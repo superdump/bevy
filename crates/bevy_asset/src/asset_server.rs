@@ -211,7 +211,7 @@ impl AssetServer {
                     if !changed.contains(path) {
                         let root_path = asset_server.get_root_path().unwrap();
                         let relative_path = path.strip_prefix(root_path).unwrap();
-                        match asset_server.load_untyped(relative_path) {
+                        match asset_server.load_untyped(path) {
                             Ok(_) => {}
                             Err(AssetServerError::AssetLoadError(error)) => panic!("{:?}", error),
                             Err(_) => {}
