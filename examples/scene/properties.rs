@@ -30,6 +30,7 @@ pub struct Test {
 #[derive(Properties, Default)]
 pub struct Nested {
     b: usize,
+    c: Vec<usize>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Property)]
@@ -41,7 +42,7 @@ fn setup(type_registry: Res<TypeRegistry>) {
     let mut test = Test {
         a: 1,
         custom: CustomProperty { a: 10 },
-        nested: Nested { b: 8 },
+        nested: Nested { b: 8, c: vec![1, 2, 3] },
     };
 
     // You can set a property value like this. The type must match exactly or this will fail.
