@@ -31,6 +31,7 @@ default = [
 ]
 
 profiler = ["bevy_ecs/profiler", "bevy_diagnostic/profiler"]
+trace = [ "bevy_app/trace", "bevy_ecs/trace" ]
 wgpu_trace = ["bevy_wgpu/trace"]
 
 # Rendering support
