@@ -129,14 +129,21 @@ pub fn text_system(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn draw_text_system(
+pub fn draw_text_system<P: Send + Sync + 'static>(
     mut context: DrawContext,
     msaa: Res<Msaa>,
     windows: Res<Windows>,
     meshes: Res<Assets<Mesh>>,
     mut render_resource_bindings: ResMut<RenderResourceBindings>,
     text_pipeline: Res<DefaultTextPipeline>,
-    mut query: Query<(Entity, &mut Draw, &Visible, &Text, &Node, &GlobalTransform)>,
+    mut query: Query<(
+        Entity,
+        &mut Draw<P>,
+        &Visible,
+        &Text,
+        &Node,
+        &GlobalTransform,
+    )>,
 ) {
     let scale_factor = if let Some(window) = windows.get_primary() {
         window.scale_factor()
@@ -163,6 +170,7 @@ pub fn draw_text_system(
                 text_glyphs: &text_glyphs.glyphs,
                 font_quad_vertex_layout: &vertex_buffer_layout,
                 sections: &text.sections,
+                marker: Default::default(),
             };
 
             drawable_text.draw(&mut draw, &mut context).unwrap();

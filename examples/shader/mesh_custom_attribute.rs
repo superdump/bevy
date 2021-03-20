@@ -4,7 +4,10 @@ use bevy::{
     render::{
         mesh::{shape, VertexAttributeValues},
         pipeline::{PipelineDescriptor, RenderPipeline},
-        render_graph::{base, AssetRenderResourcesNode, RenderGraph},
+        render_graph::{
+            base::{self, MainPass},
+            AssetRenderResourcesNode, RenderGraph,
+        },
         renderer::RenderResources,
         shader::{ShaderStage, ShaderStages},
     },
@@ -69,7 +72,7 @@ fn setup(
     // MyMaterialWithVertexColorSupport resources to our shader
     render_graph.add_system_node(
         "my_material_with_vertex_color_support",
-        AssetRenderResourcesNode::<MyMaterialWithVertexColorSupport>::new(true),
+        AssetRenderResourcesNode::<MyMaterialWithVertexColorSupport, MainPass>::new(true),
     );
 
     // Add a Render Graph edge connecting our new "my_material" node to the main pass node. This

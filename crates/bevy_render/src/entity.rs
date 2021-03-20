@@ -17,9 +17,9 @@ use bevy_transform::components::{GlobalTransform, Transform};
 #[derive(Bundle, Default)]
 pub struct MeshBundle {
     pub mesh: Handle<Mesh>,
-    pub draw: Draw,
+    pub draw: Draw<MainPass>,
     pub visible: Visible,
-    pub render_pipelines: RenderPipelines,
+    pub render_pipelines: RenderPipelines<MainPass>,
     pub main_pass: MainPass,
     pub transform: Transform,
     pub global_transform: GlobalTransform,

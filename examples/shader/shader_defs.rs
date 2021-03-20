@@ -4,7 +4,10 @@ use bevy::{
     render::{
         mesh::shape,
         pipeline::{PipelineDescriptor, RenderPipeline},
-        render_graph::{base, AssetRenderResourcesNode, RenderGraph},
+        render_graph::{
+            base::{self, MainPass},
+            AssetRenderResourcesNode, RenderGraph,
+        },
         renderer::RenderResources,
         shader::{asset_shader_defs_system, ShaderDefs, ShaderStage, ShaderStages},
     },
@@ -20,7 +23,7 @@ fn main() {
         .add_startup_system(setup.system())
         .add_system_to_stage(
             CoreStage::PostUpdate,
-            asset_shader_defs_system::<MyMaterial>.system(),
+            asset_shader_defs_system::<MyMaterial, MainPass>.system(),
         )
         .run();
 }
@@ -82,7 +85,7 @@ fn setup(
     // our shader
     render_graph.add_system_node(
         "my_material",
-        AssetRenderResourcesNode::<MyMaterial>::new(true),
+        AssetRenderResourcesNode::<MyMaterial, MainPass>::new(true),
     );
 
     // Add a Render Graph edge connecting our new "my_material" node to the main pass node. This

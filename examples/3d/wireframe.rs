@@ -1,6 +1,9 @@
 use bevy::{
     prelude::*,
-    render::wireframe::{Wireframe, WireframeConfig, WireframePlugin},
+    render::{
+        render_graph::base::MainPass,
+        wireframe::{Wireframe, WireframeConfig, WireframePlugin},
+    },
     wgpu::{WgpuFeature, WgpuFeatures, WgpuOptions},
 };
 
@@ -15,7 +18,7 @@ fn main() {
             ..Default::default()
         })
         .add_plugins(DefaultPlugins)
-        .add_plugin(WireframePlugin)
+        .add_plugin(WireframePlugin::<MainPass>::default())
         .add_startup_system(setup.system())
         .run();
 }

@@ -133,7 +133,7 @@ pub(crate) fn add_base_graph(config: &BaseRenderGraphConfig, world: &mut World) 
     }
 
     if config.add_main_pass {
-        let mut main_pass_node = PassNode::<&MainPass>::new(PassDescriptor {
+        let mut main_pass_node = PassNode::<MainPass, &MainPass>::new(PassDescriptor {
             color_attachments: vec![msaa.color_attachment_descriptor(
                 TextureAttachment::Input("color_attachment".to_string()),
                 TextureAttachment::Input("color_resolve_target".to_string()),

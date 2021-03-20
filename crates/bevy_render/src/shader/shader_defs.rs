@@ -61,8 +61,9 @@ impl ShaderDef for Option<Handle<Texture>> {
 }
 
 /// Updates [RenderPipelines] with the latest [ShaderDefs]
-pub fn shader_defs_system<T>(mut query: Query<(&T, &mut RenderPipelines)>)
-where
+pub fn shader_defs_system<T, P: Send + Sync + 'static>(
+    mut query: Query<(&T, &mut RenderPipelines<P>)>,
+) where
     T: ShaderDefs + Send + Sync + 'static,
 {
     for (shader_defs, mut render_pipelines) in query.iter_mut() {
@@ -79,7 +80,9 @@ where
 }
 
 /// Clears each [RenderPipelines]' shader defs collection
-pub fn clear_shader_defs_system(mut query: Query<&mut RenderPipelines>) {
+pub fn clear_shader_defs_system<P: Send + Sync + 'static>(
+    mut query: Query<&mut RenderPipelines<P>>,
+) {
     for mut render_pipelines in query.iter_mut() {
         for render_pipeline in render_pipelines.pipelines.iter_mut() {
             render_pipeline
@@ -92,9 +95,9 @@ pub fn clear_shader_defs_system(mut query: Query<&mut RenderPipelines>) {
 }
 
 /// Updates [RenderPipelines] with the latest [ShaderDefs] from a given asset type
-pub fn asset_shader_defs_system<T: Asset>(
+pub fn asset_shader_defs_system<T: Asset, P: Send + Sync + 'static>(
     assets: Res<Assets<T>>,
-    mut query: Query<(&Handle<T>, &mut RenderPipelines)>,
+    mut query: Query<(&Handle<T>, &mut RenderPipelines<P>)>,
 ) where
     T: ShaderDefs + Send + Sync + 'static,
 {

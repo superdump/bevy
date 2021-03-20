@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use crate::{
     draw::DrawContext,
     mesh::Indices,
@@ -21,13 +23,25 @@ mod pipeline;
 pub const WIREFRAME_PIPELINE_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(PipelineDescriptor::TYPE_UUID, 0x137c75ab7e9ad7f5);
 
-#[derive(Debug, Default)]
-pub struct WireframePlugin;
+#[derive(Debug)]
+pub struct WireframePlugin<P: Send + Sync + 'static> {
+    marker: PhantomData<P>,
+}
 
-impl Plugin for WireframePlugin {
+impl<P: Send + Sync + 'static> Default for WireframePlugin<P> {
+    fn default() -> Self {
+        Self {
+            marker: Default::default(),
+        }
+    }
+}
+
+impl<P: Send + Sync + 'static> Plugin for WireframePlugin<P> {
     fn build(&self, app: &mut AppBuilder) {
-        app.init_resource::<WireframeConfig>()
-            .add_system_to_stage(crate::RenderStage::Draw, draw_wireframes_system.system());
+        app.init_resource::<WireframeConfig>().add_system_to_stage(
+            crate::RenderStage::Draw,
+            draw_wireframes_system::<P>.system(),
+        );
         let world = app.world_mut().cell();
         let mut shaders = world.get_resource_mut::<Assets<Shader>>().unwrap();
         let mut pipelines = world
@@ -55,19 +69,32 @@ impl Default for WireframeConfig {
     }
 }
 
-pub fn draw_wireframes_system(
+pub fn draw_wireframes_system<P: Send + Sync + 'static>(
     mut draw_context: DrawContext,
     msaa: Res<Msaa>,
     meshes: Res<Assets<Mesh>>,
     wireframe_config: Res<WireframeConfig>,
     mut query: QuerySet<(
-        Query<(&mut Draw, &mut RenderPipelines, &Handle<Mesh>, &Visible)>,
-        Query<(&mut Draw, &mut RenderPipelines, &Handle<Mesh>, &Visible), With<Wireframe>>,
+        Query<(
+            &mut Draw<P>,
+            &mut RenderPipelines<P>,
+            &Handle<Mesh>,
+            &Visible,
+        )>,
+        Query<
+            (
+                &mut Draw<P>,
+                &mut RenderPipelines<P>,
+                &Handle<Mesh>,
+                &Visible,
+            ),
+            With<Wireframe>,
+        >,
     )>,
 ) {
     let iterator = |(mut draw, mut render_pipelines, mesh_handle, visible): (
-        Mut<Draw>,
-        Mut<RenderPipelines>,
+        Mut<Draw<P>>,
+        Mut<RenderPipelines<P>>,
         &Handle<Mesh>,
         &Visible,
     )| {

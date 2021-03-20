@@ -16,9 +16,9 @@ use bevy_ecs::{
     world::{Mut, World},
 };
 use bevy_utils::{tracing::debug, HashMap};
-use std::fmt;
+use std::{fmt, marker::PhantomData};
 
-pub struct PassNode<Q: WorldQuery> {
+pub struct PassNode<P: Send + Sync + 'static, Q: WorldQuery> {
     descriptor: PassDescriptor,
     inputs: Vec<ResourceSlotInfo>,
     cameras: Vec<String>,
@@ -28,9 +28,10 @@ pub struct PassNode<Q: WorldQuery> {
     default_clear_color_inputs: Vec<usize>,
     query_state: Option<QueryState<Q>>,
     commands: Vec<RenderCommand>,
+    marker: PhantomData<P>,
 }
 
-impl<Q: WorldQuery> fmt::Debug for PassNode<Q> {
+impl<P: Send + Sync + 'static, Q: WorldQuery> fmt::Debug for PassNode<P, Q> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("PassNode")
             .field("descriptor", &self.descriptor)
@@ -56,7 +57,7 @@ impl<Q: WorldQuery> fmt::Debug for PassNode<Q> {
     }
 }
 
-impl<Q: WorldQuery> PassNode<Q> {
+impl<P: Send + Sync + 'static, Q: WorldQuery> PassNode<P, Q> {
     pub fn new(descriptor: PassDescriptor) -> Self {
         let mut inputs = Vec::new();
         let mut color_attachment_input_indices = Vec::new();
@@ -104,6 +105,7 @@ impl<Q: WorldQuery> PassNode<Q> {
             default_clear_color_inputs: Vec::new(),
             query_state: None,
             commands: Vec::new(),
+            marker: Default::default(),
         }
     }
 
@@ -116,7 +118,7 @@ impl<Q: WorldQuery> PassNode<Q> {
     }
 }
 
-impl<Q: WorldQuery + Send + Sync + 'static> Node for PassNode<Q>
+impl<P: Send + Sync + 'static, Q: WorldQuery + Send + Sync + 'static> Node for PassNode<P, Q>
 where
     Q::Fetch: ReadOnlyFetch,
 {
@@ -154,7 +156,7 @@ where
                         continue;
                     }
 
-                    let draw = if let Some(draw) = world.get::<Draw>(visible_entity.entity) {
+                    let draw = if let Some(draw) = world.get::<Draw<P>>(visible_entity.entity) {
                         draw
                     } else {
                         continue;

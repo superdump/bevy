@@ -32,7 +32,7 @@ use bevy_reflect::TypeUuid;
 use bevy_render::{
     mesh::{shape, Mesh},
     pipeline::PipelineDescriptor,
-    render_graph::RenderGraph,
+    render_graph::{base::MainPass, RenderGraph},
     shader::{asset_shader_defs_system, Shader},
 };
 use sprite::sprite_system;
@@ -56,7 +56,7 @@ impl Plugin for SpritePlugin {
             )
             .add_system_to_stage(
                 CoreStage::PostUpdate,
-                asset_shader_defs_system::<ColorMaterial>.system(),
+                asset_shader_defs_system::<ColorMaterial, MainPass>.system(),
             );
 
         let world = app.world_mut().cell();

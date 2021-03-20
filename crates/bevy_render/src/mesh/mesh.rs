@@ -398,14 +398,14 @@ pub struct MeshResourceProviderState {
     mesh_entities: HashMap<Handle<Mesh>, MeshEntities>,
 }
 
-pub fn mesh_resource_provider_system(
+pub fn mesh_resource_provider_system<P: Send + Sync + 'static>(
     mut state: Local<MeshResourceProviderState>,
     render_resource_context: Res<Box<dyn RenderResourceContext>>,
     meshes: Res<Assets<Mesh>>,
     mut mesh_events: EventReader<AssetEvent<Mesh>>,
     mut queries: QuerySet<(
-        Query<&mut RenderPipelines, With<Handle<Mesh>>>,
-        Query<(Entity, &Handle<Mesh>, &mut RenderPipelines), Changed<Handle<Mesh>>>,
+        Query<&mut RenderPipelines<P>, With<Handle<Mesh>>>,
+        Query<(Entity, &Handle<Mesh>, &mut RenderPipelines<P>), Changed<Handle<Mesh>>>,
     )>,
 ) {
     let mut changed_meshes = HashSet::default();
@@ -490,11 +490,11 @@ pub fn mesh_resource_provider_system(
     }
 }
 
-fn update_entity_mesh(
+fn update_entity_mesh<P: Send + Sync + 'static>(
     render_resource_context: &dyn RenderResourceContext,
     mesh: &Mesh,
     handle: &Handle<Mesh>,
-    mut render_pipelines: Mut<RenderPipelines>,
+    mut render_pipelines: Mut<RenderPipelines<P>>,
 ) {
     for render_pipeline in render_pipelines.pipelines.iter_mut() {
         render_pipeline.specialization.primitive_topology = mesh.primitive_topology;

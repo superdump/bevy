@@ -100,7 +100,7 @@ fn setup_pipeline(
     render_graph.add_system_node("secondary_camera", CameraNode::new("Secondary"));
 
     // add a new render pass for our new window / camera
-    let mut second_window_pass = PassNode::<&MainPass>::new(PassDescriptor {
+    let mut second_window_pass = PassNode::<MainPass, &MainPass>::new(PassDescriptor {
         color_attachments: vec![msaa.color_attachment_descriptor(
             TextureAttachment::Input("color_attachment".to_string()),
             TextureAttachment::Input("color_resolve_target".to_string()),

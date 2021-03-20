@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use bevy_math::{Mat4, Vec3};
 use bevy_render::{
     draw::{Draw, DrawContext, DrawError, Drawable},
@@ -13,7 +15,7 @@ use bevy_utils::tracing::error;
 use crate::{PositionedGlyph, TextSection};
 use bevy_render::pipeline::IndexFormat;
 
-pub struct DrawableText<'a> {
+pub struct DrawableText<'a, P: Send + Sync + 'static> {
     pub render_resource_bindings: &'a mut RenderResourceBindings,
     pub position: Vec3,
     pub scale_factor: f32,
@@ -21,10 +23,11 @@ pub struct DrawableText<'a> {
     pub text_glyphs: &'a Vec<PositionedGlyph>,
     pub msaa: &'a Msaa,
     pub font_quad_vertex_layout: &'a VertexBufferLayout,
+    pub marker: PhantomData<P>,
 }
 
-impl<'a> Drawable for DrawableText<'a> {
-    fn draw(&mut self, draw: &mut Draw, context: &mut DrawContext) -> Result<(), DrawError> {
+impl<'a, P: Send + Sync + 'static> Drawable<P> for DrawableText<'a, P> {
+    fn draw(&mut self, draw: &mut Draw<P>, context: &mut DrawContext) -> Result<(), DrawError> {
         context.set_pipeline(
             draw,
             &bevy_sprite::SPRITE_SHEET_PIPELINE_HANDLE.typed(),

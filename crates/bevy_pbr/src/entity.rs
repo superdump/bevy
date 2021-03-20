@@ -16,9 +16,9 @@ pub struct PbrBundle {
     pub mesh: Handle<Mesh>,
     pub material: Handle<StandardMaterial>,
     pub main_pass: MainPass,
-    pub draw: Draw,
+    pub draw: Draw<MainPass>,
     pub visible: Visible,
-    pub render_pipelines: RenderPipelines,
+    pub render_pipelines: RenderPipelines<MainPass>,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
 }

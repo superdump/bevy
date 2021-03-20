@@ -15,7 +15,7 @@ pub mod prelude {
 use bevy_app::prelude::*;
 use bevy_asset::{AddAsset, Assets, Handle};
 use bevy_ecs::system::IntoSystem;
-use bevy_render::{prelude::Color, shader};
+use bevy_render::{prelude::Color, render_graph::base::MainPass, shader};
 use material::StandardMaterial;
 use render_graph::add_pbr_graph;
 
@@ -29,7 +29,7 @@ impl Plugin for PbrPlugin {
             .register_type::<Light>()
             .add_system_to_stage(
                 CoreStage::PostUpdate,
-                shader::asset_shader_defs_system::<StandardMaterial>.system(),
+                shader::asset_shader_defs_system::<StandardMaterial, MainPass>.system(),
             )
             .init_resource::<AmbientLight>();
         add_pbr_graph(app.world_mut());

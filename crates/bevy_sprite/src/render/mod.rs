@@ -7,7 +7,10 @@ use bevy_render::{
         CullMode, DepthBiasState, DepthStencilState, FrontFace, PipelineDescriptor, PolygonMode,
         PrimitiveState, PrimitiveTopology, StencilFaceState, StencilState,
     },
-    render_graph::{base, AssetRenderResourcesNode, RenderGraph, RenderResourcesNode},
+    render_graph::{
+        base::{self, MainPass},
+        AssetRenderResourcesNode, RenderGraph, RenderResourcesNode,
+    },
     shader::{Shader, ShaderStage, ShaderStages},
     texture::TextureFormat,
 };
@@ -138,25 +141,28 @@ pub(crate) fn add_sprite_graph(
 ) {
     graph.add_system_node(
         node::COLOR_MATERIAL,
-        AssetRenderResourcesNode::<ColorMaterial>::new(false),
+        AssetRenderResourcesNode::<ColorMaterial, MainPass>::new(false),
     );
     graph
         .add_node_edge(node::COLOR_MATERIAL, base::node::MAIN_PASS)
         .unwrap();
 
-    graph.add_system_node(node::SPRITE, RenderResourcesNode::<Sprite>::new(true));
+    graph.add_system_node(
+        node::SPRITE,
+        RenderResourcesNode::<Sprite, MainPass>::new(true),
+    );
     graph
         .add_node_edge(node::SPRITE, base::node::MAIN_PASS)
         .unwrap();
 
     graph.add_system_node(
         node::SPRITE_SHEET,
-        AssetRenderResourcesNode::<TextureAtlas>::new(false),
+        AssetRenderResourcesNode::<TextureAtlas, MainPass>::new(false),
     );
 
     graph.add_system_node(
         node::SPRITE_SHEET_SPRITE,
-        RenderResourcesNode::<TextureAtlasSprite>::new(true),
+        RenderResourcesNode::<TextureAtlasSprite, MainPass>::new(true),
     );
 
     pipelines.set_untracked(SPRITE_PIPELINE_HANDLE, build_sprite_pipeline(shaders));
