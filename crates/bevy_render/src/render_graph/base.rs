@@ -229,14 +229,16 @@ pub(crate) fn add_base_graph(config: &BaseRenderGraphConfig, world: &mut World) 
             ),
         );
 
-        graph
-            .add_slot_edge(
-                node::MAIN_SAMPLED_COLOR_ATTACHMENT,
-                WindowSwapChainNode::OUT_TEXTURE,
-                node::MAIN_PASS,
-                "color_attachment",
-            )
-            .unwrap();
+        if config.add_main_pass {
+            graph
+                .add_slot_edge(
+                    node::MAIN_SAMPLED_COLOR_ATTACHMENT,
+                    WindowSwapChainNode::OUT_TEXTURE,
+                    node::MAIN_PASS,
+                    "color_attachment",
+                )
+                .unwrap();
+        }
     }
 
     if config.connect_main_pass_to_main_depth_texture {
