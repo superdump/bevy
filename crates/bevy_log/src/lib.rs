@@ -6,6 +6,8 @@ pub mod prelude {
         debug, debug_span, error, error_span, info, info_span, trace, trace_span, warn, warn_span,
     };
 }
+use std::io;
+
 pub use bevy_utils::tracing::{
     debug, debug_span, error, error_span, info, info_span, trace, trace_span, warn, warn_span,
     Level,
@@ -95,7 +97,7 @@ impl Plugin for LogPlugin {
 
         #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
         {
-            let fmt_layer = tracing_subscriber::fmt::Layer::default();
+            let fmt_layer = tracing_subscriber::fmt::Layer::default().with_writer(io::stderr);
             let subscriber = subscriber.with(fmt_layer);
             #[cfg(feature = "tracing-chrome")]
             {
