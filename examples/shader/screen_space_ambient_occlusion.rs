@@ -33,17 +33,20 @@ use bevy::{
 };
 
 mod node {
+    // Resource bindings
     pub const CAMERA_INVERSE_PROJECTION: &str = "CameraInverseProjection";
     pub const WINDOW_TEXTURE_SIZE: &str = "WindowTextureSize";
+    // Nodes
     pub const TRANSFORM: &str = "transform";
     pub const DEPTH_NORMAL_PRE_PASS: &str = "depth_normal_pre_pass_node";
+    pub const DEPTH_RENDER_PASS: &str = "depth_render_pass";
     pub const SSAO_PASS: &str = "ssao_pass_node";
     pub const BLUR_X_PASS: &str = "blur_x_pass_node";
     pub const BLUR_Y_PASS: &str = "blur_y_pass_node";
+    // Textures
     pub const DUMMY_SWAPCHAIN_TEXTURE: &str = "dummy_swapchain_texture";
     pub const SAMPLED_COLOR_ATTACHMENT: &str = "sampled_color_attachment";
     pub const DEPTH_TEXTURE: &str = "depth_texture";
-    pub const DEPTH_RENDER: &str = "depth_render_pass";
     pub const NORMAL_TEXTURE: &str = "normal_texture";
     pub const SSAO_A_TEXTURE: &str = "ssao_a_texture";
     pub const SSAO_B_TEXTURE: &str = "ssao_b_texture";
@@ -982,14 +985,14 @@ fn set_up_depth_display_pass(
         pipeline_handle,
         vec![node::DEPTH_TEXTURE.into()],
     );
-    render_graph.add_node(node::DEPTH_RENDER, pass_node);
+    render_graph.add_node(node::DEPTH_RENDER_PASS, pass_node);
 
     // NOTE: The blur Y pass will read from B and write to A
     render_graph
         .add_slot_edge(
             node::DEPTH_TEXTURE,
             WindowTextureNode::OUT_TEXTURE,
-            node::DEPTH_RENDER,
+            node::DEPTH_RENDER_PASS,
             node::DEPTH_TEXTURE,
         )
         .unwrap();
@@ -997,7 +1000,7 @@ fn set_up_depth_display_pass(
         .add_slot_edge(
             node::DEPTH_TEXTURE,
             WindowTextureNode::OUT_SAMPLER,
-            node::DEPTH_RENDER,
+            node::DEPTH_RENDER_PASS,
             format!("{}_sampler", node::DEPTH_TEXTURE),
         )
         .unwrap();
@@ -1025,7 +1028,7 @@ fn set_up_depth_display_pass(
         .add_slot_edge(
             node::SAMPLED_COLOR_ATTACHMENT,
             WindowTextureNode::OUT_TEXTURE,
-            node::DEPTH_RENDER,
+            node::DEPTH_RENDER_PASS,
             "color_attachment",
         )
         .unwrap();
@@ -1033,7 +1036,7 @@ fn set_up_depth_display_pass(
         .add_slot_edge(
             base::node::PRIMARY_SWAP_CHAIN,
             WindowSwapChainNode::OUT_TEXTURE,
-            node::DEPTH_RENDER,
+            node::DEPTH_RENDER_PASS,
             "color_resolve_target",
         )
         .unwrap();
@@ -1067,6 +1070,10 @@ fn set_up_depth_display_pass(
     //         "color_resolve_target",
     //     )
     //     .unwrap();
+
+    render_graph
+        .add_node_edge(node::DEPTH_NORMAL_PRE_PASS, node::DEPTH_RENDER_PASS)
+        .unwrap();
 }
 
 fn setup_render_graph(
