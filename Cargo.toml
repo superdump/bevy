@@ -87,9 +87,13 @@ syn = "=1.0.65"
 
 [dev-dependencies]
 anyhow = "1.0"
+bevy_mod_debugdump = { git = "https://github.com/jakobhellermann/bevy_mod_debugdump", branch = "main" }
 rand = "0.8.0"
 ron = "0.6.2"
 serde = {version = "1", features = ["derive"]}
+
+[patch.crates-io]
+bevy = { path = "./" }
 
 [[example]]
 name = "hello_world"
