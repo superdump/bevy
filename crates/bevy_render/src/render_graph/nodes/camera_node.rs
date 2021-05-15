@@ -58,6 +58,7 @@ impl SystemNode for CameraNode {
 }
 
 const CAMERA_VIEW_PROJ: &str = "CameraViewProj";
+const CAMERA_PROJECTION: &str = "CameraProjection";
 const CAMERA_VIEW: &str = "CameraView";
 const CAMERA_POSITION: &str = "CameraPosition";
 
@@ -98,6 +99,8 @@ pub fn camera_node_system(
             size:
                 // ViewProj
                 MATRIX_SIZE +
+                // Projection
+                MATRIX_SIZE +
                 // View
                 MATRIX_SIZE +
                 // Position
@@ -118,6 +121,22 @@ pub fn camera_node_system(
         });
         bindings.set(
             CAMERA_VIEW_PROJ,
+            RenderResourceBinding::Buffer {
+                buffer,
+                range: 0..MATRIX_SIZE as u64,
+                dynamic_index: None,
+            },
+        );
+    }
+
+    if bindings.get(CAMERA_PROJECTION).is_none() {
+        let buffer = render_resource_context.create_buffer(BufferInfo {
+            size: MATRIX_SIZE,
+            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+            ..Default::default()
+        });
+        bindings.set(
+            CAMERA_PROJECTION,
             RenderResourceBinding::Buffer {
                 buffer,
                 range: 0..MATRIX_SIZE as u64,
@@ -186,6 +205,25 @@ pub fn camera_node_system(
             offset..(offset + MATRIX_SIZE as u64),
             &mut |data, _renderer| {
                 data[0..MATRIX_SIZE].copy_from_slice(view_proj.to_cols_array_2d().as_bytes());
+            },
+        );
+        state.command_queue.copy_buffer_to_buffer(
+            staging_buffer,
+            offset,
+            *buffer,
+            0,
+            MATRIX_SIZE as u64,
+        );
+        offset += MATRIX_SIZE as u64;
+    }
+
+    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_PROJECTION) {
+        render_resource_context.write_mapped_buffer(
+            staging_buffer,
+            offset..(offset + MATRIX_SIZE as u64),
+            &mut |data, _renderer| {
+                data[0..MATRIX_SIZE]
+                    .copy_from_slice(camera.projection_matrix.to_cols_array_2d().as_bytes());
             },
         );
         state.command_queue.copy_buffer_to_buffer(
