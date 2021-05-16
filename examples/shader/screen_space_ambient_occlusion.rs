@@ -925,7 +925,7 @@ fn set_up_depth_display_pass(
         depth_stencil: None,
         color_target_states: vec![
             ColorTargetState {
-                format: TextureFormat::Bgra8Unorm,
+                format: TextureFormat::Bgra8UnormSrgb,
                 color_blend: BlendState {
                     src_factor: BlendFactor::SrcAlpha,
                     dst_factor: BlendFactor::OneMinusSrcAlpha,
