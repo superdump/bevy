@@ -40,6 +40,7 @@ mod node {
     pub const TRANSFORM: &str = "transform";
     pub const DEPTH_NORMAL_PRE_PASS: &str = "depth_normal_pre_pass_node";
     pub const DEPTH_RENDER_PASS: &str = "depth_render_pass";
+    pub const NORMAL_RENDER_PASS: &str = "normal_render_pass";
     pub const SSAO_PASS: &str = "ssao_pass_node";
     pub const BLUR_X_PASS: &str = "blur_x_pass_node";
     pub const BLUR_Y_PASS: &str = "blur_y_pass_node";
@@ -915,7 +916,7 @@ fn set_up_modified_main_pass(
     //     .unwrap();
 }
 
-fn set_up_depth_display_pass(
+fn set_up_depth_render_pass(
     shaders: &mut Assets<Shader>,
     pipelines: &mut Assets<PipelineDescriptor>,
     msaa: &Msaa,
@@ -1076,6 +1077,167 @@ fn set_up_depth_display_pass(
         .unwrap();
 }
 
+fn set_up_normal_render_pass(
+    shaders: &mut Assets<Shader>,
+    pipelines: &mut Assets<PipelineDescriptor>,
+    msaa: &Msaa,
+    render_graph: &mut RenderGraph,
+) {
+    let pipeline_descriptor = PipelineDescriptor {
+        depth_stencil: None,
+        color_target_states: vec![
+            ColorTargetState {
+                format: TextureFormat::Bgra8UnormSrgb,
+                color_blend: BlendState {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+                alpha_blend: BlendState {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                write_mask: ColorWrite::ALL,
+            },
+        ],
+        ..PipelineDescriptor::new(ShaderStages {
+            vertex: shaders.add(Shader::from_glsl(
+                ShaderStage::Vertex,
+                fullscreen_pass_node::shaders::VERTEX_SHADER,
+            )),
+            fragment: Some(shaders.add(Shader::from_glsl(
+                ShaderStage::Fragment,
+                "#version 450
+
+                layout(location = 0) in vec2 v_Uv;
+
+                layout(set = 0, binding = 0) uniform texture2D normal_texture;
+                layout(set = 0, binding = 1) uniform sampler normal_texture_sampler;
+
+                layout(location = 0) out vec4 o_Target;
+
+                void main() {
+                    o_Target = vec4(texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).rgb, 1.0);
+                }
+                ",
+            ))),
+        })
+    };
+
+    let pipeline_handle = pipelines.add(pipeline_descriptor);
+
+    // Setup pass
+    let pass_descriptor = PassDescriptor {
+        color_attachments: vec![msaa.color_attachment_descriptor(
+            TextureAttachment::Input("color_attachment".to_string()),
+            TextureAttachment::Input("color_resolve_target".to_string()),
+            Operations {
+                load: LoadOp::Load,
+                store: true,
+            },
+        )],
+        depth_stencil_attachment: None,
+        sample_count: msaa.samples,
+    };
+
+    // Create the pass node
+    let pass_node = FullscreenPassNode::new(
+        pass_descriptor,
+        pipeline_handle,
+        vec![node::NORMAL_TEXTURE.into()],
+    );
+    render_graph.add_node(node::NORMAL_RENDER_PASS, pass_node);
+
+    // NOTE: The blur Y pass will read from B and write to A
+    render_graph
+        .add_slot_edge(
+            node::NORMAL_TEXTURE,
+            WindowTextureNode::OUT_TEXTURE,
+            node::NORMAL_RENDER_PASS,
+            node::NORMAL_TEXTURE,
+        )
+        .unwrap();
+    render_graph
+        .add_slot_edge(
+            node::NORMAL_TEXTURE,
+            WindowTextureNode::OUT_SAMPLER,
+            node::NORMAL_RENDER_PASS,
+            format!("{}_sampler", node::NORMAL_TEXTURE),
+        )
+        .unwrap();
+    render_graph.add_node(
+        node::SAMPLED_COLOR_ATTACHMENT,
+        WindowTextureNode::new(
+            WindowId::primary(),
+            TextureDescriptor {
+                size: Extent3d {
+                    depth: 1,
+                    width: 1,
+                    height: 1,
+                },
+                mip_level_count: 1,
+                sample_count: msaa.samples,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::default(),
+                usage: TextureUsage::OUTPUT_ATTACHMENT,
+            },
+            None,
+            None,
+        ),
+    );
+    render_graph
+        .add_slot_edge(
+            node::SAMPLED_COLOR_ATTACHMENT,
+            WindowTextureNode::OUT_TEXTURE,
+            node::NORMAL_RENDER_PASS,
+            "color_attachment",
+        )
+        .unwrap();
+    render_graph
+        .add_slot_edge(
+            base::node::PRIMARY_SWAP_CHAIN,
+            WindowSwapChainNode::OUT_TEXTURE,
+            node::NORMAL_RENDER_PASS,
+            "color_resolve_target",
+        )
+        .unwrap();
+
+    // // Hack to fill all main pass input slots
+    // render_graph.add_node(
+    //     node::DUMMY_SWAPCHAIN_TEXTURE,
+    //     WindowTextureNode::new(
+    //         WindowId::primary(),
+    //         TextureDescriptor {
+    //             size: Extent3d {
+    //                 depth: 1,
+    //                 width: 1,
+    //                 height: 1,
+    //             },
+    //             mip_level_count: 1,
+    //             sample_count: 1,
+    //             dimension: TextureDimension::D2,
+    //             format: TextureFormat::default(),
+    //             usage: TextureUsage::OUTPUT_ATTACHMENT,
+    //         },
+    //         None,
+    //         None,
+    //     ),
+    // );
+    // render_graph
+    //     .add_slot_edge(
+    //         node::DUMMY_SWAPCHAIN_TEXTURE,
+    //         WindowTextureNode::OUT_TEXTURE,
+    //         base::node::MAIN_PASS,
+    //         "color_resolve_target",
+    //     )
+    //     .unwrap();
+
+    render_graph
+        .add_node_edge(node::DEPTH_NORMAL_PRE_PASS, node::NORMAL_RENDER_PASS)
+        .unwrap();
+}
+
 fn setup_render_graph(
     render_graph: &mut RenderGraph,
     pipelines: &mut Assets<PipelineDescriptor>,
@@ -1083,7 +1245,6 @@ fn setup_render_graph(
     msaa: &Msaa,
 ) {
     // Set up the additional textures
-    // FIXME: Make a new depth texture with OUTPUT_ATTACHMENT | SAMPLED
     render_graph.add_node(
         node::DEPTH_TEXTURE,
         WindowTextureNode::new(
@@ -1152,8 +1313,10 @@ fn setup_render_graph(
     // Set up depth normal pre-pass pipeline
     set_up_depth_normal_pre_pass(msaa, render_graph);
 
-    // Render the depth texture
-    set_up_depth_display_pass(shaders, pipelines, msaa, render_graph);
+    // // Render the depth texture
+    // set_up_depth_render_pass(shaders, pipelines, msaa, render_graph);
+    // Render the normal texture
+    set_up_normal_render_pass(shaders, pipelines, msaa, render_graph);
 
     // // Set up SSAO pass pipeline
     // set_up_ssao_pass(shaders, pipelines, msaa, render_graph);
