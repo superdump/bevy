@@ -205,7 +205,7 @@ fn setup(
                 layout(set = 0, binding = 0) uniform CameraViewProj {
                     mat4 ViewProj;
                 };
-                layout(set = 0, binding = 1) uniform CameraView {
+                layout(set = 1, binding = 0) uniform CameraView {
                     mat4 View;
                 };
                 
