@@ -58,7 +58,7 @@ impl SystemNode for CameraNode {
 }
 
 const CAMERA_VIEW_PROJ: &str = "CameraViewProj";
-const CAMERA_PROJECTION: &str = "CameraProjection";
+const CAMERA_PROJ: &str = "CameraProj";
 const CAMERA_VIEW: &str = "CameraView";
 const CAMERA_POSITION: &str = "CameraPosition";
 
@@ -129,14 +129,14 @@ pub fn camera_node_system(
         );
     }
 
-    if bindings.get(CAMERA_PROJECTION).is_none() {
+    if bindings.get(CAMERA_PROJ).is_none() {
         let buffer = render_resource_context.create_buffer(BufferInfo {
             size: MATRIX_SIZE,
             buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
             ..Default::default()
         });
         bindings.set(
-            CAMERA_PROJECTION,
+            CAMERA_PROJ,
             RenderResourceBinding::Buffer {
                 buffer,
                 range: 0..MATRIX_SIZE as u64,
@@ -217,7 +217,7 @@ pub fn camera_node_system(
         offset += MATRIX_SIZE as u64;
     }
 
-    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_PROJECTION) {
+    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_PROJ) {
         render_resource_context.write_mapped_buffer(
             staging_buffer,
             offset..(offset + MATRIX_SIZE as u64),
