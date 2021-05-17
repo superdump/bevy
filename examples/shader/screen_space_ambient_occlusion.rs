@@ -249,7 +249,7 @@ fn setup(
     });
     commands.spawn_bundle(MeshBundle {
         transform: Transform::from_xyz(0.0, -1.0, 0.0),
-        mesh: cube_handle.clone(),
+        mesh: cube_handle,
         render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
             pipeline_handle.clone(),
         )]),
@@ -260,7 +260,7 @@ fn setup(
         transform: Transform::from_xyz(0.0, 0.0, 0.0),
         mesh: sphere_handle,
         render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle.clone(),
+            pipeline_handle,
         )]),
         // material: materials.add(Color::YELLOW.into()),
         ..Default::default()
