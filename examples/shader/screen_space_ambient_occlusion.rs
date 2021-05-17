@@ -460,7 +460,7 @@ fn set_up_blur_x_pass(
     pipelines: &mut Assets<PipelineDescriptor>,
     msaa: &Msaa,
     render_graph: &mut RenderGraph,
-    asset_server: Res<AssetServer>,
+    asset_server: &AssetServer,
 ) {
     asset_server.watch_for_changes().unwrap();
 
@@ -542,7 +542,7 @@ fn set_up_blur_y_pass(
     pipelines: &mut Assets<PipelineDescriptor>,
     msaa: &Msaa,
     render_graph: &mut RenderGraph,
-    asset_server: Res<AssetServer>,
+    asset_server: &AssetServer,
 ) {
     asset_server.watch_for_changes().unwrap();
 
@@ -747,7 +747,7 @@ fn set_up_depth_render_pass(
     pipelines: &mut Assets<PipelineDescriptor>,
     msaa: &Msaa,
     render_graph: &mut RenderGraph,
-    asset_server: Res<AssetServer>,
+    asset_server: &AssetServer,
 ) {
     asset_server.watch_for_changes().unwrap();
 
@@ -837,22 +837,33 @@ fn set_up_depth_render_pass(
             None,
         ),
     );
-    render_graph
-        .add_slot_edge(
-            node::SAMPLED_COLOR_ATTACHMENT,
-            WindowTextureNode::OUT_TEXTURE,
-            node::DEPTH_RENDER_PASS,
-            "color_attachment",
-        )
-        .unwrap();
-    render_graph
-        .add_slot_edge(
-            base::node::PRIMARY_SWAP_CHAIN,
-            WindowSwapChainNode::OUT_TEXTURE,
-            node::DEPTH_RENDER_PASS,
-            "color_resolve_target",
-        )
-        .unwrap();
+    if msaa.samples > 1 {
+        render_graph
+            .add_slot_edge(
+                node::SAMPLED_COLOR_ATTACHMENT,
+                WindowTextureNode::OUT_TEXTURE,
+                node::DEPTH_RENDER_PASS,
+                "color_attachment",
+            )
+            .unwrap();
+        render_graph
+            .add_slot_edge(
+                base::node::PRIMARY_SWAP_CHAIN,
+                WindowSwapChainNode::OUT_TEXTURE,
+                node::DEPTH_RENDER_PASS,
+                "color_resolve_target",
+            )
+            .unwrap();
+    } else {
+        render_graph
+            .add_slot_edge(
+                base::node::PRIMARY_SWAP_CHAIN,
+                WindowSwapChainNode::OUT_TEXTURE,
+                node::DEPTH_RENDER_PASS,
+                "color_attachment",
+            )
+            .unwrap();
+    }
 
     // // Hack to fill all main pass input slots
     // render_graph.add_node(
@@ -894,7 +905,7 @@ fn set_up_normal_render_pass(
     pipelines: &mut Assets<PipelineDescriptor>,
     msaa: &Msaa,
     render_graph: &mut RenderGraph,
-    asset_server: Res<AssetServer>,
+    asset_server: &AssetServer,
 ) {
     asset_server.watch_for_changes().unwrap();
 
@@ -984,22 +995,33 @@ fn set_up_normal_render_pass(
             None,
         ),
     );
-    render_graph
-        .add_slot_edge(
-            node::SAMPLED_COLOR_ATTACHMENT,
-            WindowTextureNode::OUT_TEXTURE,
-            node::NORMAL_RENDER_PASS,
-            "color_attachment",
-        )
-        .unwrap();
-    render_graph
-        .add_slot_edge(
-            base::node::PRIMARY_SWAP_CHAIN,
-            WindowSwapChainNode::OUT_TEXTURE,
-            node::NORMAL_RENDER_PASS,
-            "color_resolve_target",
-        )
-        .unwrap();
+    if msaa.samples > 1 {
+        render_graph
+            .add_slot_edge(
+                node::SAMPLED_COLOR_ATTACHMENT,
+                WindowTextureNode::OUT_TEXTURE,
+                node::NORMAL_RENDER_PASS,
+                "color_attachment",
+            )
+            .unwrap();
+        render_graph
+            .add_slot_edge(
+                base::node::PRIMARY_SWAP_CHAIN,
+                WindowSwapChainNode::OUT_TEXTURE,
+                node::NORMAL_RENDER_PASS,
+                "color_resolve_target",
+            )
+            .unwrap();
+    } else {
+        render_graph
+            .add_slot_edge(
+                base::node::PRIMARY_SWAP_CHAIN,
+                WindowSwapChainNode::OUT_TEXTURE,
+                node::NORMAL_RENDER_PASS,
+                "color_attachment",
+            )
+            .unwrap();
+    }
 
     // // Hack to fill all main pass input slots
     // render_graph.add_node(
@@ -1275,14 +1297,14 @@ fn setup_render_graph(
     set_up_depth_normal_pre_pass(msaa, render_graph);
 
     // // Render the depth texture
-    // set_up_depth_render_pass(shaders, pipelines, msaa, render_graph);
+    // set_up_depth_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
     // // Render the normal texture
-    // set_up_normal_render_pass(shaders, pipelines, msaa, render_graph);
+    set_up_normal_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
 
     // Set up SSAO pass pipeline
-    set_up_ssao_pass(shaders, pipelines, msaa, render_graph, asset_server);
+    // set_up_ssao_pass(shaders, pipelines, msaa, render_graph, asset_server);
     // Render the occlusion texture after the ssao pass
-    set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
+    // set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
 
     // // Set up blur X pass pipeline
     // set_up_blur_x_pass(shaders, pipelines, msaa, render_graph);
