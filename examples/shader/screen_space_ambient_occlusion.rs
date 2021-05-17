@@ -817,27 +817,27 @@ fn set_up_depth_render_pass(
             format!("{}_sampler", node::DEPTH_TEXTURE),
         )
         .unwrap();
-    render_graph.add_node(
-        node::SAMPLED_COLOR_ATTACHMENT,
-        WindowTextureNode::new(
-            WindowId::primary(),
-            TextureDescriptor {
-                size: Extent3d {
-                    depth: 1,
-                    width: 1,
-                    height: 1,
-                },
-                mip_level_count: 1,
-                sample_count: msaa.samples,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::default(),
-                usage: TextureUsage::OUTPUT_ATTACHMENT,
-            },
-            None,
-            None,
-        ),
-    );
     if msaa.samples > 1 {
+        render_graph.add_node(
+            node::SAMPLED_COLOR_ATTACHMENT,
+            WindowTextureNode::new(
+                WindowId::primary(),
+                TextureDescriptor {
+                    size: Extent3d {
+                        depth: 1,
+                        width: 1,
+                        height: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: msaa.samples,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::default(),
+                    usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
+                },
+                None,
+                None,
+            ),
+        );
         render_graph
             .add_slot_edge(
                 node::SAMPLED_COLOR_ATTACHMENT,
@@ -975,27 +975,27 @@ fn set_up_normal_render_pass(
             format!("{}_sampler", node::NORMAL_TEXTURE),
         )
         .unwrap();
-    render_graph.add_node(
-        node::SAMPLED_COLOR_ATTACHMENT,
-        WindowTextureNode::new(
-            WindowId::primary(),
-            TextureDescriptor {
-                size: Extent3d {
-                    depth: 1,
-                    width: 1,
-                    height: 1,
-                },
-                mip_level_count: 1,
-                sample_count: msaa.samples,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::default(),
-                usage: TextureUsage::OUTPUT_ATTACHMENT,
-            },
-            None,
-            None,
-        ),
-    );
     if msaa.samples > 1 {
+        render_graph.add_node(
+            node::SAMPLED_COLOR_ATTACHMENT,
+            WindowTextureNode::new(
+                WindowId::primary(),
+                TextureDescriptor {
+                    size: Extent3d {
+                        depth: 1,
+                        width: 1,
+                        height: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: msaa.samples,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::default(),
+                    usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
+                },
+                None,
+                None,
+            ),
+        );
         render_graph
             .add_slot_edge(
                 node::SAMPLED_COLOR_ATTACHMENT,
@@ -1133,27 +1133,27 @@ fn set_up_occlusion_render_pass(
             format!("{}_sampler", "occlusion_texture"),
         )
         .unwrap();
-    render_graph.add_node(
-        node::SAMPLED_COLOR_ATTACHMENT,
-        WindowTextureNode::new(
-            WindowId::primary(),
-            TextureDescriptor {
-                size: Extent3d {
-                    depth: 1,
-                    width: 1,
-                    height: 1,
-                },
-                mip_level_count: 1,
-                sample_count: msaa.samples,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::default(),
-                usage: TextureUsage::OUTPUT_ATTACHMENT,
-            },
-            None,
-            None,
-        ),
-    );
     if msaa.samples > 1 {
+        render_graph.add_node(
+            node::SAMPLED_COLOR_ATTACHMENT,
+            WindowTextureNode::new(
+                WindowId::primary(),
+                TextureDescriptor {
+                    size: Extent3d {
+                        depth: 1,
+                        width: 1,
+                        height: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: msaa.samples,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::default(),
+                    usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
+                },
+                None,
+                None,
+            ),
+        );
         render_graph
             .add_slot_edge(
                 node::SAMPLED_COLOR_ATTACHMENT,
