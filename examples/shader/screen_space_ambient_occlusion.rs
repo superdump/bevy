@@ -2,7 +2,7 @@ use bevy::{
     asset::AssetPlugin,
     core::CorePlugin,
     diagnostic::DiagnosticsPlugin,
-    input::InputPlugin,
+    input::{system::exit_on_esc_system, InputPlugin},
     log::LogPlugin,
     prelude::{shape, *},
     render::{
@@ -34,7 +34,7 @@ use bevy::{
 
 mod node {
     // Resource bindings
-    pub const CAMERA_INVERSE_PROJECTION: &str = "CameraInverseProjection";
+    pub const CAMERA_INV_PROJ: &str = "CameraInvProj";
     pub const WINDOW_TEXTURE_SIZE: &str = "WindowTextureSize";
     // Nodes
     pub const TRANSFORM: &str = "transform";
@@ -42,6 +42,7 @@ mod node {
     pub const DEPTH_RENDER_PASS: &str = "depth_render_pass";
     pub const NORMAL_RENDER_PASS: &str = "normal_render_pass";
     pub const SSAO_PASS: &str = "ssao_pass_node";
+    pub const OCCLUSION_RENDER_PASS: &str = "occlusion_render_pass";
     pub const BLUR_X_PASS: &str = "blur_x_pass_node";
     pub const BLUR_Y_PASS: &str = "blur_y_pass_node";
     // Textures
@@ -54,6 +55,8 @@ mod node {
 }
 
 fn main() {
+    env_logger::init();
+
     let mut app = App::build();
 
     app
@@ -101,7 +104,10 @@ fn main() {
 
     app.add_startup_system(update_camera_inverse_projection.system())
         .add_startup_system(setup.system().label("setup"))
-        .add_system(update_camera_inverse_projection.system())
+        .add_system_to_stage(
+            CoreStage::PostUpdate,
+            update_camera_inverse_projection.system(),
+        )
         .add_system(rotator_system.system())
         .add_startup_system(
             bevy_mod_debugdump::print_render_graph
@@ -109,32 +115,27 @@ fn main() {
                 .label("debugdump")
                 .after("setup"),
         )
+        .add_system(exit_on_esc_system.system())
         .run();
 }
 
 #[derive(Debug, RenderResources)]
-pub struct CameraInverseProjection {
+pub struct CameraInvProj {
     pub inverse_projection: Mat4,
 }
 
 fn update_camera_inverse_projection(
     mut commands: Commands,
-    to_init: Query<
-        (Entity, &Camera),
-        (
-            With<PerspectiveProjection>,
-            Without<CameraInverseProjection>,
-        ),
-    >,
+    to_init: Query<(Entity, &Camera), (With<PerspectiveProjection>, Without<CameraInvProj>)>,
     mut to_update: Query<
-        (&Camera, &mut CameraInverseProjection),
+        (&Camera, &mut CameraInvProj),
         (With<PerspectiveProjection>, Changed<Camera>),
     >,
 ) {
     for (entity, camera) in to_init.iter() {
         // If the determinant is 0, then the matrix is not invertible
         debug_assert!(camera.projection_matrix.determinant().abs() > 1e-5);
-        commands.entity(entity).insert(CameraInverseProjection {
+        commands.entity(entity).insert(CameraInvProj {
             inverse_projection: camera.projection_matrix.inverse(),
         });
     }
@@ -154,10 +155,10 @@ fn setup(
     // mut materials: ResMut<Assets<StandardMaterial>>,
     msaa: Res<Msaa>,
 ) {
-    render_graph.add_system_node(
-        node::CAMERA_INVERSE_PROJECTION,
-        RenderResourcesNode::<CameraInverseProjection>::new(true),
-    );
+    // render_graph.add_system_node(
+    //     node::CAMERA_INV_PROJ,
+    //     RenderResourcesNode::<CameraInvProj>::new(true),
+    // );
 
     setup_render_graph(&mut *render_graph, &mut *pipelines, &mut *shaders, &*msaa);
 
@@ -215,7 +216,7 @@ fn setup(
                 };
                 
                 void main() {
-                    v_ViewNormal = mat3(View) * mat3(Model) * Vertex_Normal;
+                    v_ViewNormal = mat3(inverse(View)) * mat3(Model) * Vertex_Normal;
                     gl_Position = ViewProj * Model * vec4(Vertex_Position, 1.0);
                 }
                 ",
@@ -229,7 +230,7 @@ fn setup(
                 layout(location = 0) out vec4 o_Target;
 
                 void main() {
-                    o_Target = vec4(v_ViewNormal, 1.0);
+                    o_Target = vec4(v_ViewNormal * 0.5 + 0.5, 1.0);
                 }
                 ",
             ))),
@@ -287,6 +288,7 @@ fn setup(
         transform: Transform::from_xyz(2.0, 2.0, 2.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
         ..Default::default()
     });
+    // .insert(Rotates);
     commands
         .spawn_bundle(PointLightBundle {
             transform: Transform::from_xyz(3.0, 5.0, 3.0),
@@ -302,7 +304,7 @@ fn set_up_depth_normal_pre_pass(msaa: &Msaa, render_graph: &mut RenderGraph) {
             attachment: TextureAttachment::Input(node::NORMAL_TEXTURE.to_string()),
             resolve_target: None,
             ops: Operations {
-                load: LoadOp::Clear(Color::rgb(0.1, 0.1, 0.1)),
+                load: LoadOp::Clear(Color::WHITE),
                 store: true,
             },
         }],
@@ -371,8 +373,8 @@ fn set_up_ssao_pass(
             ColorTargetState {
                 format: TextureFormat::R8Unorm,
                 color_blend: BlendState {
-                    src_factor: BlendFactor::SrcAlpha,
-                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    src_factor: BlendFactor::SrcColor,
+                    dst_factor: BlendFactor::OneMinusSrcColor,
                     operation: BlendOperation::Add,
                 },
                 alpha_blend: BlendState {
@@ -393,81 +395,109 @@ fn set_up_ssao_pass(
                 "#version 450
 
                 // FIXME: Move to a uniform!
-                const vec3 kernel[32] = // precalculated hemisphere kernel (low discrepancy noiser)
+                const float kernel[32][3] = // precalculated hemisphere kernel (low discrepancy noiser)
                 {
-                    vec3(-0.668154f, -0.084296f, 0.219458f),
-                    vec3(-0.092521f,  0.141327f, 0.505343f),
-                    vec3(-0.041960f,  0.700333f, 0.365754f),
-                    vec3( 0.722389f, -0.015338f, 0.084357f),
-                    vec3(-0.815016f,  0.253065f, 0.465702f),
-                    vec3( 0.018993f, -0.397084f, 0.136878f),
-                    vec3( 0.617953f, -0.234334f, 0.513754f),
-                    vec3(-0.281008f, -0.697906f, 0.240010f),
-                    vec3( 0.303332f, -0.443484f, 0.588136f),
-                    vec3(-0.477513f,  0.559972f, 0.310942f),
-                    vec3( 0.307240f,  0.076276f, 0.324207f),
-                    vec3(-0.404343f, -0.615461f, 0.098425f),
-                    vec3( 0.152483f, -0.326314f, 0.399277f),
-                    vec3( 0.435708f,  0.630501f, 0.169620f),
-                    vec3( 0.878907f,  0.179609f, 0.266964f),
-                    vec3(-0.049752f, -0.232228f, 0.264012f),
-                    vec3( 0.537254f, -0.047783f, 0.693834f),
-                    vec3( 0.001000f,  0.177300f, 0.096643f),
-                    vec3( 0.626400f,  0.524401f, 0.492467f),
-                    vec3(-0.708714f, -0.223893f, 0.182458f),
-                    vec3(-0.106760f,  0.020965f, 0.451976f),
-                    vec3(-0.285181f, -0.388014f, 0.241756f),
-                    vec3( 0.241154f, -0.174978f, 0.574671f),
-                    vec3(-0.405747f,  0.080275f, 0.055816f),
-                    vec3( 0.079375f,  0.289697f, 0.348373f),
-                    vec3( 0.298047f, -0.309351f, 0.114787f),
-                    vec3(-0.616434f, -0.117369f, 0.475924f),
-                    vec3(-0.035249f,  0.134591f, 0.840251f),
-                    vec3( 0.175849f,  0.971033f, 0.211778f),
-                    vec3( 0.024805f,  0.348056f, 0.240006f),
-                    vec3(-0.267123f,  0.204885f, 0.688595f),
-                    vec3(-0.077639f, -0.753205f, 0.070938f)
+                    {-0.668154f, -0.084296f, 0.219458f},
+                    {-0.092521f,  0.141327f, 0.505343f},
+                    {-0.041960f,  0.700333f, 0.365754f},
+                    { 0.722389f, -0.015338f, 0.084357f},
+                    {-0.815016f,  0.253065f, 0.465702f},
+                    { 0.018993f, -0.397084f, 0.136878f},
+                    { 0.617953f, -0.234334f, 0.513754f},
+                    {-0.281008f, -0.697906f, 0.240010f},
+                    { 0.303332f, -0.443484f, 0.588136f},
+                    {-0.477513f,  0.559972f, 0.310942f},
+                    { 0.307240f,  0.076276f, 0.324207f},
+                    {-0.404343f, -0.615461f, 0.098425f},
+                    { 0.152483f, -0.326314f, 0.399277f},
+                    { 0.435708f,  0.630501f, 0.169620f},
+                    { 0.878907f,  0.179609f, 0.266964f},
+                    {-0.049752f, -0.232228f, 0.264012f},
+                    { 0.537254f, -0.047783f, 0.693834f},
+                    { 0.001000f,  0.177300f, 0.096643f},
+                    { 0.626400f,  0.524401f, 0.492467f},
+                    {-0.708714f, -0.223893f, 0.182458f},
+                    {-0.106760f,  0.020965f, 0.451976f},
+                    {-0.285181f, -0.388014f, 0.241756f},
+                    { 0.241154f, -0.174978f, 0.574671f},
+                    {-0.405747f,  0.080275f, 0.055816f},
+                    { 0.079375f,  0.289697f, 0.348373f},
+                    { 0.298047f, -0.309351f, 0.114787f},
+                    {-0.616434f, -0.117369f, 0.475924f},
+                    {-0.035249f,  0.134591f, 0.840251f},
+                    { 0.175849f,  0.971033f, 0.211778f},
+                    { 0.024805f,  0.348056f, 0.240006f},
+                    {-0.267123f,  0.204885f, 0.688595f},
+                    {-0.077639f, -0.753205f, 0.070938f}
                 };
 
                 layout(location = 0) in vec2 v_Uv;
 
                 layout(location = 0) out float o_Target;
 
-                layout(set = 0, binding = 0) uniform CameraProjection {
-                    mat4 Projection;
-                };
-                layout(set = 0, binding = 1) uniform CameraInverseProjection {
-                    mat4 InverseProjection;
-                };
+                // layout(set = 0, binding = 0) uniform CameraProj {
+                //     mat4 Proj;
+                // };
+                // layout(set = 1, binding = 1) uniform CameraInvProj {
+                //     mat4 InvProj;
+                // };
 
-                layout(set = 2, binding = 0) uniform texture2D depth_texture;
-                layout(set = 2, binding = 1) uniform sampler depth_texture_sampler;
-                layout(set = 2, binding = 2) uniform texture2D normal_texture;
-                layout(set = 2, binding = 3) uniform sampler normal_texture_sampler;
+                layout(set = 0, binding = 0) uniform texture2D depth_texture;
+                layout(set = 0, binding = 1) uniform sampler depth_texture_sampler;
+                layout(set = 0, binding = 2) uniform texture2D normal_texture;
+                layout(set = 0, binding = 3) uniform sampler normal_texture_sampler;
                 // layout(set = 2, binding = 4) uniform texture2D noise_texture;
                 // layout(set = 2, binding = 5) uniform sampler noise_texture_sampler;
 
-                // tile noise texture over screen, based on screen dimensions divided by noise size
-                const ivec2 size = textureSize(sampler2D(normal_texture, normal_texture_sampler), 0);
-                const vec2 noiseScale = vec2(size) / 4.0;
-                // FIXME: Make this into a uniform
+                // FIXME: Make these into uniforms
                 const float RADIUS = 0.5;
                 const float BIAS = 0.025;
                 const int KERNEL_SIZE = 32;
 
-                const float NearClipDistance = 1.0;
-                const float FarClipDistance = 1000.0;
-                const float ProjectionA = FarClipDistance / (FarClipDistance - NearClipDistance);
-                const float ProjectionB = (-FarClipDistance * NearClipDistance) / (FarClipDistance - NearClipDistance);
+                // From Matt Pettineo's article: https://mynameismjp.wordpress.com/2010/09/05/position-from-depth-3/
+                // but I derived my own method
+                // const float NearClipDistance = 1.0;
+                // const float FarClipDistance = 1000.0;
+                // const float ProjectionA = FarClipDistance / (FarClipDistance - NearClipDistance);
+                // const float ProjectionB = (-FarClipDistance * NearClipDistance) / (FarClipDistance - NearClipDistance);
+
+                float rand(vec2 co){
+                    return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
+                }
 
                 void main() {
+                    // Hard=coded perspective_rh with fov_y_radians 45, aspect ratio 16/9, near 0.1, far 1000.0
+                    // Can't yet bind camera projection in a fullscreen pass node and that may not make sense
+                    mat4 Proj;
+                    Proj[0] = vec4(1.357995, 0.0, 0.0, 0.0);
+                    Proj[1] = vec4(0.0, 2.4142134, 0.0, 0.0);
+                    Proj[2] = vec4(0.0, 0.0, -1.001001, -1.0);
+                    Proj[3] = vec4(0.0, 0.0, -1.001001, 0.0);
+
+                    mat4 InvProj;
+                    InvProj[0] = vec4(0.7363797, 0.0, -0.0, 0.0);
+                    InvProj[1] = vec4(0.0, 0.41421357, 0.0, -0.0);
+                    InvProj[2] = vec4(-0.0, 0.0, -0.0, -0.99899995);
+                    InvProj[3] = vec4(0.0, -0.0, -1.0, 1.0);
+
+                    // TODO: For the 4x4 noise texture sampling
+                    // tile noise texture over screen, based on screen dimensions divided by noise size
+                    // const ivec2 size = textureSize(sampler2D(normal_texture, normal_texture_sampler), 0);
+                    // const vec2 noiseScale = vec2(size) / 4.0;
+
                     // Calculate the fragment position from the depth texture
-                    vec3 viewRay =
                     float depth = texture(sampler2D(depth_texture, depth_texture_sampler), v_Uv).x;
-                    float linearDepth = ProjectionB / (depth - ProjectionA);
-                    vec3 fragPos = vec3(0.0);
-                    vec3 normal = texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).xyz;
-                    vec3 randomVec = texture(sampler2D(noise_texture, noise_texture_sampler), v_Uv * noiseScale).xyz;
+                    vec3 frag_ndc = vec3(v_Uv * 2.0 - 1.0, depth);
+                    // FIXME: I feel like I should be multiplying the frag_ndc by the frag_clip.w. If frag_ndc.z at the far plane
+                    // should be 1 and frag_ndc.z = frag_clip.z / frag_clip.w and frag_clip.w is -frag_view.z for perspective_rh projection
+                    // then the below two lines should be correct, but they just make everything white.
+                    // vec4 frag_clip = vec4(frag_ndc * -1000.0, -1000.0);
+                    // vec4 frag_view = InvProj * frag_clip;
+                    vec3 frag_view = mat3(InvProj) * frag_ndc;
+                    vec3 normal = (texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).xyz - 0.5) * 2.0;
+                    vec3 randomVec = normalize(vec3(rand(v_Uv), 0.0, rand(v_Uv + 1234.0)));
+                    // TODO: Bind a 4x4 noise texture
+                    // vec3 randomVec = texture(sampler2D(noise_texture, noise_texture_sampler), v_Uv * noiseScale).xyz;
 
                     vec3 tangent = normalize(randomVec - normal * dot(randomVec, normal));
                     vec3 bitangent = cross(normal, tangent);
@@ -475,18 +505,22 @@ fn set_up_ssao_pass(
 
                     float occlusion = 0.0;
                     for (int i = 0; i < KERNEL_SIZE; ++i) {
-                        vec3 samplePos = TBN * kernel[i];
-                        samplePos = fragPos + samplePos * RADIUS;
+                        vec3 sample_view = TBN * vec3(kernel[i][0], kernel[i][1], kernel[i][2]);
+                        sample_view = frag_view.xyz + sample_view * RADIUS;
 
-                        vec4 offset = vec4(samplePos, 1.0);
-                        offset = Projection * offset; // from view to clip space
-                        offset.xyz /= offset.w; // perspective divide
-                        offset.xyz = offset.xyz * 0.5 + 0.5; // transform to range 0.0 to 1.0
+                        vec4 offset_view = vec4(sample_view, 1.0);
+                        vec4 offset_clip = Proj * offset_view; // from view to clip space
+                        vec3 offset_ndc = offset_clip.xyz / offset_clip.w; // perspective divide
+                        vec2 uv = offset_ndc.xy * 0.5 + 0.5;
+                        // offset.xyz = offset.xyz * 0.5 + 0.5; // transform to range 0.0 to 1.0
 
-                        float sampleDepth = texture(sampler2D(depth_texture, depth_texture_sampler), offset.xy).x;
+                        float sampleDepth = texture(sampler2D(depth_texture, depth_texture_sampler), uv).x;
+                        // sampleDepth = dot(vec3(sampleDepth), InvProj[2].xyz);
 
-                        float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(fragPos.z - sampleDepth));
-                        occlusion += (sampleDepth >= samplePos.z + bias ? 1.0 : 0.0) * rangeCheck;  
+                        // float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(frag_view.z - sampleDepth));
+                        // occlusion += (sampleDepth >= sample_view.z + BIAS ? 1.0 : 0.0) * rangeCheck;
+                        float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(frag_ndc.z - sampleDepth));
+                        occlusion += (sampleDepth >= offset_ndc.z + BIAS ? 1.0 : 0.0) * rangeCheck;
                     }
                     occlusion = 1.0 - (occlusion / KERNEL_SIZE);
 
@@ -502,7 +536,7 @@ fn set_up_ssao_pass(
     // Setup pass
     let pass_descriptor = PassDescriptor {
         color_attachments: vec![RenderPassColorAttachmentDescriptor {
-            attachment: TextureAttachment::Input(node::SSAO_A_TEXTURE.to_string()),
+            attachment: TextureAttachment::Input("occlusion_texture".to_string()),
             resolve_target: None,
             ops: Operations {
                 load: LoadOp::Clear(Color::BLACK),
@@ -521,8 +555,17 @@ fn set_up_ssao_pass(
     );
     render_graph.add_node(node::SSAO_PASS, pass_node);
 
+    // render_graph
+    //     .add_node_edge(base::node::SHARED_BUFFERS, node::SSAO_PASS)
+    //     .unwrap();
+    // render_graph
+    //     .add_node_edge(base::node::CAMERA_3D, node::SSAO_PASS)
+    //     .unwrap();
+    // render_graph
+    //     .add_node_edge(node::CAMERA_INV_PROJ, node::SSAO_PASS)
+    //     .unwrap();
     render_graph
-        .add_node_edge(node::CAMERA_INVERSE_PROJECTION, node::SSAO_PASS)
+        .add_node_edge(node::DEPTH_NORMAL_PRE_PASS, node::SSAO_PASS)
         .unwrap();
 
     render_graph
@@ -538,7 +581,7 @@ fn set_up_ssao_pass(
             node::NORMAL_TEXTURE,
             WindowTextureNode::OUT_SAMPLER,
             node::SSAO_PASS,
-            node::NORMAL_TEXTURE,
+            format!("{}_sampler", node::NORMAL_TEXTURE),
         )
         .unwrap();
     render_graph
@@ -554,7 +597,7 @@ fn set_up_ssao_pass(
             node::DEPTH_TEXTURE,
             WindowTextureNode::OUT_SAMPLER,
             node::SSAO_PASS,
-            node::DEPTH_TEXTURE,
+            format!("{}_sampler", node::DEPTH_TEXTURE),
         )
         .unwrap();
     render_graph
@@ -562,7 +605,7 @@ fn set_up_ssao_pass(
             node::SSAO_A_TEXTURE,
             WindowTextureNode::OUT_TEXTURE,
             node::SSAO_PASS,
-            "ssao_output_texture",
+            "occlusion_texture",
         )
         .unwrap();
 }
@@ -637,7 +680,7 @@ fn set_up_blur_x_pass(
             attachment: TextureAttachment::Input(node::SSAO_B_TEXTURE.to_string()),
             resolve_target: None,
             ops: Operations {
-                load: LoadOp::Clear(Color::BLACK),
+                load: LoadOp::Clear(Color::WHITE),
                 store: true,
             },
         }],
@@ -750,7 +793,7 @@ fn set_up_blur_y_pass(
             attachment: TextureAttachment::Input(node::SSAO_A_TEXTURE.to_string()),
             resolve_target: None,
             ops: Operations {
-                load: LoadOp::Clear(Color::BLACK),
+                load: LoadOp::Clear(Color::WHITE),
                 store: true,
             },
         }],
@@ -1118,7 +1161,7 @@ fn set_up_normal_render_pass(
                 layout(location = 0) out vec4 o_Target;
 
                 void main() {
-                    o_Target = vec4(texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).rgb, 1.0);
+                    o_Target = vec4((texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).rgb - 0.5) * 2.0, 1.0);
                 }
                 ",
             ))),
@@ -1238,6 +1281,167 @@ fn set_up_normal_render_pass(
         .unwrap();
 }
 
+fn set_up_occlusion_render_pass(
+    shaders: &mut Assets<Shader>,
+    pipelines: &mut Assets<PipelineDescriptor>,
+    msaa: &Msaa,
+    render_graph: &mut RenderGraph,
+) {
+    let pipeline_descriptor = PipelineDescriptor {
+        depth_stencil: None,
+        color_target_states: vec![
+            ColorTargetState {
+                format: TextureFormat::Bgra8UnormSrgb,
+                color_blend: BlendState {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+                alpha_blend: BlendState {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                write_mask: ColorWrite::ALL,
+            },
+        ],
+        ..PipelineDescriptor::new(ShaderStages {
+            vertex: shaders.add(Shader::from_glsl(
+                ShaderStage::Vertex,
+                fullscreen_pass_node::shaders::VERTEX_SHADER,
+            )),
+            fragment: Some(shaders.add(Shader::from_glsl(
+                ShaderStage::Fragment,
+                "#version 450
+
+                layout(location = 0) in vec2 v_Uv;
+
+                layout(set = 0, binding = 0) uniform texture2D occlusion_texture;
+                layout(set = 0, binding = 1) uniform sampler occlusion_texture_sampler;
+
+                layout(location = 0) out vec4 o_Target;
+
+                void main() {
+                    o_Target = vec4(vec3(texture(sampler2D(occlusion_texture, occlusion_texture_sampler), v_Uv).r), 1.0);
+                }
+                ",
+            ))),
+        })
+    };
+
+    let pipeline_handle = pipelines.add(pipeline_descriptor);
+
+    // Setup pass
+    let pass_descriptor = PassDescriptor {
+        color_attachments: vec![msaa.color_attachment_descriptor(
+            TextureAttachment::Input("color_attachment".to_string()),
+            TextureAttachment::Input("color_resolve_target".to_string()),
+            Operations {
+                load: LoadOp::Load,
+                store: true,
+            },
+        )],
+        depth_stencil_attachment: None,
+        sample_count: msaa.samples,
+    };
+
+    // Create the pass node
+    let pass_node = FullscreenPassNode::new(
+        pass_descriptor,
+        pipeline_handle,
+        vec!["occlusion_texture".into()],
+    );
+    render_graph.add_node(node::OCCLUSION_RENDER_PASS, pass_node);
+
+    // NOTE: The blur Y pass will read from B and write to A
+    render_graph
+        .add_slot_edge(
+            node::SSAO_A_TEXTURE,
+            WindowTextureNode::OUT_TEXTURE,
+            node::OCCLUSION_RENDER_PASS,
+            "occlusion_texture",
+        )
+        .unwrap();
+    render_graph
+        .add_slot_edge(
+            node::SSAO_A_TEXTURE,
+            WindowTextureNode::OUT_SAMPLER,
+            node::OCCLUSION_RENDER_PASS,
+            format!("{}_sampler", "occlusion_texture"),
+        )
+        .unwrap();
+    render_graph.add_node(
+        node::SAMPLED_COLOR_ATTACHMENT,
+        WindowTextureNode::new(
+            WindowId::primary(),
+            TextureDescriptor {
+                size: Extent3d {
+                    depth: 1,
+                    width: 1,
+                    height: 1,
+                },
+                mip_level_count: 1,
+                sample_count: msaa.samples,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::default(),
+                usage: TextureUsage::OUTPUT_ATTACHMENT,
+            },
+            None,
+            None,
+        ),
+    );
+    render_graph
+        .add_slot_edge(
+            node::SAMPLED_COLOR_ATTACHMENT,
+            WindowTextureNode::OUT_TEXTURE,
+            node::OCCLUSION_RENDER_PASS,
+            "color_attachment",
+        )
+        .unwrap();
+    render_graph
+        .add_slot_edge(
+            base::node::PRIMARY_SWAP_CHAIN,
+            WindowSwapChainNode::OUT_TEXTURE,
+            node::OCCLUSION_RENDER_PASS,
+            "color_resolve_target",
+        )
+        .unwrap();
+
+    // // Hack to fill all main pass input slots
+    // render_graph.add_node(
+    //     node::DUMMY_SWAPCHAIN_TEXTURE,
+    //     WindowTextureNode::new(
+    //         WindowId::primary(),
+    //         TextureDescriptor {
+    //             size: Extent3d {
+    //                 depth: 1,
+    //                 width: 1,
+    //                 height: 1,
+    //             },
+    //             mip_level_count: 1,
+    //             sample_count: 1,
+    //             dimension: TextureDimension::D2,
+    //             format: TextureFormat::default(),
+    //             usage: TextureUsage::OUTPUT_ATTACHMENT,
+    //         },
+    //         None,
+    //         None,
+    //     ),
+    // );
+    // render_graph
+    //     .add_slot_edge(
+    //         node::DUMMY_SWAPCHAIN_TEXTURE,
+    //         WindowTextureNode::OUT_TEXTURE,
+    //         base::node::MAIN_PASS,
+    //         "color_resolve_target",
+    //     )
+    //     .unwrap();
+
+    render_graph
+        .add_node_edge(node::SSAO_PASS, node::OCCLUSION_RENDER_PASS)
+        .unwrap();
+}
+
 fn setup_render_graph(
     render_graph: &mut RenderGraph,
     pipelines: &mut Assets<PipelineDescriptor>,
@@ -1310,16 +1514,23 @@ fn setup_render_graph(
         ),
     );
 
+    // NOTE: Usage of the below is to only have one of the _render_pass enabled to render the
+    // corresponding texture
+    // For the main passes of interest (depth normal, ssao, blur) enable up to the one you want to render
+
     // Set up depth normal pre-pass pipeline
     set_up_depth_normal_pre_pass(msaa, render_graph);
 
     // // Render the depth texture
     // set_up_depth_render_pass(shaders, pipelines, msaa, render_graph);
-    // Render the normal texture
-    set_up_normal_render_pass(shaders, pipelines, msaa, render_graph);
+    // // Render the normal texture
+    // set_up_normal_render_pass(shaders, pipelines, msaa, render_graph);
 
-    // // Set up SSAO pass pipeline
-    // set_up_ssao_pass(shaders, pipelines, msaa, render_graph);
+    // Set up SSAO pass pipeline
+    set_up_ssao_pass(shaders, pipelines, msaa, render_graph);
+    // Render the occlusion texture after the ssao pass
+    set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph);
+
     // // Set up blur X pass pipeline
     // set_up_blur_x_pass(shaders, pipelines, msaa, render_graph);
     // // Set up blur Y pass pipeline
