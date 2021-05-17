@@ -68,7 +68,7 @@ fn main() {
         //     color: Color::WHITE,
         //     brightness: 1.0 / 5.0f32,
         // })
-        .insert_resource(Msaa { samples: 4 })
+        .insert_resource(Msaa { samples: 1 })
         .insert_resource(WindowDescriptor {
             title: "SSAO demo".to_string(),
             width: 1600.,
@@ -1399,22 +1399,33 @@ fn set_up_occlusion_render_pass(
             None,
         ),
     );
-    render_graph
-        .add_slot_edge(
-            node::SAMPLED_COLOR_ATTACHMENT,
-            WindowTextureNode::OUT_TEXTURE,
-            node::OCCLUSION_RENDER_PASS,
-            "color_attachment",
-        )
-        .unwrap();
-    render_graph
-        .add_slot_edge(
-            base::node::PRIMARY_SWAP_CHAIN,
-            WindowSwapChainNode::OUT_TEXTURE,
-            node::OCCLUSION_RENDER_PASS,
-            "color_resolve_target",
-        )
-        .unwrap();
+    if msaa.samples > 1 {
+        render_graph
+            .add_slot_edge(
+                node::SAMPLED_COLOR_ATTACHMENT,
+                WindowTextureNode::OUT_TEXTURE,
+                node::OCCLUSION_RENDER_PASS,
+                "color_attachment",
+            )
+            .unwrap();
+        render_graph
+            .add_slot_edge(
+                base::node::PRIMARY_SWAP_CHAIN,
+                WindowSwapChainNode::OUT_TEXTURE,
+                node::OCCLUSION_RENDER_PASS,
+                "color_resolve_target",
+            )
+            .unwrap();
+    } else {
+        render_graph
+            .add_slot_edge(
+                base::node::PRIMARY_SWAP_CHAIN,
+                WindowSwapChainNode::OUT_TEXTURE,
+                node::OCCLUSION_RENDER_PASS,
+                "color_attachment",
+            )
+            .unwrap();
+    }
 
     // // Hack to fill all main pass input slots
     // render_graph.add_node(
