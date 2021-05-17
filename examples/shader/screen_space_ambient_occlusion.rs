@@ -1,3 +1,6 @@
+use std::fs::File;
+use std::io::Write;
+
 use bevy::{
     asset::AssetPlugin,
     core::CorePlugin,
@@ -110,7 +113,7 @@ fn main() {
         )
         .add_system(rotator_system.system())
         .add_startup_system(
-            bevy_mod_debugdump::print_render_graph
+            debug_render_graph
                 .system()
                 .label("debugdump")
                 .after("setup"),
@@ -119,6 +122,12 @@ fn main() {
         .run();
 }
 
+fn debug_render_graph(render_graph: Res<RenderGraph>) {
+    let dot = bevy_mod_debugdump::render_graph::render_graph_dot(&*render_graph);
+    let mut file = File::create("render_graph.dot").unwrap();
+    write!(file, "{}", dot).unwrap();
+    println!("*** Updated render_graph.dot");
+}
 #[derive(Debug, RenderResources)]
 pub struct CameraInvProj {
     pub inverse_projection: Mat4,
