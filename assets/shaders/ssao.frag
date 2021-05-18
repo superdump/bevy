@@ -124,7 +124,9 @@ void main() {
         float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(frag_ndc.z - sampleDepth));
         occlusion += (sampleDepth >= offset_ndc.z + BIAS ? 1.0 : 0.0) * rangeCheck;
     }
-    occlusion = 1.0 - (occlusion / KERNEL_SIZE);
+    // For some reason this surprisingly ends up being flipped despite seeming like it should be correct
+    // occlusion = 1.0 - (occlusion / KERNEL_SIZE);
+    occlusion /= KERNEL_SIZE;
 
     o_Target = occlusion;
 }
