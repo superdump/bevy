@@ -101,7 +101,7 @@ void main() {
     vec4 frag_view = InvProj * vec4(frag_ndc, 1.0);
     frag_view.xyz = frag_view.xyz / frag_view.w;
     vec3 normal = (texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).xyz - 0.5) * 2.0;
-    vec3 randomVec = normalize(vec3(rand(v_Uv), 0.0, rand(v_Uv + 1234.0)));
+    vec3 randomVec = normalize(vec3(rand(v_Uv) * 2.0 - 1.0, 0.0, rand(v_Uv + 1234.0) * 2.0 - 1.0));
     // TODO: Bind a 4x4 noise texture
     // vec3 randomVec = texture(sampler2D(noise_texture, noise_texture_sampler), v_Uv * noiseScale).xyz;
 
