@@ -17,7 +17,7 @@ layout(set = 2, binding = 0) uniform Transform {
 };
 
 void main() {
-    v_ViewNormal = (inverse(View) * Model * vec4(Vertex_Normal, 0.0)).xyz;
+    v_ViewNormal = (inverse(View) * Model * vec4(Vertex_Normal, 0.0)).xyz * 0.5 + 0.5;
 
     gl_Position = ViewProj * Model * vec4(Vertex_Position, 1.0);
 }
