@@ -72,7 +72,7 @@ float rand(vec2 co) {
 }
 
 void main() {
-    // Hard=coded perspective_rh with fov_y_radians 45, aspect ratio 16/9, near 0.1, far 1000.0
+    // FIXME: Hard=coded perspective_rh with fov_y_radians 45, aspect ratio 16/9, near 0.1, far 1000.0
     // Can't yet bind camera projection in a fullscreen pass node and that may not make sense
     mat4 Proj;
     Proj[0] = vec4(1.357995, 0.0, 0.0, 0.0);
@@ -118,13 +118,9 @@ void main() {
         vec4 offset_clip = Proj * offset_view; // from view to clip space
         vec3 offset_ndc = offset_clip.xyz / offset_clip.w; // perspective divide
         vec2 uv = offset_ndc.xy * 0.5 + 0.5;
-        // offset.xyz = offset.xyz * 0.5 + 0.5; // transform to range 0.0 to 1.0
 
         float sampleDepth = texture(sampler2D(depth_texture, depth_texture_sampler), uv).x;
-        // sampleDepth = dot(vec3(sampleDepth), InvProj[2].xyz);
 
-        // float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(frag_view.z - sampleDepth));
-        // occlusion += (sampleDepth >= sample_view.z + BIAS ? 1.0 : 0.0) * rangeCheck;
         float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(frag_ndc.z - sampleDepth));
         occlusion += (sampleDepth >= offset_ndc.z + BIAS ? 1.0 : 0.0) * rangeCheck;
     }
