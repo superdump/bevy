@@ -93,6 +93,10 @@ void main() {
 
     // Calculate the fragment position from the depth texture
     float depth = texture(sampler2D(depth_texture, depth_texture_sampler), v_Uv).x;
+    if (depth == 1.0) {
+        o_Target = 1.0;
+        return;
+    }
     vec3 frag_ndc = vec3(v_Uv * 2.0 - 1.0, depth);
     // FIXME: I feel like I should be multiplying the frag_ndc by the frag_clip.w. If frag_ndc.z at the far plane
     // should be 1 and frag_ndc.z = frag_clip.z / frag_clip.w and frag_clip.w is -frag_view.z for perspective_rh projection
