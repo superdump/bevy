@@ -1301,12 +1301,12 @@ fn setup_render_graph(
     // // Render the depth texture
     // set_up_depth_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
     // // Render the normal texture
-    set_up_normal_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
+    // set_up_normal_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
 
     // Set up SSAO pass pipeline
-    // set_up_ssao_pass(shaders, pipelines, msaa, render_graph, asset_server);
+    set_up_ssao_pass(shaders, pipelines, msaa, render_graph, asset_server);
     // Render the occlusion texture after the ssao pass
-    // set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
+    set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
 
     // // Set up blur X pass pipeline
     // set_up_blur_x_pass(shaders, pipelines, msaa, render_graph);
