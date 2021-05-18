@@ -265,11 +265,13 @@ fn setup(
         // material: materials.add(Color::YELLOW.into()),
         ..Default::default()
     });
-    commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(2.0, 2.0, 2.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
-        ..Default::default()
-    });
-    // .insert(Rotates);
+    commands
+        .spawn_bundle(PerspectiveCameraBundle {
+            transform: Transform::from_xyz(2.0, 2.0, 2.0)
+                .looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+            ..Default::default()
+        })
+        .insert(Rotates);
     commands
         .spawn_bundle(PointLightBundle {
             transform: Transform::from_xyz(3.0, 5.0, 3.0),
