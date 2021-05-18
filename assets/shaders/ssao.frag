@@ -92,40 +92,38 @@ void main() {
     // const vec2 noiseScale = vec2(size) / 4.0;
 
     // Calculate the fragment position from the depth texture
-    float depth = texture(sampler2D(depth_texture, depth_texture_sampler), v_Uv).x;
-    if (depth == 1.0) {
+    float frag_depth_ndc = texture(sampler2D(depth_texture, depth_texture_sampler), v_Uv).x;
+    if (frag_depth_ndc == 1.0) {
         o_Target = 1.0;
         return;
     }
-    vec3 frag_ndc = vec3(v_Uv * 2.0 - 1.0, depth);
-    vec4 frag_view = InvProj * vec4(frag_ndc, 1.0);
+    vec4 frag_view = InvProj * vec4(v_Uv * 2.0 - 1.0, frag_depth_ndc, 1.0);
     frag_view.xyz = frag_view.xyz / frag_view.w;
+    vec3 normal_view = (texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).xyz - 0.5) * 2.0;
     vec3 randomVec = normalize(vec3(rand(v_Uv) * 2.0 - 1.0, rand(v_Uv + 1234.0) * 2.0 - 1.0, 0.0));
     // TODO: Bind a 4x4 noise texture
     // vec3 randomVec = texture(sampler2D(noise_texture, noise_texture_sampler), v_Uv * noiseScale).xyz;
 
-    vec3 tangent = normalize(randomVec - normal * dot(randomVec, normal));
-    vec3 bitangent = cross(normal, tangent);
-    mat3 TBN = mat3(tangent, bitangent, normal);
+    vec3 tangent = normalize(randomVec - normal_view * dot(randomVec, normal_view));
+    vec3 bitangent = cross(normal_view, tangent);
+    mat3 TBN = mat3(tangent, bitangent, normal_view);
 
     float occlusion = 0.0;
     for (int i = 0; i < KERNEL_SIZE; ++i) {
-        vec3 sample_view = TBN * vec3(kernel[i][0], kernel[i][1], kernel[i][2]);
-        sample_view = frag_view.xyz + sample_view * RADIUS;
+        vec3 sample_offset_view = TBN * vec3(kernel[i][0], kernel[i][1], kernel[i][2]); // from tangent to view space
+        vec4 sample_view = vec4(frag_view.xyz + sample_offset_view * RADIUS, 1.0);
+        vec4 sample_clip = Proj * sample_view; // from view to clip space
+        vec3 sample_ndc = sample_clip.xyz / sample_clip.w; // perspective divide
+        vec2 depth_uv = sample_ndc.xy * 0.5 + 0.5;
 
-        vec4 offset_view = vec4(sample_view, 1.0);
-        vec4 offset_clip = Proj * offset_view; // from view to clip space
-        vec3 offset_ndc = offset_clip.xyz / offset_clip.w; // perspective divide
-        vec2 uv = offset_ndc.xy * 0.5 + 0.5;
+        float sample_depth_ndc = texture(sampler2D(depth_texture, depth_texture_sampler), depth_uv).x;
+        vec4 sample_depth_view = InvProj * vec4(0.0, 0.0, sample_depth_ndc, 1.0);
+        sample_depth_view.xyz /= sample_depth_view.w;
 
-        float sampleDepth = texture(sampler2D(depth_texture, depth_texture_sampler), uv).x;
-
-        float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(frag_ndc.z - sampleDepth));
-        occlusion += (sampleDepth >= offset_ndc.z + BIAS ? 1.0 : 0.0) * rangeCheck;
+        float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(frag_view.z - sample_depth_view.z));
+        occlusion += (sample_depth_view.z >= sample_view.z + BIAS ? 1.0 : 0.0) * rangeCheck;
     }
-    // For some reason this surprisingly ends up being flipped despite seeming like it should be correct
-    // occlusion = 1.0 - (occlusion / KERNEL_SIZE);
-    occlusion /= KERNEL_SIZE;
+    occlusion = 1.0 - (occlusion / KERNEL_SIZE);
 
     o_Target = occlusion;
 }
