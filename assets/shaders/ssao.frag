@@ -98,12 +98,8 @@ void main() {
         return;
     }
     vec3 frag_ndc = vec3(v_Uv * 2.0 - 1.0, depth);
-    // FIXME: I feel like I should be multiplying the frag_ndc by the frag_clip.w. If frag_ndc.z at the far plane
-    // should be 1 and frag_ndc.z = frag_clip.z / frag_clip.w and frag_clip.w is -frag_view.z for perspective_rh projection
-    // then the below two lines should be correct, but they just make everything white.
-    // vec4 frag_clip = vec4(frag_ndc * -1000.0, -1000.0);
-    // vec4 frag_view = InvProj * frag_clip;
-    vec3 frag_view = mat3(InvProj) * frag_ndc;
+    vec4 frag_view = InvProj * vec4(frag_ndc, 1.0);
+    frag_view.xyz = frag_view.xyz / frag_view.w;
     vec3 normal = (texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).xyz - 0.5) * 2.0;
     vec3 randomVec = normalize(vec3(rand(v_Uv), 0.0, rand(v_Uv + 1234.0)));
     // TODO: Bind a 4x4 noise texture
