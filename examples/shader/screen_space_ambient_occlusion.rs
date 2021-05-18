@@ -287,7 +287,7 @@ fn set_up_depth_normal_pre_pass(msaa: &Msaa, render_graph: &mut RenderGraph) {
             attachment: TextureAttachment::Input(node::NORMAL_TEXTURE.to_string()),
             resolve_target: None,
             ops: Operations {
-                load: LoadOp::Clear(Color::WHITE),
+                load: LoadOp::Clear(Color::rgb(0.0, 0.0, 1.0)),
                 store: true,
             },
         }],
