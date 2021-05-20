@@ -97,7 +97,9 @@ void main() {
         o_Target = 1.0;
         return;
     }
-    vec4 frag_view = InvProj * vec4(v_Uv * 2.0 - 1.0, frag_depth_ndc, 1.0);
+    // v_Uv.x is [0,1] from left to right. * 2 - 1 remaps to [-1, 1] left to right which is NDC
+    // v_Uv.y is [0,1] top to bottom. (1-v)*2-1 = 2-2v-1 = 1-2v remaps to [-1, 1] bottom to top which is NDC
+    vec4 frag_view = InvProj * vec4(v_Uv.x * 2.0 - 1.0, 1.0 - 2.0 * v_Uv.y, frag_depth_ndc, 1.0);
     frag_view.xyz = frag_view.xyz / frag_view.w;
     vec3 normal_view = (texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).xyz - 0.5) * 2.0;
     vec3 randomVec = normalize(vec3(rand(v_Uv) * 2.0 - 1.0, rand(v_Uv + 1234.0) * 2.0 - 1.0, 0.0));
@@ -114,7 +116,9 @@ void main() {
         vec4 sample_view = vec4(frag_view.xyz + sample_offset_view * RADIUS, 1.0);
         vec4 sample_clip = Proj * sample_view; // from view to clip space
         vec3 sample_ndc = sample_clip.xyz / sample_clip.w; // perspective divide
-        vec2 depth_uv = sample_ndc.xy * 0.5 + 0.5;
+        // sample_ndc.x is [-1,1] left to right, so * 0.5 + 0.5 remaps to [0,1] left to right
+        // sample_ndc.y is [-1,1] bottom to top, so * -0.5 + 0.5 remaps to [0,1] top to bottom
+        vec2 depth_uv = vec2(sample_ndc.x * 0.5 + 0.5, sample_ndc.y * -0.5 + 0.5);
 
         float sample_depth_ndc = texture(sampler2D(depth_texture, depth_texture_sampler), depth_uv).x;
         vec4 sample_depth_view = InvProj * vec4(0.0, 0.0, sample_depth_ndc, 1.0);
