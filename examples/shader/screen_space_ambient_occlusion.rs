@@ -325,7 +325,6 @@ fn set_up_scene(
         render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
             pipeline_handle.clone(),
         )]),
-        // material: materials.add(Color::PINK.into()),
         ..Default::default()
     });
     commands.spawn_bundle(MeshBundle {
@@ -334,7 +333,6 @@ fn set_up_scene(
         render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
             pipeline_handle.clone(),
         )]),
-        // material: materials.add(Color::PURPLE.into()),
         ..Default::default()
     });
     commands.spawn_bundle(MeshBundle {
@@ -343,7 +341,6 @@ fn set_up_scene(
         render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
             pipeline_handle.clone(),
         )]),
-        // material: materials.add(Color::TEAL.into()),
         ..Default::default()
     });
     commands.spawn_bundle(MeshBundle {
