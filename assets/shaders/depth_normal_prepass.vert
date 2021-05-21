@@ -8,8 +8,8 @@ layout(location = 0) out vec3 v_ViewNormal;
 layout(set = 0, binding = 0) uniform CameraViewProj {
     mat4 ViewProj;
 };
-layout(set = 1, binding = 0) uniform CameraView {
-    mat4 View;
+layout(set = 1, binding = 0) uniform CameraViewInv3 {
+    mat4 ViewInv3;
 };
 
 layout(set = 2, binding = 0) uniform Transform {
@@ -39,7 +39,7 @@ void main() {
     // the length of the normal
     // The normals need to rotate inverse to the view rotation
     // Using mat3 is important else the translation in the Model matrix can have other unintended effects
-    v_ViewNormal = normalize(inverse_temp(mat3(View)) * transpose(inverse_temp(mat3(Model))) * Vertex_Normal) * 0.5 + 0.5;
+    v_ViewNormal = normalize(mat3(ViewInv3) * transpose(inverse_temp(mat3(Model))) * Vertex_Normal) * 0.5 + 0.5;
 
     gl_Position = ViewProj * Model * vec4(Vertex_Position, 1.0);
 }

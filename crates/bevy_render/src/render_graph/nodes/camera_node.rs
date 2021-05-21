@@ -11,6 +11,7 @@ use bevy_ecs::{
     system::{BoxedSystem, IntoSystem, Local, Query, Res, ResMut},
     world::World,
 };
+use bevy_math::{Mat3, Mat4};
 use bevy_transform::prelude::*;
 use std::borrow::Cow;
 
@@ -60,6 +61,7 @@ impl SystemNode for CameraNode {
 const CAMERA_VIEW_PROJ: &str = "CameraViewProj";
 const CAMERA_PROJ: &str = "CameraProj";
 const CAMERA_VIEW: &str = "CameraView";
+const CAMERA_VIEW_INV_3: &str = "CameraViewInv3";
 const CAMERA_POSITION: &str = "CameraPosition";
 
 #[derive(Debug, Default)]
@@ -102,6 +104,8 @@ pub fn camera_node_system(
                 // Projection
                 MATRIX_SIZE +
                 // View
+                MATRIX_SIZE +
+                // View Inverse Mat3 but in Mat4
                 MATRIX_SIZE +
                 // Position
                 VEC4_SIZE,
@@ -161,6 +165,22 @@ pub fn camera_node_system(
         );
     }
 
+    if bindings.get(CAMERA_VIEW_INV_3).is_none() {
+        let buffer = render_resource_context.create_buffer(BufferInfo {
+            size: MATRIX_SIZE,
+            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+            ..Default::default()
+        });
+        bindings.set(
+            CAMERA_VIEW_INV_3,
+            RenderResourceBinding::Buffer {
+                buffer,
+                range: 0..MATRIX_SIZE as u64,
+                dynamic_index: None,
+            },
+        );
+    }
+
     if bindings.get(CAMERA_POSITION).is_none() {
         let buffer = render_resource_context.create_buffer(BufferInfo {
             size: VEC4_SIZE,
@@ -186,6 +206,38 @@ pub fn camera_node_system(
             0..MATRIX_SIZE as u64,
             &mut |data, _renderer| {
                 data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&view));
+            },
+        );
+        state.command_queue.copy_buffer_to_buffer(
+            staging_buffer,
+            0,
+            *buffer,
+            0,
+            MATRIX_SIZE as u64,
+        );
+        offset += MATRIX_SIZE as u64;
+    }
+
+    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_VIEW_INV_3) {
+        let v = view.to_cols_array();
+        let view_inv_3 = Mat3::from_cols_array_2d(&[
+            [v[0], v[1], v[2]],
+            [v[4], v[5], v[6]],
+            [v[8], v[9], v[10]],
+        ])
+        .inverse()
+        .to_cols_array();
+        let view_inv_3_mat4 = Mat4::from_cols_array_2d(&[
+            [view_inv_3[0], view_inv_3[1], view_inv_3[2], 0.0],
+            [view_inv_3[3], view_inv_3[4], view_inv_3[5], 0.0],
+            [view_inv_3[6], view_inv_3[7], view_inv_3[8], 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]);
+        render_resource_context.write_mapped_buffer(
+            staging_buffer,
+            0..MATRIX_SIZE as u64,
+            &mut |data, _renderer| {
+                data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&view_inv_3_mat4));
             },
         );
         state.command_queue.copy_buffer_to_buffer(
