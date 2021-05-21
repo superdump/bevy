@@ -17,7 +17,13 @@ layout(set = 2, binding = 0) uniform Transform {
 };
 
 void main() {
-    v_ViewNormal = (inverse(View) * Model * vec4(Vertex_Normal, 0.0)).xyz * 0.5 + 0.5;
+    // For non-uniform scaling, the Model matrix must be inverse-transposed which has the effect of
+    // applying inverse scaling while retaining the correct rotation
+    // The normals must be re-normalised after applying the inverse-transpose because this can affect
+    // the length of the normal
+    // The normals need to rotate inverse to the view rotation
+    // Using mat3 is important else the translation in the Model matrix can have other unintended effects
+    v_ViewNormal = normalize(inverse(mat3(View)) * transpose(inverse(mat3(Model))) * Vertex_Normal) * 0.5 + 0.5;
 
     gl_Position = ViewProj * Model * vec4(Vertex_Position, 1.0);
 }
