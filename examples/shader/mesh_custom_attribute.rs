@@ -3,11 +3,6 @@ use bevy::{
     render::{
         mesh::{shape, VertexAttributeValues},
         pipeline::{PipelineDescriptor, RenderPipeline},
-        render_graph::{
-            base::{self, MainPass},
-            AssetRenderResourcesNode, RenderGraph,
-        },
-        renderer::RenderResources,
         shader::{ShaderStage, ShaderStages},
     },
 };
@@ -59,25 +54,6 @@ fn setup(
         vertex: shaders.add(Shader::from_glsl(ShaderStage::Vertex, VERTEX_SHADER)),
         fragment: Some(shaders.add(Shader::from_glsl(ShaderStage::Fragment, FRAGMENT_SHADER))),
     }));
-
-    // Add an AssetRenderResourcesNode to our Render Graph. This will bind
-    // MyMaterialWithVertexColorSupport resources to our shader
-    render_graph.add_system_node(
-        "my_material_with_vertex_color_support",
-        AssetRenderResourcesNode::<MyMaterialWithVertexColorSupport, MainPass>::new(true),
-    );
-
-    // Add a Render Graph edge connecting our new "my_material" node to the main pass node. This
-    // ensures "my_material" runs before the main pass
-    render_graph
-        .add_node_edge(
-            "my_material_with_vertex_color_support",
-            base::node::MAIN_PASS,
-        )
-        .unwrap();
-
-    // Create a new material
-    let material = materials.add(MyMaterialWithVertexColorSupport {});
 
     // create a generic cube
     let mut cube_with_vertex_colors = Mesh::from(shape::Cube { size: 2.0 });
