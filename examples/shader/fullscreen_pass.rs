@@ -7,12 +7,9 @@ use bevy::{
     pbr::AmbientLight,
     prelude::*,
     render::{
-        pass::{
-            LoadOp, Operations, PassDescriptor, RenderPassColorAttachmentDescriptor,
-            TextureAttachment,
-        },
+        pass::{LoadOp, Operations, PassDescriptor, RenderPassColorAttachment, TextureAttachment},
         pipeline::{
-            BlendFactor, BlendOperation, BlendState, ColorTargetState, ColorWrite,
+            BlendComponent, BlendFactor, BlendOperation, BlendState, ColorTargetState, ColorWrite,
             PipelineDescriptor,
         },
         render_graph::{
@@ -139,16 +136,18 @@ fn setup_render_graph(
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
             format: TextureFormat::Bgra8UnormSrgb,
-            color_blend: BlendState {
-                src_factor: BlendFactor::SrcAlpha,
-                dst_factor: BlendFactor::OneMinusSrcAlpha,
-                operation: BlendOperation::Add,
-            },
-            alpha_blend: BlendState {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
+            blend: Some(BlendState {
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                color: BlendComponent {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+            }),
             write_mask: ColorWrite::ALL,
         }],
         ..PipelineDescriptor::new(ShaderStages {
@@ -179,7 +178,7 @@ fn setup_render_graph(
 
     // Setup post processing pass
     let pass_descriptor = PassDescriptor {
-        color_attachments: vec![RenderPassColorAttachmentDescriptor {
+        color_attachments: vec![RenderPassColorAttachment {
             attachment: TextureAttachment::Input("color_attachment".to_string()),
             resolve_target: None,
             ops: Operations {

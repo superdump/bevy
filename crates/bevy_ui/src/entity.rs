@@ -12,7 +12,6 @@ use bevy_render::{
     mesh::Mesh,
     pipeline::{RenderPipeline, RenderPipelines},
     prelude::Visible,
-    render_graph::base::MainPass,
 };
 use bevy_sprite::{ColorMaterial, QUAD_HANDLE};
 use bevy_text::Text;

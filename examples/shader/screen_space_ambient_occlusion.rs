@@ -11,12 +11,12 @@ use bevy::{
     render::{
         camera::{Camera, PerspectiveProjection},
         pass::{
-            LoadOp, Operations, PassDescriptor, RenderPassColorAttachmentDescriptor,
-            RenderPassDepthStencilAttachmentDescriptor, TextureAttachment,
+            LoadOp, Operations, PassDescriptor, RenderPassColorAttachment,
+            RenderPassDepthStencilAttachment, TextureAttachment,
         },
         pipeline::{
-            BlendFactor, BlendOperation, BlendState, ColorTargetState, ColorWrite, CompareFunction,
-            DepthBiasState, DepthStencilState, PipelineDescriptor, RenderPipeline,
+            BlendComponent, BlendFactor, BlendOperation, BlendState, ColorTargetState, ColorWrite,
+            CompareFunction, DepthBiasState, DepthStencilState, PipelineDescriptor, RenderPipeline,
             StencilFaceState, StencilState,
         },
         render_graph::{
@@ -218,20 +218,21 @@ fn setup(
                 slope_scale: 0.0,
                 clamp: 0.0,
             },
-            clamp_depth: false,
         }),
         color_target_states: vec![ColorTargetState {
             format: TextureFormat::Bgra8Unorm,
-            color_blend: BlendState {
-                src_factor: BlendFactor::SrcAlpha,
-                dst_factor: BlendFactor::OneMinusSrcAlpha,
-                operation: BlendOperation::Add,
-            },
-            alpha_blend: BlendState {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
+            blend: Some(BlendState {
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                color: BlendComponent {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+            }),
             write_mask: ColorWrite::ALL,
         }],
         ..PipelineDescriptor::new(ShaderStages {
@@ -517,7 +518,7 @@ fn setup_render_graph(
 fn set_up_depth_normal_pre_pass(msaa: &Msaa, render_graph: &mut RenderGraph) {
     // Set up pass
     let pass_descriptor = PassDescriptor {
-        color_attachments: vec![RenderPassColorAttachmentDescriptor {
+        color_attachments: vec![RenderPassColorAttachment {
             attachment: TextureAttachment::Input(node::NORMAL_TEXTURE.to_string()),
             resolve_target: None,
             ops: Operations {
@@ -525,7 +526,7 @@ fn set_up_depth_normal_pre_pass(msaa: &Msaa, render_graph: &mut RenderGraph) {
                 store: true,
             },
         }],
-        depth_stencil_attachment: Some(RenderPassDepthStencilAttachmentDescriptor {
+        depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
             attachment: TextureAttachment::Input(node::DEPTH_TEXTURE.to_string()),
             depth_ops: Some(Operations {
                 load: LoadOp::Clear(1.0),
@@ -537,13 +538,13 @@ fn set_up_depth_normal_pre_pass(msaa: &Msaa, render_graph: &mut RenderGraph) {
     };
 
     // Create the pass node
-    let mut depth_normal_pass_node = PassNode::<&MainPass>::new(pass_descriptor);
+    let mut depth_normal_pass_node = PassNode::<MainPass, &MainPass>::new(pass_descriptor);
     depth_normal_pass_node.add_camera(camera::CAMERA_3D);
     render_graph.add_node(node::DEPTH_NORMAL_PRE_PASS, depth_normal_pass_node);
 
     render_graph.add_system_node(
         node::TRANSFORM,
-        RenderResourcesNode::<GlobalTransform>::new(true),
+        RenderResourcesNode::<GlobalTransform, MainPass>::new(true),
     );
     render_graph
         .add_node_edge(node::TRANSFORM, node::DEPTH_NORMAL_PRE_PASS)
@@ -591,16 +592,18 @@ fn set_up_ssao_pass(
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
             format: TextureFormat::R8Unorm,
-            color_blend: BlendState {
-                src_factor: BlendFactor::SrcColor,
-                dst_factor: BlendFactor::OneMinusSrcColor,
-                operation: BlendOperation::Add,
-            },
-            alpha_blend: BlendState {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
+            blend: Some(BlendState {
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                color: BlendComponent {
+                    src_factor: BlendFactor::Src,
+                    dst_factor: BlendFactor::OneMinusSrc,
+                    operation: BlendOperation::Add,
+                },
+            }),
             write_mask: ColorWrite::ALL,
         }],
         ..PipelineDescriptor::new(ShaderStages {
@@ -616,7 +619,7 @@ fn set_up_ssao_pass(
 
     // Setup pass
     let pass_descriptor = PassDescriptor {
-        color_attachments: vec![RenderPassColorAttachmentDescriptor {
+        color_attachments: vec![RenderPassColorAttachment {
             attachment: TextureAttachment::Input("occlusion_texture".to_string()),
             resolve_target: None,
             ops: Operations {
@@ -704,16 +707,18 @@ fn set_up_blur_x_pass(
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
             format: TextureFormat::R8Unorm,
-            color_blend: BlendState {
-                src_factor: BlendFactor::SrcAlpha,
-                dst_factor: BlendFactor::OneMinusSrcAlpha,
-                operation: BlendOperation::Add,
-            },
-            alpha_blend: BlendState {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
+            blend: Some(BlendState {
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                color: BlendComponent {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+            }),
             write_mask: ColorWrite::ALL,
         }],
         ..PipelineDescriptor::new(ShaderStages {
@@ -726,7 +731,7 @@ fn set_up_blur_x_pass(
 
     // Setup pass
     let pass_descriptor = PassDescriptor {
-        color_attachments: vec![RenderPassColorAttachmentDescriptor {
+        color_attachments: vec![RenderPassColorAttachment {
             attachment: TextureAttachment::Input(node::SSAO_B_TEXTURE.to_string()),
             resolve_target: None,
             ops: Operations {
@@ -786,16 +791,18 @@ fn set_up_blur_y_pass(
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
             format: TextureFormat::R8Unorm,
-            color_blend: BlendState {
-                src_factor: BlendFactor::SrcAlpha,
-                dst_factor: BlendFactor::OneMinusSrcAlpha,
-                operation: BlendOperation::Add,
-            },
-            alpha_blend: BlendState {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
+            blend: Some(BlendState {
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                color: BlendComponent {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+            }),
             write_mask: ColorWrite::ALL,
         }],
         ..PipelineDescriptor::new(ShaderStages {
@@ -808,7 +815,7 @@ fn set_up_blur_y_pass(
 
     // Setup pass
     let pass_descriptor = PassDescriptor {
-        color_attachments: vec![RenderPassColorAttachmentDescriptor {
+        color_attachments: vec![RenderPassColorAttachment {
             attachment: TextureAttachment::Input(node::SSAO_A_TEXTURE.to_string()),
             resolve_target: None,
             ops: Operations {
@@ -991,16 +998,18 @@ fn set_up_depth_render_pass(
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
             format: TextureFormat::Bgra8UnormSrgb,
-            color_blend: BlendState {
-                src_factor: BlendFactor::SrcAlpha,
-                dst_factor: BlendFactor::OneMinusSrcAlpha,
-                operation: BlendOperation::Add,
-            },
-            alpha_blend: BlendState {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
+            blend: Some(BlendState {
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                color: BlendComponent {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+            }),
             write_mask: ColorWrite::ALL,
         }],
         ..PipelineDescriptor::new(ShaderStages {
@@ -1016,7 +1025,7 @@ fn set_up_depth_render_pass(
 
     // Setup pass
     let pass_descriptor = PassDescriptor {
-        color_attachments: vec![msaa.color_attachment_descriptor(
+        color_attachments: vec![msaa.color_attachment(
             TextureAttachment::Input("color_attachment".to_string()),
             TextureAttachment::Input("color_resolve_target".to_string()),
             Operations {
@@ -1060,7 +1069,7 @@ fn set_up_depth_render_pass(
                 WindowId::primary(),
                 TextureDescriptor {
                     size: Extent3d {
-                        depth: 1,
+                        depth_or_array_layers: 1,
                         width: 1,
                         height: 1,
                     },
@@ -1149,16 +1158,18 @@ fn set_up_normal_render_pass(
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
             format: TextureFormat::Bgra8UnormSrgb,
-            color_blend: BlendState {
-                src_factor: BlendFactor::SrcAlpha,
-                dst_factor: BlendFactor::OneMinusSrcAlpha,
-                operation: BlendOperation::Add,
-            },
-            alpha_blend: BlendState {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
+            blend: Some(BlendState {
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                color: BlendComponent {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+            }),
             write_mask: ColorWrite::ALL,
         }],
         ..PipelineDescriptor::new(ShaderStages {
@@ -1174,7 +1185,7 @@ fn set_up_normal_render_pass(
 
     // Setup pass
     let pass_descriptor = PassDescriptor {
-        color_attachments: vec![msaa.color_attachment_descriptor(
+        color_attachments: vec![msaa.color_attachment(
             TextureAttachment::Input("color_attachment".to_string()),
             TextureAttachment::Input("color_resolve_target".to_string()),
             Operations {
@@ -1218,7 +1229,7 @@ fn set_up_normal_render_pass(
                 WindowId::primary(),
                 TextureDescriptor {
                     size: Extent3d {
-                        depth: 1,
+                        depth_or_array_layers: 1,
                         width: 1,
                         height: 1,
                     },
@@ -1307,16 +1318,18 @@ fn set_up_occlusion_render_pass(
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
             format: TextureFormat::Bgra8UnormSrgb,
-            color_blend: BlendState {
-                src_factor: BlendFactor::SrcAlpha,
-                dst_factor: BlendFactor::OneMinusSrcAlpha,
-                operation: BlendOperation::Add,
-            },
-            alpha_blend: BlendState {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
+            blend: Some(BlendState {
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+                color: BlendComponent {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+            }),
             write_mask: ColorWrite::ALL,
         }],
         ..PipelineDescriptor::new(ShaderStages {
@@ -1332,7 +1345,7 @@ fn set_up_occlusion_render_pass(
 
     // Setup pass
     let pass_descriptor = PassDescriptor {
-        color_attachments: vec![msaa.color_attachment_descriptor(
+        color_attachments: vec![msaa.color_attachment(
             TextureAttachment::Input("color_attachment".to_string()),
             TextureAttachment::Input("color_resolve_target".to_string()),
             Operations {
@@ -1376,7 +1389,7 @@ fn set_up_occlusion_render_pass(
                 WindowId::primary(),
                 TextureDescriptor {
                     size: Extent3d {
-                        depth: 1,
+                        depth_or_array_layers: 1,
                         width: 1,
                         height: 1,
                     },

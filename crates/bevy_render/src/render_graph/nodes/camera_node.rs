@@ -222,8 +222,7 @@ pub fn camera_node_system(
             staging_buffer,
             offset..(offset + MATRIX_SIZE as u64),
             &mut |data, _renderer| {
-                data[0..MATRIX_SIZE]
-                    .copy_from_slice(camera.projection_matrix.to_cols_array_2d().as_bytes());
+                data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&camera.projection_matrix));
             },
         );
         state.command_queue.copy_buffer_to_buffer(
