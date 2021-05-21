@@ -276,8 +276,105 @@ fn setup(
         .spawn_bundle(PointLightBundle {
             transform: Transform::from_xyz(3.0, 5.0, 3.0),
             ..Default::default()
-        })
-        .insert(Rotates);
+}
+
+fn setup_render_graph(
+    render_graph: &mut RenderGraph,
+    pipelines: &mut Assets<PipelineDescriptor>,
+    shaders: &mut Assets<Shader>,
+    msaa: &Msaa,
+    asset_server: &AssetServer,
+) {
+    // Set up the additional textures
+    render_graph.add_node(
+        node::DEPTH_TEXTURE,
+        WindowTextureNode::new(
+            WindowId::primary(),
+            TextureDescriptor {
+                size: Extent3d::new(1, 1, 1),
+                mip_level_count: 1,
+                sample_count: msaa.samples,
+                dimension: bevy::render::texture::TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
+            },
+            Some(SamplerDescriptor::default()),
+            None,
+        ),
+    );
+    render_graph.add_node(
+        node::NORMAL_TEXTURE,
+        WindowTextureNode::new(
+            WindowId::primary(),
+            TextureDescriptor {
+                size: Extent3d::new(1, 1, 1),
+                mip_level_count: 1,
+                sample_count: msaa.samples,
+                dimension: bevy::render::texture::TextureDimension::D2,
+                format: TextureFormat::Bgra8Unorm,
+                usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
+            },
+            Some(SamplerDescriptor::default()),
+            None,
+        ),
+    );
+    render_graph.add_node(
+        node::SSAO_A_TEXTURE,
+        WindowTextureNode::new(
+            WindowId::primary(),
+            TextureDescriptor {
+                size: Extent3d::new(1, 1, 1),
+                mip_level_count: 1,
+                sample_count: msaa.samples,
+                dimension: bevy::render::texture::TextureDimension::D2,
+                format: TextureFormat::R8Unorm,
+                usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
+            },
+            Some(SamplerDescriptor::default()),
+            None,
+        ),
+    );
+    render_graph.add_node(
+        node::SSAO_B_TEXTURE,
+        WindowTextureNode::new(
+            WindowId::primary(),
+            TextureDescriptor {
+                size: Extent3d::new(1, 1, 1),
+                mip_level_count: 1,
+                sample_count: msaa.samples,
+                dimension: bevy::render::texture::TextureDimension::D2,
+                format: TextureFormat::R8Unorm,
+                usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
+            },
+            Some(SamplerDescriptor::default()),
+            None,
+        ),
+    );
+
+    // NOTE: Usage of the below is to only have one of the _render_pass enabled to render the
+    // corresponding texture
+    // For the main passes of interest (depth normal, ssao, blur) enable up to the one you want to render
+
+    // Set up depth normal pre-pass pipeline
+    set_up_depth_normal_pre_pass(msaa, render_graph);
+
+    // // Render the depth texture
+    // set_up_depth_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
+    // // Render the normal texture
+    // set_up_normal_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
+
+    // Set up SSAO pass pipeline
+    set_up_ssao_pass(shaders, pipelines, msaa, render_graph, asset_server);
+    // Render the occlusion texture after the ssao pass
+    set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
+
+    // // Set up blur X pass pipeline
+    // set_up_blur_x_pass(shaders, pipelines, msaa, render_graph);
+    // // Set up blur Y pass pipeline
+    // set_up_blur_y_pass(shaders, pipelines, msaa, render_graph);
+
+    // // Set up modified main pass
+    // set_up_modified_main_pass(shaders, pipelines, msaa, render_graph);
 }
 
 fn set_up_depth_normal_pre_pass(msaa: &Msaa, render_graph: &mut RenderGraph) {
@@ -1216,105 +1313,6 @@ fn set_up_occlusion_render_pass(
     render_graph
         .add_node_edge(node::SSAO_PASS, node::OCCLUSION_RENDER_PASS)
         .unwrap();
-}
-
-fn setup_render_graph(
-    render_graph: &mut RenderGraph,
-    pipelines: &mut Assets<PipelineDescriptor>,
-    shaders: &mut Assets<Shader>,
-    msaa: &Msaa,
-    asset_server: &AssetServer,
-) {
-    // Set up the additional textures
-    render_graph.add_node(
-        node::DEPTH_TEXTURE,
-        WindowTextureNode::new(
-            WindowId::primary(),
-            TextureDescriptor {
-                size: Extent3d::new(1, 1, 1),
-                mip_level_count: 1,
-                sample_count: msaa.samples,
-                dimension: bevy::render::texture::TextureDimension::D2,
-                format: TextureFormat::Depth32Float,
-                usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
-            },
-            Some(SamplerDescriptor::default()),
-            None,
-        ),
-    );
-    render_graph.add_node(
-        node::NORMAL_TEXTURE,
-        WindowTextureNode::new(
-            WindowId::primary(),
-            TextureDescriptor {
-                size: Extent3d::new(1, 1, 1),
-                mip_level_count: 1,
-                sample_count: msaa.samples,
-                dimension: bevy::render::texture::TextureDimension::D2,
-                format: TextureFormat::Bgra8Unorm,
-                usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
-            },
-            Some(SamplerDescriptor::default()),
-            None,
-        ),
-    );
-    render_graph.add_node(
-        node::SSAO_A_TEXTURE,
-        WindowTextureNode::new(
-            WindowId::primary(),
-            TextureDescriptor {
-                size: Extent3d::new(1, 1, 1),
-                mip_level_count: 1,
-                sample_count: msaa.samples,
-                dimension: bevy::render::texture::TextureDimension::D2,
-                format: TextureFormat::R8Unorm,
-                usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
-            },
-            Some(SamplerDescriptor::default()),
-            None,
-        ),
-    );
-    render_graph.add_node(
-        node::SSAO_B_TEXTURE,
-        WindowTextureNode::new(
-            WindowId::primary(),
-            TextureDescriptor {
-                size: Extent3d::new(1, 1, 1),
-                mip_level_count: 1,
-                sample_count: msaa.samples,
-                dimension: bevy::render::texture::TextureDimension::D2,
-                format: TextureFormat::R8Unorm,
-                usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
-            },
-            Some(SamplerDescriptor::default()),
-            None,
-        ),
-    );
-
-    // NOTE: Usage of the below is to only have one of the _render_pass enabled to render the
-    // corresponding texture
-    // For the main passes of interest (depth normal, ssao, blur) enable up to the one you want to render
-
-    // Set up depth normal pre-pass pipeline
-    set_up_depth_normal_pre_pass(msaa, render_graph);
-
-    // // Render the depth texture
-    // set_up_depth_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
-    // // Render the normal texture
-    // set_up_normal_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
-
-    // Set up SSAO pass pipeline
-    set_up_ssao_pass(shaders, pipelines, msaa, render_graph, asset_server);
-    // Render the occlusion texture after the ssao pass
-    set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
-
-    // // Set up blur X pass pipeline
-    // set_up_blur_x_pass(shaders, pipelines, msaa, render_graph);
-    // // Set up blur Y pass pipeline
-    // set_up_blur_y_pass(shaders, pipelines, msaa, render_graph);
-
-    // // Set up modified main pass
-    // set_up_modified_main_pass(shaders, pipelines, msaa, render_graph);
 }
 
 /// this component indicates what entities should rotate
