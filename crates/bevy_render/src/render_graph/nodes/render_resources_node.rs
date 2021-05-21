@@ -358,16 +358,17 @@ where
 }
 
 #[derive(Default)]
-pub struct RenderResourcesNode<T>
+pub struct RenderResourcesNode<T, P: Send + Sync + 'static>
 where
     T: renderer::RenderResources,
 {
     command_queue: CommandQueue,
     dynamic_uniforms: bool,
-    _marker: PhantomData<T>,
+    _marker_t: PhantomData<T>,
+    _marker_p: PhantomData<P>,
 }
 
-impl<T> RenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> RenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
@@ -375,12 +376,13 @@ where
         RenderResourcesNode {
             command_queue: CommandQueue::default(),
             dynamic_uniforms,
-            _marker: PhantomData::default(),
+            _marker_p: PhantomData::default(),
+            _marker_t: PhantomData::default(),
         }
     }
 }
 
-impl<T> Node for RenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> Node for RenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
@@ -395,18 +397,20 @@ where
     }
 }
 
-impl<T> SystemNode for RenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> SystemNode for RenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
     fn get_system(&self) -> BoxedSystem {
-        let system = render_resources_node_system::<T>.system().config(|config| {
-            config.0 = Some(RenderResourcesNodeState {
-                command_queue: self.command_queue.clone(),
-                uniform_buffer_arrays: UniformBufferArrays::<Entity, T>::default(),
-                dynamic_uniforms: self.dynamic_uniforms,
-            })
-        });
+        let system = render_resources_node_system::<T, P>
+            .system()
+            .config(|config| {
+                config.0 = Some(RenderResourcesNodeState {
+                    command_queue: self.command_queue.clone(),
+                    uniform_buffer_arrays: UniformBufferArrays::<Entity, T>::default(),
+                    dynamic_uniforms: self.dynamic_uniforms,
+                })
+            });
 
         Box::new(system)
     }
@@ -429,14 +433,14 @@ impl<I, T: RenderResources> Default for RenderResourcesNodeState<I, T> {
 }
 
 #[allow(clippy::type_complexity)]
-fn render_resources_node_system<T: RenderResources>(
+fn render_resources_node_system<T: RenderResources, P: Send + Sync + 'static>(
     mut state: Local<RenderResourcesNodeState<Entity, T>>,
     mut entities_waiting_for_textures: Local<Vec<Entity>>,
     render_resource_context: Res<Box<dyn RenderResourceContext>>,
     removed: RemovedComponents<T>,
     mut queries: QuerySet<(
-        Query<(Entity, &T, &Visible, &mut RenderPipelines), Or<(Changed<T>, Changed<Visible>)>>,
-        Query<(Entity, &T, &Visible, &mut RenderPipelines)>,
+        Query<(Entity, &T, &Visible, &mut RenderPipelines<P>), Or<(Changed<T>, Changed<Visible>)>>,
+        Query<(Entity, &T, &Visible, &mut RenderPipelines<P>)>,
     )>,
 ) {
     let state = state.deref_mut();
@@ -541,16 +545,17 @@ fn render_resources_node_system<T: RenderResources>(
 }
 
 #[derive(Default)]
-pub struct AssetRenderResourcesNode<T>
+pub struct AssetRenderResourcesNode<T, P: Send + Sync + 'static>
 where
     T: renderer::RenderResources,
 {
     command_queue: CommandQueue,
     dynamic_uniforms: bool,
     _marker: PhantomData<T>,
+    _marker_p: PhantomData<P>,
 }
 
-impl<T> AssetRenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> AssetRenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
@@ -559,11 +564,12 @@ where
             dynamic_uniforms,
             command_queue: Default::default(),
             _marker: Default::default(),
+            _marker_p: Default::default(),
         }
     }
 }
 
-impl<T> Node for AssetRenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> Node for AssetRenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
@@ -578,12 +584,12 @@ where
     }
 }
 
-impl<T> SystemNode for AssetRenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> SystemNode for AssetRenderResourcesNode<T, P>
 where
     T: renderer::RenderResources + Asset,
 {
     fn get_system(&self) -> BoxedSystem {
-        let system = asset_render_resources_node_system::<T>
+        let system = asset_render_resources_node_system::<T, P>
             .system()
             .config(|config| {
                 config.0 = Some(RenderResourcesNodeState {
@@ -612,7 +618,7 @@ impl<T: Asset> Default for AssetRenderNodeState<T> {
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn asset_render_resources_node_system<T: RenderResources + Asset>(
+fn asset_render_resources_node_system<T: RenderResources + Asset, P: Send + Sync + 'static>(
     mut state: Local<RenderResourcesNodeState<HandleId, T>>,
     mut asset_state: Local<AssetRenderNodeState<T>>,
     assets: Res<Assets<T>>,
@@ -621,8 +627,8 @@ fn asset_render_resources_node_system<T: RenderResources + Asset>(
     render_resource_context: Res<Box<dyn RenderResourceContext>>,
     removed_handles: RemovedComponents<Handle<T>>,
     mut queries: QuerySet<(
-        Query<(&Handle<T>, &mut RenderPipelines), Changed<Handle<T>>>,
-        Query<&mut RenderPipelines, With<Handle<T>>>,
+        Query<(&Handle<T>, &mut RenderPipelines<P>), Changed<Handle<T>>>,
+        Query<&mut RenderPipelines<P>, With<Handle<T>>>,
     )>,
 ) {
     let state = state.deref_mut();

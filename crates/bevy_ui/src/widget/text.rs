@@ -140,7 +140,7 @@ pub fn text_system(
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-pub fn draw_text_system(
+pub fn draw_text_system<P: Send + Sync + 'static>(
     mut context: DrawContext,
     msaa: Res<Msaa>,
     windows: Res<Windows>,
@@ -148,7 +148,14 @@ pub fn draw_text_system(
     mut render_resource_bindings: ResMut<RenderResourceBindings>,
     text_pipeline: Res<DefaultTextPipeline>,
     mut query: Query<
-        (Entity, &mut Draw, &Visible, &Text, &Node, &GlobalTransform),
+        (
+            Entity,
+            &mut Draw<P>,
+            &Visible,
+            &Text,
+            &Node,
+            &GlobalTransform,
+        ),
         Without<OutsideFrustum>,
     >,
 ) {
@@ -176,6 +183,7 @@ pub fn draw_text_system(
                 font_quad_vertex_layout: &vertex_buffer_layout,
                 sections: &text.sections,
                 alignment_offset: (node.size / -2.0).extend(0.0),
+                marker: Default::default(),
             };
 
             drawable_text.draw(&mut draw, &mut context).unwrap();

@@ -12,10 +12,14 @@ use bevy_render::{
     mesh::Mesh,
     pipeline::{RenderPipeline, RenderPipelines},
     prelude::Visible,
+    render_graph::base::MainPass,
 };
 use bevy_sprite::{ColorMaterial, QUAD_HANDLE};
 use bevy_text::Text;
 use bevy_transform::prelude::{GlobalTransform, Transform};
+
+#[derive(Clone, Debug, Default)]
+pub struct UiPass;
 
 #[derive(Bundle, Clone, Debug)]
 pub struct NodeBundle {
@@ -23,9 +27,9 @@ pub struct NodeBundle {
     pub style: Style,
     pub mesh: Handle<Mesh>, // TODO: maybe abstract this out
     pub material: Handle<ColorMaterial>,
-    pub draw: Draw,
+    pub draw: Draw<UiPass>,
     pub visible: Visible,
-    pub render_pipelines: RenderPipelines,
+    pub render_pipelines: RenderPipelines<UiPass>,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
 }
@@ -59,9 +63,9 @@ pub struct ImageBundle {
     pub calculated_size: CalculatedSize,
     pub mesh: Handle<Mesh>, // TODO: maybe abstract this out
     pub material: Handle<ColorMaterial>,
-    pub draw: Draw,
+    pub draw: Draw<UiPass>,
     pub visible: Visible,
-    pub render_pipelines: RenderPipelines,
+    pub render_pipelines: RenderPipelines<UiPass>,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
 }
@@ -93,7 +97,7 @@ impl Default for ImageBundle {
 pub struct TextBundle {
     pub node: Node,
     pub style: Style,
-    pub draw: Draw,
+    pub draw: Draw<UiPass>,
     pub visible: Visible,
     pub text: Text,
     pub calculated_size: CalculatedSize,
@@ -132,9 +136,9 @@ pub struct ButtonBundle {
     pub focus_policy: FocusPolicy,
     pub mesh: Handle<Mesh>, // TODO: maybe abstract this out
     pub material: Handle<ColorMaterial>,
-    pub draw: Draw,
+    pub draw: Draw<UiPass>,
     pub visible: Visible,
-    pub render_pipelines: RenderPipelines,
+    pub render_pipelines: RenderPipelines<UiPass>,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
 }

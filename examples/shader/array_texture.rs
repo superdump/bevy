@@ -4,7 +4,10 @@ use bevy::{
     render::{
         mesh::shape,
         pipeline::{PipelineDescriptor, RenderPipeline},
-        render_graph::{base, AssetRenderResourcesNode, RenderGraph},
+        render_graph::{
+            base::{self, MainPass},
+            AssetRenderResourcesNode, RenderGraph,
+        },
         renderer::RenderResources,
         shader::{ShaderStage, ShaderStages},
     },
@@ -103,7 +106,7 @@ fn setup(
     // to our shader.
     render_graph.add_system_node(
         "my_array_texture",
-        AssetRenderResourcesNode::<MyArrayTexture>::new(true),
+        AssetRenderResourcesNode::<MyArrayTexture, MainPass>::new(true),
     );
     // Add a Render Graph edge connecting our new "my_array_texture" node to the main pass node.
     // This ensures "my_array_texture" runs before the main pass.

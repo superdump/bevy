@@ -138,10 +138,10 @@ impl Plugin for RenderPlugin {
         .add_asset::<PipelineDescriptor>()
         .register_type::<Camera>()
         .register_type::<DepthCalculation>()
-        .register_type::<Draw>()
+        .register_type::<Draw<MainPass>>()
         .register_type::<Visible>()
         .register_type::<OutsideFrustum>()
-        .register_type::<RenderPipelines>()
+        .register_type::<RenderPipelines<MainPass>>()
         .register_type::<OrthographicProjection>()
         .register_type::<PerspectiveProjection>()
         .register_type::<MainPass>()
@@ -166,7 +166,10 @@ impl Plugin for RenderPlugin {
             StartupStage::PreStartup,
             check_for_render_resource_context.system(),
         )
-        .add_system_to_stage(CoreStage::PreUpdate, draw::clear_draw_system.system())
+        .add_system_to_stage(
+            CoreStage::PreUpdate,
+            draw::clear_draw_system::<MainPass>.system(),
+        )
         .add_system_to_stage(
             CoreStage::PostUpdate,
             camera::active_cameras_system.system(),
@@ -196,7 +199,7 @@ impl Plugin for RenderPlugin {
         )
         .add_system_to_stage(
             RenderStage::RenderResource,
-            mesh::mesh_resource_provider_system.system(),
+            mesh::mesh_resource_provider_system::<MainPass>.system(),
         )
         .add_system_to_stage(
             RenderStage::RenderResource,
@@ -208,11 +211,11 @@ impl Plugin for RenderPlugin {
         )
         .add_system_to_stage(
             RenderStage::Draw,
-            pipeline::draw_render_pipelines_system.system(),
+            pipeline::draw_render_pipelines_system::<MainPass>.system(),
         )
         .add_system_to_stage(
             RenderStage::PostRender,
-            shader::clear_shader_defs_system.system(),
+            shader::clear_shader_defs_system::<MainPass>.system(),
         );
 
         if let Some(ref config) = self.base_render_graph_config {

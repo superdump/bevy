@@ -24,7 +24,7 @@ use crate::{DefaultTextPipeline, DrawableText, Font, FontAtlasSet, Text, Text2dS
 /// [Example usage.](https://github.com/bevyengine/bevy/blob/latest/examples/2d/text2d.rs)
 #[derive(Bundle, Clone, Debug)]
 pub struct Text2dBundle {
-    pub draw: Draw,
+    pub draw: Draw<MainPass>,
     pub visible: Visible,
     pub text: Text,
     pub transform: Transform,
@@ -58,7 +58,7 @@ impl Default for Text2dBundle {
 /// default `TextPlugin`. Position is determined by the `Transform`'s translation, though scale and
 /// rotation are ignored.
 #[allow(clippy::type_complexity)]
-pub fn draw_text2d_system(
+pub fn draw_text2d_system<P: Send + Sync + 'static>(
     mut context: DrawContext,
     msaa: Res<Msaa>,
     meshes: Res<Assets<Mesh>>,
@@ -68,7 +68,7 @@ pub fn draw_text2d_system(
     mut query: Query<
         (
             Entity,
-            &mut Draw,
+            &mut Draw<P>,
             &Visible,
             &Text,
             &GlobalTransform,
@@ -113,6 +113,7 @@ pub fn draw_text2d_system(
                 font_quad_vertex_layout: &font_quad_vertex_layout,
                 sections: &text.sections,
                 alignment_offset,
+                marker: Default::default(),
             };
 
             drawable_text.draw(&mut draw, &mut context).unwrap();

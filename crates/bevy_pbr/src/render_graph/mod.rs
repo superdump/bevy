@@ -21,7 +21,10 @@ use crate::prelude::StandardMaterial;
 use bevy_asset::Assets;
 use bevy_render::{
     pipeline::PipelineDescriptor,
-    render_graph::{base, AssetRenderResourcesNode, RenderGraph, RenderResourcesNode},
+    render_graph::{
+        base::{self, MainPass},
+        AssetRenderResourcesNode, RenderGraph, RenderResourcesNode,
+    },
     shader::Shader,
 };
 use bevy_transform::prelude::GlobalTransform;
@@ -33,11 +36,11 @@ pub(crate) fn add_pbr_graph(world: &mut World) {
         let mut graph = world.get_resource_mut::<RenderGraph>().unwrap();
         graph.add_system_node(
             node::TRANSFORM,
-            RenderResourcesNode::<GlobalTransform>::new(true),
+            RenderResourcesNode::<GlobalTransform, MainPass>::new(true),
         );
         graph.add_system_node(
             node::STANDARD_MATERIAL,
-            AssetRenderResourcesNode::<StandardMaterial>::new(true),
+            AssetRenderResourcesNode::<StandardMaterial, MainPass>::new(true),
         );
 
         graph.add_system_node(
