@@ -30,7 +30,7 @@ pub const FIRST_PASS: &str = "first_pass";
 pub const FIRST_PASS_CAMERA: &str = "first_pass_camera";
 
 fn add_render_to_texture_graph(graph: &mut RenderGraph, size: Extent3d) {
-    let mut pass_node = PassNode::<&FirstPass>::new(PassDescriptor {
+    let mut pass_node = PassNode::<FirstPass, &FirstPass>::new(PassDescriptor {
         color_attachments: vec![RenderPassColorAttachment {
             attachment: TextureAttachment::Input("color_attachment".to_string()),
             resolve_target: None,

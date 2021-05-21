@@ -4,7 +4,10 @@ use bevy::{
     render::{
         mesh::shape,
         pipeline::{PipelineDescriptor, RenderPipeline},
-        render_graph::{base, RenderGraph, RenderResourcesNode},
+        render_graph::{
+            base::{self, MainPass},
+            RenderGraph, RenderResourcesNode,
+        },
         renderer::RenderResources,
         shader::{ShaderStage, ShaderStages},
     },
@@ -88,7 +91,7 @@ fn setup(
     // shader.
     render_graph.add_system_node(
         "time_uniform",
-        RenderResourcesNode::<TimeUniform>::new(true),
+        RenderResourcesNode::<TimeUniform, MainPass>::new(true),
     );
 
     // Add a `RenderGraph` edge connecting our new "time_component" node to the main pass node. This
