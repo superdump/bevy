@@ -18,9 +18,9 @@ pub struct SpriteBundle {
     pub mesh: Handle<Mesh>, // TODO: maybe abstract this out
     pub material: Handle<ColorMaterial>,
     pub main_pass: MainPass,
-    pub draw: Draw,
+    pub draw: Draw<MainPass>,
     pub visible: Visible,
-    pub render_pipelines: RenderPipelines,
+    pub render_pipelines: RenderPipelines<MainPass>,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
 }
@@ -55,9 +55,9 @@ pub struct SpriteSheetBundle {
     /// A handle to the texture atlas that holds the sprite images
     pub texture_atlas: Handle<TextureAtlas>,
     /// Data pertaining to how the sprite is drawn on the screen
-    pub draw: Draw,
+    pub draw: Draw<MainPass>,
     pub visible: Visible,
-    pub render_pipelines: RenderPipelines,
+    pub render_pipelines: RenderPipelines<MainPass>,
     pub main_pass: MainPass,
     pub mesh: Handle<Mesh>, // TODO: maybe abstract this out
     pub transform: Transform,

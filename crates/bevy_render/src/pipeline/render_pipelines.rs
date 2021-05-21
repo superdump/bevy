@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use super::{PipelineDescriptor, PipelineSpecialization};
 use crate::{
     draw::{Draw, DrawContext, OutsideFrustum},
@@ -46,13 +48,15 @@ impl RenderPipeline {
 
 #[derive(Debug, Clone, Reflect)]
 #[reflect(Component)]
-pub struct RenderPipelines {
+pub struct RenderPipelines<P: Send + Sync + 'static> {
     pub pipelines: Vec<RenderPipeline>,
     #[reflect(ignore)]
     pub bindings: RenderResourceBindings,
+    #[reflect(ignore)]
+    marker: PhantomData<P>,
 }
 
-impl RenderPipelines {
+impl<P: Send + Sync + 'static> RenderPipelines<P> {
     pub fn from_pipelines(pipelines: Vec<RenderPipeline>) -> Self {
         Self {
             pipelines,
@@ -73,22 +77,28 @@ impl RenderPipelines {
     }
 }
 
-impl Default for RenderPipelines {
+impl<P: Send + Sync + 'static> Default for RenderPipelines<P> {
     fn default() -> Self {
         Self {
             bindings: Default::default(),
             pipelines: vec![RenderPipeline::default()],
+            marker: Default::default(),
         }
     }
 }
 
-pub fn draw_render_pipelines_system(
+pub fn draw_render_pipelines_system<P: Send + Sync + 'static>(
     mut draw_context: DrawContext,
     mut render_resource_bindings: ResMut<RenderResourceBindings>,
     msaa: Res<Msaa>,
     meshes: Res<Assets<Mesh>>,
     mut query: Query<
-        (&mut Draw, &mut RenderPipelines, &Handle<Mesh>, &Visible),
+        (
+            &mut Draw<P>,
+            &mut RenderPipelines<P>,
+            &Handle<Mesh>,
+            &Visible,
+        ),
         Without<OutsideFrustum>,
     >,
 ) {

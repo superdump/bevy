@@ -42,7 +42,7 @@ pub fn text_constraint(min_size: Val, size: Val, max_size: Val, scale_factor: f6
 
 /// Computes the size of a text block and updates the TextGlyphs with the
 /// new computed glyphs from the layout
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn text_system(
     mut queued_text: Local<QueuedText>,
     mut last_scale_factor: Local<f64>,
@@ -139,8 +139,8 @@ pub fn text_system(
     queued_text.entities = new_queue;
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn draw_text_system(
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn draw_text_system<P: Send + Sync + 'static>(
     mut context: DrawContext,
     msaa: Res<Msaa>,
     windows: Res<Windows>,
@@ -148,7 +148,14 @@ pub fn draw_text_system(
     mut render_resource_bindings: ResMut<RenderResourceBindings>,
     text_pipeline: Res<DefaultTextPipeline>,
     mut query: Query<
-        (Entity, &mut Draw, &Visible, &Text, &Node, &GlobalTransform),
+        (
+            Entity,
+            &mut Draw<P>,
+            &Visible,
+            &Text,
+            &Node,
+            &GlobalTransform,
+        ),
         Without<OutsideFrustum>,
     >,
 ) {
@@ -167,16 +174,16 @@ pub fn draw_text_system(
         }
 
         if let Some(text_glyphs) = text_pipeline.get_glyphs(&entity) {
-            let position = global_transform.translation - (node.size / 2.0).extend(0.0);
-
             let mut drawable_text = DrawableText {
                 render_resource_bindings: &mut render_resource_bindings,
-                position,
+                global_transform: *global_transform,
                 scale_factor: scale_factor as f32,
                 msaa: &msaa,
                 text_glyphs: &text_glyphs.glyphs,
                 font_quad_vertex_layout: &vertex_buffer_layout,
                 sections: &text.sections,
+                alignment_offset: (node.size / -2.0).extend(0.0),
+                marker: Default::default(),
             };
 
             drawable_text.draw(&mut draw, &mut context).unwrap();

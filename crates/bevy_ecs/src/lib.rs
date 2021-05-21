@@ -12,8 +12,10 @@ pub mod system;
 pub mod world;
 
 pub mod prelude {
+    #[doc(hidden)]
     #[cfg(feature = "bevy_reflect")]
     pub use crate::reflect::ReflectComponent;
+    #[doc(hidden)]
     pub use crate::{
         bundle::Bundle,
         entity::Entity,
@@ -34,6 +36,7 @@ pub mod prelude {
 
 #[cfg(test)]
 mod tests {
+    use crate as bevy_ecs;
     use crate::{
         bundle::Bundle,
         component::{Component, ComponentDescriptor, ComponentId, StorageType, TypeInfo},
@@ -76,7 +79,6 @@ mod tests {
 
     #[test]
     fn bundle_derive() {
-        use crate as bevy_ecs;
         #[derive(Bundle, PartialEq, Debug)]
         struct Foo {
             x: &'static str,

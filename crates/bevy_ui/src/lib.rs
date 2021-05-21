@@ -13,10 +13,12 @@ pub use anchors::*;
 pub use flex::*;
 pub use focus::*;
 pub use margins::*;
+use prelude::UiPass;
 pub use render::*;
 pub use ui_node::*;
 
 pub mod prelude {
+    #[doc(hidden)]
     pub use crate::{entity::*, ui_node::*, widget::Button, Anchors, Interaction, Margins};
 }
 
@@ -89,7 +91,10 @@ impl Plugin for UiPlugin {
                     .after(UiSystem::Flex)
                     .before(TransformSystem::TransformPropagate),
             )
-            .add_system_to_stage(RenderStage::Draw, widget::draw_text_system.system());
+            .add_system_to_stage(
+                RenderStage::Draw,
+                widget::draw_text_system::<UiPass>.system(),
+            );
 
         crate::render::add_ui_graph(app.world_mut());
     }

@@ -19,7 +19,7 @@ use bevy_ecs::{
 };
 use bevy_utils::HashMap;
 use renderer::{AssetRenderResourceBindings, BufferId, RenderResourceType, RenderResources};
-use std::{any::TypeId, hash::Hash, marker::PhantomData, ops::DerefMut};
+use std::{any::TypeId, hash::Hash, io::Write, marker::PhantomData, ops::DerefMut};
 
 #[derive(Debug)]
 struct QueuedBufferWrite {
@@ -358,16 +358,17 @@ where
 }
 
 #[derive(Default)]
-pub struct RenderResourcesNode<T>
+pub struct RenderResourcesNode<T, P: Send + Sync + 'static>
 where
     T: renderer::RenderResources,
 {
     command_queue: CommandQueue,
     dynamic_uniforms: bool,
-    _marker: PhantomData<T>,
+    _marker_t: PhantomData<T>,
+    _marker_p: PhantomData<P>,
 }
 
-impl<T> RenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> RenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
@@ -375,12 +376,13 @@ where
         RenderResourcesNode {
             command_queue: CommandQueue::default(),
             dynamic_uniforms,
-            _marker: PhantomData::default(),
+            _marker_p: PhantomData::default(),
+            _marker_t: PhantomData::default(),
         }
     }
 }
 
-impl<T> Node for RenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> Node for RenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
@@ -395,18 +397,20 @@ where
     }
 }
 
-impl<T> SystemNode for RenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> SystemNode for RenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
     fn get_system(&self) -> BoxedSystem {
-        let system = render_resources_node_system::<T>.system().config(|config| {
-            config.0 = Some(RenderResourcesNodeState {
-                command_queue: self.command_queue.clone(),
-                uniform_buffer_arrays: UniformBufferArrays::<Entity, T>::default(),
-                dynamic_uniforms: self.dynamic_uniforms,
-            })
-        });
+        let system = render_resources_node_system::<T, P>
+            .system()
+            .config(|config| {
+                config.0 = Some(RenderResourcesNodeState {
+                    command_queue: self.command_queue.clone(),
+                    uniform_buffer_arrays: UniformBufferArrays::<Entity, T>::default(),
+                    dynamic_uniforms: self.dynamic_uniforms,
+                })
+            });
 
         Box::new(system)
     }
@@ -428,14 +432,15 @@ impl<I, T: RenderResources> Default for RenderResourcesNodeState<I, T> {
     }
 }
 
-fn render_resources_node_system<T: RenderResources>(
+#[allow(clippy::type_complexity)]
+fn render_resources_node_system<T: RenderResources, P: Send + Sync + 'static>(
     mut state: Local<RenderResourcesNodeState<Entity, T>>,
     mut entities_waiting_for_textures: Local<Vec<Entity>>,
     render_resource_context: Res<Box<dyn RenderResourceContext>>,
     removed: RemovedComponents<T>,
     mut queries: QuerySet<(
-        Query<(Entity, &T, &Visible, &mut RenderPipelines), Or<(Changed<T>, Changed<Visible>)>>,
-        Query<(Entity, &T, &Visible, &mut RenderPipelines)>,
+        Query<(Entity, &T, &Visible, &mut RenderPipelines<P>), Or<(Changed<T>, Changed<Visible>)>>,
+        Query<(Entity, &T, &Visible, &mut RenderPipelines<P>)>,
     )>,
 ) {
     let state = state.deref_mut();
@@ -540,16 +545,17 @@ fn render_resources_node_system<T: RenderResources>(
 }
 
 #[derive(Default)]
-pub struct AssetRenderResourcesNode<T>
+pub struct AssetRenderResourcesNode<T, P: Send + Sync + 'static>
 where
     T: renderer::RenderResources,
 {
     command_queue: CommandQueue,
     dynamic_uniforms: bool,
     _marker: PhantomData<T>,
+    _marker_p: PhantomData<P>,
 }
 
-impl<T> AssetRenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> AssetRenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
@@ -558,11 +564,12 @@ where
             dynamic_uniforms,
             command_queue: Default::default(),
             _marker: Default::default(),
+            _marker_p: Default::default(),
         }
     }
 }
 
-impl<T> Node for AssetRenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> Node for AssetRenderResourcesNode<T, P>
 where
     T: renderer::RenderResources,
 {
@@ -577,12 +584,12 @@ where
     }
 }
 
-impl<T> SystemNode for AssetRenderResourcesNode<T>
+impl<T, P: Send + Sync + 'static> SystemNode for AssetRenderResourcesNode<T, P>
 where
     T: renderer::RenderResources + Asset,
 {
     fn get_system(&self) -> BoxedSystem {
-        let system = asset_render_resources_node_system::<T>
+        let system = asset_render_resources_node_system::<T, P>
             .system()
             .config(|config| {
                 config.0 = Some(RenderResourcesNodeState {
@@ -610,8 +617,8 @@ impl<T: Asset> Default for AssetRenderNodeState<T> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn asset_render_resources_node_system<T: RenderResources + Asset>(
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn asset_render_resources_node_system<T: RenderResources + Asset, P: Send + Sync + 'static>(
     mut state: Local<RenderResourcesNodeState<HandleId, T>>,
     mut asset_state: Local<AssetRenderNodeState<T>>,
     assets: Res<Assets<T>>,
@@ -620,8 +627,8 @@ fn asset_render_resources_node_system<T: RenderResources + Asset>(
     render_resource_context: Res<Box<dyn RenderResourceContext>>,
     removed_handles: RemovedComponents<Handle<T>>,
     mut queries: QuerySet<(
-        Query<(&Handle<T>, &mut RenderPipelines), Changed<Handle<T>>>,
-        Query<&mut RenderPipelines, With<Handle<T>>>,
+        Query<(&Handle<T>, &mut RenderPipelines<P>), Changed<Handle<T>>>,
+        Query<&mut RenderPipelines<P>, With<Handle<T>>>,
     )>,
 ) {
     let state = state.deref_mut();
@@ -807,4 +814,196 @@ where
     }
 
     success
+}
+
+#[derive(Debug, Default)]
+pub struct GlobalRenderResourcesNode<T>
+where
+    T: RenderResources,
+{
+    command_queue: CommandQueue,
+    marker: PhantomData<T>,
+}
+
+impl<T> GlobalRenderResourcesNode<T>
+where
+    T: RenderResources,
+{
+    pub fn new() -> Self {
+        Self {
+            command_queue: CommandQueue::default(),
+            marker: Default::default(),
+        }
+    }
+}
+
+impl<T> Node for GlobalRenderResourcesNode<T>
+where
+    T: RenderResources,
+{
+    fn update(
+        &mut self,
+        _world: &World,
+        render_context: &mut dyn RenderContext,
+        _input: &ResourceSlots,
+        _output: &mut ResourceSlots,
+    ) {
+        // dbg!();
+        self.command_queue.execute(render_context);
+    }
+}
+
+impl<T> SystemNode for GlobalRenderResourcesNode<T>
+where
+    T: renderer::RenderResources,
+{
+    fn get_system(&self) -> BoxedSystem {
+        let system = global_render_resources_node_system::<T>
+            .system()
+            .config(|config| {
+                config.0 = Some(GlobalRenderResourcesNodeState {
+                    command_queue: self.command_queue.clone(),
+                    ..Default::default()
+                })
+            });
+
+        Box::new(system)
+    }
+}
+
+struct GlobalRenderResourcesNodeState<T: RenderResources> {
+    command_queue: CommandQueue,
+    staging_buffer: Option<BufferId>,
+    target_buffer: Option<BufferId>,
+    _marker: PhantomData<T>,
+}
+
+impl<T: RenderResources> Default for GlobalRenderResourcesNodeState<T> {
+    fn default() -> Self {
+        Self {
+            command_queue: Default::default(),
+            staging_buffer: None,
+            target_buffer: None,
+            _marker: Default::default(),
+        }
+    }
+}
+
+fn global_render_resources_node_system<T: RenderResources>(
+    mut state: Local<GlobalRenderResourcesNodeState<T>>,
+    render_resources: Res<T>,
+    render_resource_context: Res<Box<dyn RenderResourceContext>>,
+    mut render_resource_bindings: ResMut<RenderResourceBindings>,
+) {
+    // TODO add support for textures
+    // No need to do anything if no changes
+    if render_resources.is_changed() {
+        // Precalculate the aligned size of the whole render resources buffer
+        let aligned_size = render_resources
+            .iter()
+            .fold(0, |aligned_size, render_resource| {
+                aligned_size
+                    + render_resource_context
+                        .get_aligned_uniform_size(render_resource.buffer_byte_len().unwrap(), false)
+            });
+
+        // Get old buffer and possibly resize
+        let staging_buffer = match state.staging_buffer {
+            Some(staging_buffer) => {
+                if render_resource_context
+                    .get_buffer_info(staging_buffer)
+                    .unwrap()
+                    .size
+                    != aligned_size
+                {
+                    render_resource_context.remove_buffer(staging_buffer);
+                    render_resource_context.create_buffer(BufferInfo {
+                        size: aligned_size,
+                        buffer_usage: BufferUsage::COPY_SRC | BufferUsage::MAP_WRITE,
+                        mapped_at_creation: true,
+                    })
+                } else {
+                    staging_buffer
+                }
+            }
+            None => {
+                // Or create a new one
+                render_resource_context.create_buffer(BufferInfo {
+                    size: aligned_size,
+                    buffer_usage: BufferUsage::COPY_SRC | BufferUsage::MAP_WRITE,
+                    mapped_at_creation: true,
+                })
+            }
+        };
+
+        // Get old buffer and possibly resize
+        let target_buffer = if let Some(target_buffer) = state.target_buffer {
+            if render_resource_context
+                .get_buffer_info(target_buffer)
+                .unwrap()
+                .size
+                != aligned_size
+            {
+                render_resource_context.remove_buffer(target_buffer);
+                render_resource_context.create_buffer(BufferInfo {
+                    size: aligned_size,
+                    buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+                    mapped_at_creation: false,
+                })
+            } else {
+                target_buffer
+            }
+        } else {
+            // Or create a new one
+            render_resource_context.create_buffer(BufferInfo {
+                size: aligned_size,
+                buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+                mapped_at_creation: false,
+            })
+        };
+
+        // Write the resources into the staging buffer
+        let mut offset = 0u64;
+        for (index, render_resource) in render_resources.iter().enumerate() {
+            let render_resource_name = render_resources.get_render_resource_name(index).unwrap();
+            // dbg!(&render_resource_name);
+
+            let size = render_resource.buffer_byte_len().unwrap();
+            let aligned_size = render_resource_context.get_aligned_uniform_size(size, false) as u64;
+
+            render_resource_context.write_mapped_buffer(
+                staging_buffer,
+                offset..(offset + aligned_size),
+                &mut |mut buf, _render_resource_context| {
+                    render_resource.write_buffer_bytes(buf);
+
+                    // add padding
+                    for _ in 0..(aligned_size - size as u64) {
+                        buf.write_all(&[0]).unwrap();
+                    }
+                },
+            );
+
+            render_resource_bindings.set(
+                render_resource_name,
+                RenderResourceBinding::Buffer {
+                    buffer: target_buffer,
+                    range: offset..(offset + aligned_size),
+                    dynamic_index: None,
+                },
+            );
+
+            offset += aligned_size;
+        }
+
+        render_resource_context.unmap_buffer(staging_buffer);
+
+        state.command_queue.copy_buffer_to_buffer(
+            staging_buffer,
+            0,
+            target_buffer,
+            0,
+            aligned_size as u64,
+        );
+    }
 }

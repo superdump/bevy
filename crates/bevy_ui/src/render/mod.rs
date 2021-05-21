@@ -1,12 +1,11 @@
-use crate::Node;
+use crate::{entity::UiPass, Node};
 use bevy_asset::{Assets, HandleUntyped};
 use bevy_ecs::world::World;
 use bevy_reflect::TypeUuid;
 use bevy_render::{
     camera::ActiveCameras,
     pass::{
-        LoadOp, Operations, PassDescriptor, RenderPassDepthStencilAttachmentDescriptor,
-        TextureAttachment,
+        LoadOp, Operations, PassDescriptor, RenderPassDepthStencilAttachment, TextureAttachment,
     },
     pipeline::*,
     prelude::Msaa,
@@ -38,20 +37,21 @@ pub fn build_ui_pipeline(shaders: &mut Assets<Shader>) -> PipelineDescriptor {
                 slope_scale: 0.0,
                 clamp: 0.0,
             },
-            clamp_depth: false,
         }),
         color_target_states: vec![ColorTargetState {
             format: TextureFormat::default(),
-            color_blend: BlendState {
-                src_factor: BlendFactor::SrcAlpha,
-                dst_factor: BlendFactor::OneMinusSrcAlpha,
-                operation: BlendOperation::Add,
-            },
-            alpha_blend: BlendState {
-                src_factor: BlendFactor::One,
-                dst_factor: BlendFactor::One,
-                operation: BlendOperation::Add,
-            },
+            blend: Some(BlendState {
+                color: BlendComponent {
+                    src_factor: BlendFactor::SrcAlpha,
+                    dst_factor: BlendFactor::OneMinusSrcAlpha,
+                    operation: BlendOperation::Add,
+                },
+                alpha: BlendComponent {
+                    src_factor: BlendFactor::One,
+                    dst_factor: BlendFactor::One,
+                    operation: BlendOperation::Add,
+                },
+            }),
             write_mask: ColorWrite::ALL,
         }],
         ..PipelineDescriptor::new(ShaderStages {
@@ -89,8 +89,8 @@ pub(crate) fn add_ui_graph(world: &mut World) {
 
     pipelines.set_untracked(UI_PIPELINE_HANDLE, build_ui_pipeline(&mut shaders));
 
-    let mut ui_pass_node = PassNode::<&Node>::new(PassDescriptor {
-        color_attachments: vec![msaa.color_attachment_descriptor(
+    let mut ui_pass_node = PassNode::<UiPass, &Node>::new(PassDescriptor {
+        color_attachments: vec![msaa.color_attachment(
             TextureAttachment::Input("color_attachment".to_string()),
             TextureAttachment::Input("color_resolve_target".to_string()),
             Operations {
@@ -98,7 +98,7 @@ pub(crate) fn add_ui_graph(world: &mut World) {
                 store: true,
             },
         )],
-        depth_stencil_attachment: Some(RenderPassDepthStencilAttachmentDescriptor {
+        depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
             attachment: TextureAttachment::Input("depth".to_string()),
             depth_ops: Some(Operations {
                 load: LoadOp::Clear(1.0),
@@ -153,7 +153,7 @@ pub(crate) fn add_ui_graph(world: &mut World) {
     // setup ui camera
     graph.add_system_node(node::CAMERA_UI, CameraNode::new(camera::CAMERA_UI));
     graph.add_node_edge(node::CAMERA_UI, node::UI_PASS).unwrap();
-    graph.add_system_node(node::NODE, RenderResourcesNode::<Node>::new(true));
+    graph.add_system_node(node::NODE, RenderResourcesNode::<Node, UiPass>::new(true));
     graph.add_node_edge(node::NODE, node::UI_PASS).unwrap();
     active_cameras.add(camera::CAMERA_UI);
 }

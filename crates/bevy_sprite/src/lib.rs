@@ -11,6 +11,7 @@ mod texture_atlas;
 mod texture_atlas_builder;
 
 pub mod prelude {
+    #[doc(hidden)]
     pub use crate::{
         entity::{SpriteBundle, SpriteSheetBundle},
         ColorMaterial, Sprite, SpriteResizeMode, TextureAtlas, TextureAtlasSprite,
@@ -37,7 +38,7 @@ use bevy_render::{
     draw::OutsideFrustum,
     mesh::{shape, Mesh},
     pipeline::PipelineDescriptor,
-    render_graph::RenderGraph,
+    render_graph::{base::MainPass, RenderGraph},
     shader::{asset_shader_defs_system, Shader},
 };
 use sprite::sprite_system;
@@ -78,7 +79,7 @@ impl Plugin for SpritePlugin {
             )
             .add_system_to_stage(
                 CoreStage::PostUpdate,
-                asset_shader_defs_system::<ColorMaterial>.system(),
+                asset_shader_defs_system::<ColorMaterial, MainPass>.system(),
             );
 
         let sprite_settings = app

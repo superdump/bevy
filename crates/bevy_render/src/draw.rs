@@ -14,7 +14,7 @@ use bevy_ecs::{
     system::{Query, Res, ResMut, SystemParam},
 };
 use bevy_reflect::Reflect;
-use std::{ops::Range, sync::Arc};
+use std::{marker::PhantomData, ops::Range, sync::Arc};
 use thiserror::Error;
 
 /// A queued command for the renderer
@@ -80,20 +80,23 @@ pub struct OutsideFrustum;
 /// A component that indicates how to draw an entity.
 #[derive(Debug, Clone, Reflect)]
 #[reflect(Component)]
-pub struct Draw {
+pub struct Draw<P: Send + Sync + 'static> {
     #[reflect(ignore)]
     pub render_commands: Vec<RenderCommand>,
+    #[reflect(ignore)]
+    pub marker: PhantomData<P>,
 }
 
-impl Default for Draw {
+impl<P: Send + Sync + 'static> Default for Draw<P> {
     fn default() -> Self {
         Self {
             render_commands: Default::default(),
+            marker: Default::default(),
         }
     }
 }
 
-impl Draw {
+impl<P: Send + Sync + 'static> Draw<P> {
     pub fn clear_render_commands(&mut self) {
         self.render_commands.clear();
     }
@@ -185,9 +188,9 @@ impl<'a> DrawContext<'a> {
             .ok_or(DrawError::BufferAllocationFailure)
     }
 
-    pub fn set_pipeline(
+    pub fn set_pipeline<P: Send + Sync + 'static>(
         &mut self,
-        draw: &mut Draw,
+        draw: &mut Draw<P>,
         pipeline_handle: &Handle<PipelineDescriptor>,
         specialization: &PipelineSpecialization,
     ) -> Result<(), DrawError> {
@@ -226,9 +229,9 @@ impl<'a> DrawContext<'a> {
         })
     }
 
-    pub fn set_asset_bind_groups<T: Asset>(
+    pub fn set_asset_bind_groups<T: Asset, P: Send + Sync + 'static>(
         &mut self,
-        draw: &mut Draw,
+        draw: &mut Draw<P>,
         asset_handle: &Handle<T>,
     ) -> Result<(), DrawError> {
         if let Some(asset_bindings) = self
@@ -248,9 +251,9 @@ impl<'a> DrawContext<'a> {
         }
     }
 
-    pub fn set_bind_groups_from_bindings(
+    pub fn set_bind_groups_from_bindings<P: Send + Sync + 'static>(
         &mut self,
-        draw: &mut Draw,
+        draw: &mut Draw<P>,
         render_resource_bindings: &mut [&mut RenderResourceBindings],
     ) -> Result<(), DrawError> {
         Self::set_bind_groups_from_bindings_internal(
@@ -263,12 +266,12 @@ impl<'a> DrawContext<'a> {
         )
     }
 
-    fn set_bind_groups_from_bindings_internal(
+    fn set_bind_groups_from_bindings_internal<P: Send + Sync + 'static>(
         current_pipeline: &Option<Handle<PipelineDescriptor>>,
         pipelines: &Assets<PipelineDescriptor>,
         render_resource_context: &dyn RenderResourceContext,
         mut asset_render_resource_bindings: Option<&mut AssetRenderResourceBindings>,
-        draw: &mut Draw,
+        draw: &mut Draw<P>,
         render_resource_bindings: &mut [&mut RenderResourceBindings],
     ) -> Result<(), DrawError> {
         let pipeline = current_pipeline.as_ref().ok_or(DrawError::NoPipelineSet)?;
@@ -341,9 +344,9 @@ impl<'a> DrawContext<'a> {
         Ok(())
     }
 
-    pub fn set_vertex_buffers_from_bindings(
+    pub fn set_vertex_buffers_from_bindings<P: Send + Sync + 'static>(
         &self,
-        draw: &mut Draw,
+        draw: &mut Draw<P>,
         render_resource_bindings: &[&RenderResourceBindings],
     ) -> Result<(), DrawError> {
         for bindings in render_resource_bindings.iter() {
@@ -358,11 +361,11 @@ impl<'a> DrawContext<'a> {
     }
 }
 
-pub trait Drawable {
-    fn draw(&mut self, draw: &mut Draw, context: &mut DrawContext) -> Result<(), DrawError>;
+pub trait Drawable<P: Send + Sync + 'static> {
+    fn draw(&mut self, draw: &mut Draw<P>, context: &mut DrawContext) -> Result<(), DrawError>;
 }
 
-pub fn clear_draw_system(mut query: Query<&mut Draw>) {
+pub fn clear_draw_system<P: Send + Sync + 'static>(mut query: Query<&mut Draw<P>>) {
     for mut draw in query.iter_mut() {
         draw.clear_render_commands();
     }
