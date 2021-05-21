@@ -244,7 +244,8 @@ fn setup(
 
     // set_up_scene(&mut commands, &mut meshes, &pipeline_handle);
     // set_up_quad_scene(&mut commands, &mut meshes, &pipeline_handle);
-    let scene_handle: Handle<Scene> = asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0");
+    let scene_handle: Handle<Scene> =
+        asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0");
     commands.insert_resource(SceneHandles {
         scene: Some(scene_handle),
         pipeline: Some(pipeline_handle),
@@ -262,7 +263,7 @@ fn setup(
             ..Default::default()
         })
         .insert(FlyCamera::default());
-        // .insert(Rotates);
+    // .insert(Rotates);
     commands
         .spawn_bundle(PointLightBundle {
             transform: Transform::from_xyz(3.0, 5.0, 3.0),
@@ -281,10 +282,14 @@ fn scene_loaded(
     }
     if let Some(scene) = scenes.get_mut(scene_handles.scene.as_ref().unwrap()) {
         let pipeline_handle = scene_handles.pipeline.as_ref().unwrap();
-        let scale = 0.01;
+        let scale = 1.0;
         commands
             .spawn_bundle((
-                Transform::from_scale(Vec3::new(scale, scale, scale)),
+                Transform::from_matrix(Mat4::from_scale_rotation_translation(
+                    Vec3::new(scale, scale, scale),
+                    Quat::IDENTITY,
+                    Vec3::new(0.0, 1.0, 0.0),
+                )),
                 GlobalTransform::default(),
             ))
             .with_children(|child_builder| {
