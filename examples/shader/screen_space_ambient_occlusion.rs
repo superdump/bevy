@@ -34,6 +34,7 @@ use bevy::{
     scene::ScenePlugin,
     window::{WindowId, WindowPlugin},
 };
+use bevy_fly_camera::{FlyCamera, FlyCameraPlugin};
 
 mod node {
     // Resource bindings
@@ -105,7 +106,9 @@ fn main() {
 
     app.add_plugin(bevy::wgpu::WgpuPlugin::default());
 
-    app.add_startup_system(update_camera_inverse_projection.system())
+    app.add_plugin(FlyCameraPlugin)
+        .add_system(toggle_fly_camera.system())
+        .add_startup_system(update_camera_inverse_projection.system())
         .add_startup_system(setup.system().label("setup"))
         .add_system_to_stage(
             CoreStage::PostUpdate,
@@ -122,12 +125,21 @@ fn main() {
         .run();
 }
 
+fn toggle_fly_camera(keyboard_input: Res<Input<KeyCode>>, mut fly_camera: Query<&mut FlyCamera>) {
+    if keyboard_input.just_pressed(KeyCode::C) {
+        for mut fc in fly_camera.iter_mut() {
+            fc.enabled = !fc.enabled;
+        }
+    }
+}
+
 fn debug_render_graph(render_graph: Res<RenderGraph>) {
     let dot = bevy_mod_debugdump::render_graph::render_graph_dot(&*render_graph);
     let mut file = File::create("render_graph.dot").unwrap();
     write!(file, "{}", dot).unwrap();
     println!("*** Updated render_graph.dot");
 }
+
 #[derive(Debug, RenderResources)]
 pub struct CameraInvProj {
     pub inverse_projection: Mat4,
@@ -232,7 +244,8 @@ fn setup(
             transform: Transform::from_xyz(0.0, 1.7, 2.0)
                 .looking_at(Vec3::new(0.0, 1.7, 0.0), Vec3::Y),
             ..Default::default()
-        });
+        })
+        .insert(FlyCamera::default());
         // .insert(Rotates);
     commands
         .spawn_bundle(PointLightBundle {
