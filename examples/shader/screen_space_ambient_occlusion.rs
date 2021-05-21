@@ -220,6 +220,34 @@ fn setup(
 
     let pipeline_handle = pipelines.add(pipeline_descriptor);
 
+    // set_up_scene(&mut commands, &mut meshes, &pipeline_handle);
+    set_up_quad_scene(&mut commands, &mut meshes, &pipeline_handle);
+
+    commands
+        .spawn_bundle(PerspectiveCameraBundle {
+            perspective_projection: PerspectiveProjection {
+                near: 0.1,
+                ..Default::default()
+            },
+            transform: Transform::from_xyz(0.0, 1.7, 2.0)
+                .looking_at(Vec3::new(0.0, 1.7, 0.0), Vec3::Y),
+            ..Default::default()
+        });
+        // .insert(Rotates);
+    commands
+        .spawn_bundle(PointLightBundle {
+            transform: Transform::from_xyz(3.0, 5.0, 3.0),
+            ..Default::default()
+        })
+        .insert(Rotates);
+}
+
+
+fn set_up_scene(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    pipeline_handle: &Handle<PipelineDescriptor>,
+) {
     let cube_handle = meshes.add(shape::Cube { size: 1.0 }.into());
     let sphere_handle = meshes.add(
         shape::Icosphere {
@@ -260,22 +288,67 @@ fn setup(
         transform: Transform::from_xyz(0.0, 0.0, 0.0),
         mesh: sphere_handle,
         render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle,
+            pipeline_handle.clone(),
         )]),
-        // material: materials.add(Color::YELLOW.into()),
         ..Default::default()
     });
-    commands
-        .spawn_bundle(PerspectiveCameraBundle {
-            transform: Transform::from_xyz(2.0, 2.0, 2.0)
-                .looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
-            ..Default::default()
-        })
-        .insert(Rotates);
-    commands
-        .spawn_bundle(PointLightBundle {
-            transform: Transform::from_xyz(3.0, 5.0, 3.0),
-            ..Default::default()
+}
+
+fn set_up_quad_scene(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    pipeline_handle: &Handle<PipelineDescriptor>,
+) {
+    let quad_handle = meshes.add(
+        shape::Quad {
+            size: Vec2::splat(2.0),
+            flip: false,
+        }
+        .into(),
+    );
+
+    commands.spawn_bundle(MeshBundle {
+        mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
+            pipeline_handle.clone(),
+        )]),
+        transform: Transform::from_matrix(Mat4::from_scale_rotation_translation(
+            Vec3::new(0.5, 0.5, 0.1),
+            Quat::IDENTITY,
+            Vec3::new(0.0, 2.0, 0.0),
+        )),
+        ..Default::default()
+    });
+    commands.spawn_bundle(MeshBundle {
+        mesh: quad_handle.clone(),
+        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
+            pipeline_handle.clone(),
+        )]),
+        transform: Transform::from_matrix(Mat4::from_rotation_translation(
+            Quat::from_rotation_y(90.0f32.to_radians()),
+            Vec3::new(-1.0, 2.0, 0.0),
+        )),
+        ..Default::default()
+    });
+    commands.spawn_bundle(MeshBundle {
+        mesh: quad_handle.clone(),
+        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
+            pipeline_handle.clone(),
+        )]),
+        transform: Transform::from_matrix(Mat4::from_rotation_translation(
+            Quat::from_rotation_y(-90.0f32.to_radians()),
+            Vec3::new(1.0, 2.0, 0.0),
+        )),
+        ..Default::default()
+    });
+    commands.spawn_bundle(MeshBundle {
+        mesh: quad_handle.clone(),
+        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
+            pipeline_handle.clone(),
+        )]),
+        transform: Transform::from_xyz(0.0, 2.0, -1.0),
+        ..Default::default()
+    });
 }
 
 fn setup_render_graph(
