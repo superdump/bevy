@@ -58,6 +58,13 @@ mod node {
     pub const SSAO_B_TEXTURE: &str = "ssao_b_texture";
 }
 
+#[derive(Debug, Default)]
+struct SceneHandles {
+    scene: Option<Handle<Scene>>,
+    pipeline: Option<Handle<PipelineDescriptor>>,
+    loaded: bool,
+}
+
 fn main() {
     env_logger::init();
 
@@ -106,7 +113,9 @@ fn main() {
 
     app.add_plugin(bevy::wgpu::WgpuPlugin::default());
 
-    app.add_plugin(FlyCameraPlugin)
+    app.add_asset::<StandardMaterial>()
+        .insert_resource(SceneHandles::default())
+        .add_plugin(FlyCameraPlugin)
         .add_system(toggle_fly_camera.system())
         .add_startup_system(update_camera_inverse_projection.system())
         .add_startup_system(setup.system().label("setup"))
@@ -122,6 +131,7 @@ fn main() {
                 .after("setup"),
         )
         .add_system(exit_on_esc_system.system())
+        .add_system(scene_loaded.system())
         .run();
 }
 
@@ -233,7 +243,13 @@ fn setup(
     let pipeline_handle = pipelines.add(pipeline_descriptor);
 
     // set_up_scene(&mut commands, &mut meshes, &pipeline_handle);
-    set_up_quad_scene(&mut commands, &mut meshes, &pipeline_handle);
+    // set_up_quad_scene(&mut commands, &mut meshes, &pipeline_handle);
+    let scene_handle: Handle<Scene> = asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0");
+    commands.insert_resource(SceneHandles {
+        scene: Some(scene_handle),
+        pipeline: Some(pipeline_handle),
+        loaded: false,
+    });
 
     commands
         .spawn_bundle(PerspectiveCameraBundle {
@@ -255,6 +271,39 @@ fn setup(
         .insert(Rotates);
 }
 
+fn scene_loaded(
+    mut commands: Commands,
+    mut scene_handles: ResMut<SceneHandles>,
+    mut scenes: ResMut<Assets<Scene>>,
+) {
+    if scene_handles.loaded || scene_handles.scene.is_none() || scene_handles.pipeline.is_none() {
+        return;
+    }
+    if let Some(scene) = scenes.get_mut(scene_handles.scene.as_ref().unwrap()) {
+        let pipeline_handle = scene_handles.pipeline.as_ref().unwrap();
+        let scale = 0.01;
+        commands
+            .spawn_bundle((
+                Transform::from_scale(Vec3::new(scale, scale, scale)),
+                GlobalTransform::default(),
+            ))
+            .with_children(|child_builder| {
+                let mut query = scene.world.query::<(&Handle<Mesh>, &Transform)>();
+                for (mesh, transform) in query.iter(&mut scene.world) {
+                    child_builder.spawn_bundle(MeshBundle {
+                        transform: transform.clone(),
+                        mesh: mesh.clone(),
+                        render_pipelines: RenderPipelines::from_pipelines(vec![
+                            RenderPipeline::new(pipeline_handle.clone()),
+                        ]),
+                        ..Default::default()
+                    });
+                }
+            });
+        println!("SCENE LOADED!");
+        scene_handles.loaded = true;
+    }
+}
 
 fn set_up_scene(
     commands: &mut Commands,
