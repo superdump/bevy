@@ -32,6 +32,7 @@ use bevy::{
         },
     },
     scene::ScenePlugin,
+    transform::TransformSystem,
     window::{WindowId, WindowPlugin},
 };
 use bevy_fly_camera::{FlyCamera, FlyCameraPlugin};
@@ -42,6 +43,7 @@ mod node {
     pub const WINDOW_TEXTURE_SIZE: &str = "WindowTextureSize";
     // Nodes
     pub const TRANSFORM: &str = "transform";
+    pub const MODEL_INV_TRANS_3: &str = "model_inv_trans_3";
     pub const DEPTH_NORMAL_PRE_PASS: &str = "depth_normal_pre_pass_node";
     pub const DEPTH_RENDER_PASS: &str = "depth_render_pass";
     pub const NORMAL_RENDER_PASS: &str = "normal_render_pass";
@@ -63,6 +65,11 @@ struct SceneHandles {
     scene: Option<Handle<Scene>>,
     pipeline: Option<Handle<PipelineDescriptor>>,
     loaded: bool,
+}
+
+#[derive(Debug, RenderResources)]
+struct ModelInvTrans3 {
+    pub model_inv_trans_3: Mat4,
 }
 
 fn main() {
@@ -132,7 +139,54 @@ fn main() {
         )
         .add_system(exit_on_esc_system.system())
         .add_system(scene_loaded.system())
+        .add_system_to_stage(
+            CoreStage::PostUpdate,
+            inverse_transpose_transform
+                .system()
+                .label(node::MODEL_INV_TRANS_3)
+                .after(TransformSystem::ParentUpdate)
+                .after(TransformSystem::TransformPropagate),
+        )
         .run();
+}
+
+fn inverse_transpose_transform(
+    mut commands: Commands,
+    mut queries: QuerySet<(
+        Query<(&GlobalTransform, &mut ModelInvTrans3), Changed<GlobalTransform>>,
+        Query<(Entity, &GlobalTransform), (With<Handle<Mesh>>, Without<ModelInvTrans3>)>,
+    )>,
+) {
+    for (transform, mut model_inv_trans_3) in queries.q0_mut().iter_mut() {
+        model_inv_trans_3.model_inv_trans_3 = inverse_transpose_3(transform);
+    }
+    for (entity, transform) in queries.q1().iter() {
+        commands.entity(entity).insert(ModelInvTrans3 {
+            model_inv_trans_3: inverse_transpose_3(transform),
+        });
+    }
+}
+
+fn inverse_transpose_3(transform: &GlobalTransform) -> Mat4 {
+    let model = transform.compute_matrix();
+    let temp = mat4_to_mat3(&model);
+    let inv_trans_3 = temp.inverse().transpose();
+    mat3_to_mat4(&inv_trans_3)
+}
+
+fn mat4_to_mat3(mat4: &Mat4) -> Mat3 {
+    let m = mat4.to_cols_array();
+    Mat3::from_cols_array_2d(&[[m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]])
+}
+
+fn mat3_to_mat4(mat3: &Mat3) -> Mat4 {
+    let m = mat3.to_cols_array();
+    Mat4::from_cols_array_2d(&[
+        [m[0], m[1], m[2], 0.0],
+        [m[3], m[4], m[5], 0.0],
+        [m[6], m[7], m[8], 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
 }
 
 fn toggle_fly_camera(keyboard_input: Res<Input<KeyCode>>, mut fly_camera: Query<&mut FlyCamera>) {
@@ -546,8 +600,15 @@ fn set_up_depth_normal_pre_pass(msaa: &Msaa, render_graph: &mut RenderGraph) {
         node::TRANSFORM,
         RenderResourcesNode::<GlobalTransform, MainPass>::new(true),
     );
+    render_graph.add_system_node(
+        node::MODEL_INV_TRANS_3,
+        RenderResourcesNode::<ModelInvTrans3, MainPass>::new(true),
+    );
     render_graph
         .add_node_edge(node::TRANSFORM, node::DEPTH_NORMAL_PRE_PASS)
+        .unwrap();
+    render_graph
+        .add_node_edge(node::MODEL_INV_TRANS_3, node::DEPTH_NORMAL_PRE_PASS)
         .unwrap();
 
     render_graph
