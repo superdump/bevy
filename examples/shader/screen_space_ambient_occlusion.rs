@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Write;
 
 use bevy::{
-    asset::AssetPlugin,
+    asset::{AssetPlugin, AssetServerSettings},
     core::CorePlugin,
     diagnostic::DiagnosticsPlugin,
     input::{system::exit_on_esc_system, InputPlugin},
@@ -91,14 +91,17 @@ fn main() {
             ..Default::default()
         });
 
-    app.add_plugin(LogPlugin::default())
-        .add_plugin(CorePlugin::default())
-        .add_plugin(TransformPlugin::default())
-        .add_plugin(DiagnosticsPlugin::default())
-        .add_plugin(InputPlugin::default())
-        .add_plugin(WindowPlugin::default())
-        .add_plugin(AssetPlugin::default())
-        .add_plugin(ScenePlugin::default());
+    app.insert_resource(AssetServerSettings {
+        asset_folder: format!("{}/assets", env!("CARGO_MANIFEST_DIR")).to_string(),
+    })
+    .add_plugin(LogPlugin::default())
+    .add_plugin(CorePlugin::default())
+    .add_plugin(TransformPlugin::default())
+    .add_plugin(DiagnosticsPlugin::default())
+    .add_plugin(InputPlugin::default())
+    .add_plugin(WindowPlugin::default())
+    .add_plugin(AssetPlugin::default())
+    .add_plugin(ScenePlugin::default());
 
     // cannot currently override config for a plugin as part of DefaultPlugins
     app.add_plugin(bevy::render::RenderPlugin {
