@@ -39,7 +39,6 @@ use bevy_fly_camera::{FlyCamera, FlyCameraPlugin};
 
 mod node {
     // Resource bindings
-    pub const CAMERA_INV_PROJ: &str = "CameraInvProj";
     pub const WINDOW_TEXTURE_SIZE: &str = "WindowTextureSize";
     // Nodes
     pub const TRANSFORM: &str = "transform";
@@ -124,12 +123,7 @@ fn main() {
         .insert_resource(SceneHandles::default())
         .add_plugin(FlyCameraPlugin)
         .add_system(toggle_fly_camera.system())
-        .add_startup_system(update_camera_inverse_projection.system())
         .add_startup_system(setup.system().label("setup"))
-        .add_system_to_stage(
-            CoreStage::PostUpdate,
-            update_camera_inverse_projection.system(),
-        )
         .add_system(rotator_system.system())
         .add_startup_system(
             debug_render_graph
@@ -204,33 +198,6 @@ fn debug_render_graph(render_graph: Res<RenderGraph>) {
     println!("*** Updated render_graph.dot");
 }
 
-#[derive(Debug, RenderResources)]
-pub struct CameraInvProj {
-    pub inverse_projection: Mat4,
-}
-
-fn update_camera_inverse_projection(
-    mut commands: Commands,
-    to_init: Query<(Entity, &Camera), (With<PerspectiveProjection>, Without<CameraInvProj>)>,
-    mut to_update: Query<
-        (&Camera, &mut CameraInvProj),
-        (With<PerspectiveProjection>, Changed<Camera>),
-    >,
-) {
-    for (entity, camera) in to_init.iter() {
-        // If the determinant is 0, then the matrix is not invertible
-        debug_assert!(camera.projection_matrix.determinant().abs() > 1e-5);
-        commands.entity(entity).insert(CameraInvProj {
-            inverse_projection: camera.projection_matrix.inverse(),
-        });
-    }
-    for (camera, mut camera_inverse_projection) in to_update.iter_mut() {
-        // If the determinant is 0, then the matrix is not invertible
-        debug_assert!(camera.projection_matrix.determinant().abs() > 1e-5);
-        camera_inverse_projection.inverse_projection = camera.projection_matrix.inverse();
-    }
-}
-
 fn setup(
     mut commands: Commands,
     mut render_graph: ResMut<RenderGraph>,
@@ -241,11 +208,6 @@ fn setup(
     msaa: Res<Msaa>,
     asset_server: Res<AssetServer>,
 ) {
-    // render_graph.add_system_node(
-    //     node::CAMERA_INV_PROJ,
-    //     RenderResourcesNode::<CameraInvProj>::new(true),
-    // );
-
     setup_render_graph(
         &mut *render_graph,
         &mut *pipelines,
