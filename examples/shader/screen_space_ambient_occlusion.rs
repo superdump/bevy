@@ -9,7 +9,7 @@ use bevy::{
     log::LogPlugin,
     prelude::{shape, *},
     render::{
-        camera::{Camera, PerspectiveProjection},
+        camera::PerspectiveProjection,
         pass::{
             LoadOp, Operations, PassDescriptor, RenderPassColorAttachment,
             RenderPassDepthStencilAttachment, TextureAttachment,
@@ -64,6 +64,7 @@ struct SceneHandles {
     scene: Option<Handle<Scene>>,
     pipeline: Option<Handle<PipelineDescriptor>>,
     loaded: bool,
+    scale: f32,
 }
 
 #[derive(Debug, RenderResources)]
@@ -267,6 +268,7 @@ fn setup(
         scene: Some(scene_handle),
         pipeline: Some(pipeline_handle),
         loaded: false,
+        scale: 1.0,
     });
 
     commands
@@ -299,7 +301,7 @@ fn scene_loaded(
     }
     if let Some(scene) = scenes.get_mut(scene_handles.scene.as_ref().unwrap()) {
         let pipeline_handle = scene_handles.pipeline.as_ref().unwrap();
-        let scale = 1.0;
+        let scale = scene_handles.scale;
         commands
             .spawn_bundle((
                 Transform::from_matrix(Mat4::from_scale_rotation_translation(
@@ -631,7 +633,7 @@ fn set_up_ssao_pass(
         }],
         ..PipelineDescriptor::new(ShaderStages {
             vertex: shaders.add(Shader::from_glsl(
-                ShaderStage::Vertex,                          // FIXME: Fix the shaders!
+                ShaderStage::Vertex,
                 fullscreen_pass_node::shaders::VERTEX_SHADER, // Provides v_Uv
             )),
             fragment: Some(asset_server.load::<Shader, _>("shaders/ssao.frag")),
