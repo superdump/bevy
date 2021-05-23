@@ -60,6 +60,7 @@ impl SystemNode for CameraNode {
 
 const CAMERA_VIEW_PROJ: &str = "CameraViewProj";
 const CAMERA_PROJ: &str = "CameraProj";
+const CAMERA_PROJ_INV: &str = "CameraProjInv";
 const CAMERA_VIEW: &str = "CameraView";
 const CAMERA_VIEW_INV_3: &str = "CameraViewInv3";
 const CAMERA_POSITION: &str = "CameraPosition";
@@ -103,6 +104,8 @@ pub fn camera_node_system(
                 MATRIX_SIZE +
                 // Projection
                 MATRIX_SIZE +
+                // Projection Inverse
+                MATRIX_SIZE +
                 // View
                 MATRIX_SIZE +
                 // View Inverse Mat3 but in Mat4
@@ -141,6 +144,22 @@ pub fn camera_node_system(
         });
         bindings.set(
             CAMERA_PROJ,
+            RenderResourceBinding::Buffer {
+                buffer,
+                range: 0..MATRIX_SIZE as u64,
+                dynamic_index: None,
+            },
+        );
+    }
+
+    if bindings.get(CAMERA_PROJ_INV).is_none() {
+        let buffer = render_resource_context.create_buffer(BufferInfo {
+            size: MATRIX_SIZE,
+            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+            ..Default::default()
+        });
+        bindings.set(
+            CAMERA_PROJ_INV,
             RenderResourceBinding::Buffer {
                 buffer,
                 range: 0..MATRIX_SIZE as u64,
@@ -203,14 +222,14 @@ pub fn camera_node_system(
     if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_VIEW) {
         render_resource_context.write_mapped_buffer(
             staging_buffer,
-            0..MATRIX_SIZE as u64,
+            offset..(offset + MATRIX_SIZE as u64),
             &mut |data, _renderer| {
                 data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&view));
             },
         );
         state.command_queue.copy_buffer_to_buffer(
             staging_buffer,
-            0,
+            offset,
             *buffer,
             0,
             MATRIX_SIZE as u64,
@@ -235,14 +254,14 @@ pub fn camera_node_system(
         ]);
         render_resource_context.write_mapped_buffer(
             staging_buffer,
-            0..MATRIX_SIZE as u64,
+            offset..(offset + MATRIX_SIZE as u64),
             &mut |data, _renderer| {
                 data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&view_inv_3_mat4));
             },
         );
         state.command_queue.copy_buffer_to_buffer(
             staging_buffer,
-            0,
+            offset,
             *buffer,
             0,
             MATRIX_SIZE as u64,
@@ -275,6 +294,24 @@ pub fn camera_node_system(
             offset..(offset + MATRIX_SIZE as u64),
             &mut |data, _renderer| {
                 data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&camera.projection_matrix));
+            },
+        );
+        state.command_queue.copy_buffer_to_buffer(
+            staging_buffer,
+            offset,
+            *buffer,
+            0,
+            MATRIX_SIZE as u64,
+        );
+        offset += MATRIX_SIZE as u64;
+    }
+
+    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_PROJ_INV) {
+        render_resource_context.write_mapped_buffer(
+            staging_buffer,
+            offset..(offset + MATRIX_SIZE as u64),
+            &mut |data, _renderer| {
+                data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&camera.projection_matrix.inverse()));
             },
         );
         state.command_queue.copy_buffer_to_buffer(
