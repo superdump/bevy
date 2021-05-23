@@ -1,6 +1,9 @@
 #version 450
 
-// FIXME: Move to a uniform!
+// FIXME: Make these into uniforms
+const float RADIUS = 0.5;
+const float BIAS = 0.025;
+const int KERNEL_SIZE = 32;
 const float kernel[32][3] = // precalculated hemisphere kernel (low discrepancy noiser)
     {
         { -0.668154f, -0.084296f, 0.219458f },
@@ -55,18 +58,6 @@ layout(set = 0, binding = 3) uniform sampler normal_texture_sampler;
 // layout(set = 2, binding = 4) uniform texture2D noise_texture;
 // layout(set = 2, binding = 5) uniform sampler noise_texture_sampler;
 
-// FIXME: Make these into uniforms
-const float RADIUS = 0.5;
-const float BIAS = 0.025;
-const int KERNEL_SIZE = 32;
-
-// From Matt Pettineo's article: https://mynameismjp.wordpress.com/2010/09/05/position-from-depth-3/
-// but I derived my own method
-// const float NearClipDistance = 1.0;
-// const float FarClipDistance = 1000.0;
-// const float ProjectionA = FarClipDistance / (FarClipDistance - NearClipDistance);
-// const float ProjectionB = (-FarClipDistance * NearClipDistance) / (FarClipDistance - NearClipDistance);
-
 float rand(vec2 co) {
     return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
 }
@@ -102,9 +93,9 @@ void main() {
     vec4 frag_view = InvProj * vec4(v_Uv.x * 2.0 - 1.0, 1.0 - 2.0 * v_Uv.y, frag_depth_ndc, 1.0);
     frag_view.xyz = frag_view.xyz / frag_view.w;
     vec3 normal_view = (texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).xyz - 0.5) * 2.0;
-    vec3 randomVec = normalize(vec3(rand(v_Uv) * 2.0 - 1.0, rand(v_Uv + 1.0) * 2.0 - 1.0, 0.0));
     // TODO: Bind a 4x4 noise texture
     // vec3 randomVec = texture(sampler2D(noise_texture, noise_texture_sampler), v_Uv * noiseScale).xyz;
+    vec3 randomVec = normalize(vec3(rand(v_Uv) * 2.0 - 1.0, rand(v_Uv + 1.0) * 2.0 - 1.0, 0.0));
 
     vec3 tangent = normalize(randomVec - normal_view * dot(randomVec, normal_view));
     vec3 bitangent = cross(normal_view, tangent);
