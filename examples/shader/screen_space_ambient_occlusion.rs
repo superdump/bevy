@@ -22,7 +22,7 @@ use bevy::{
             RenderPipeline, StencilFaceState, StencilState,
         },
         render_graph::{
-            base::{self, camera, BaseRenderGraphConfig},
+            base::{self, camera, BaseRenderGraphConfig, MainPass},
             fullscreen_pass_node, FullscreenPassNode, PassNode, RenderGraph, RenderResourcesNode,
             WindowSwapChainNode, WindowTextureNode,
         },
@@ -351,11 +351,11 @@ fn scene_loaded(
         return;
     }
     if let Some(scene_handle) = scene_handles.scene.as_ref() {
-        if let Some(scene) = scenes.get_mut(scene_handles.scene.as_ref().unwrap()) {
-            let mut query = scene.world.query::<(Entity, &Handle<Mesh>)>();
+        if let Some(scene) = scenes.get_mut(scene_handle) {
+            let mut query = scene.world.query::<(Entity, &MainPass)>();
             let entities = query
-                .iter(&mut scene.world)
-                .map(|(entity, _mesh_handle)| entity)
+                .iter(&scene.world)
+                .map(|(entity, _main_pass)| entity)
                 .collect::<Vec<_>>();
             for entity in entities {
                 scene
@@ -363,22 +363,22 @@ fn scene_loaded(
                     .entity_mut(entity)
                     .insert_bundle(DepthNormalBundle::default());
             }
+            let scale = scene_handles.scale;
+            commands
+                .spawn_bundle((
+                    Transform::from_matrix(Mat4::from_scale_rotation_translation(
+                        Vec3::new(scale, scale, scale),
+                        Quat::IDENTITY,
+                        Vec3::new(0.0, 1.0, 0.0),
+                    )),
+                    GlobalTransform::default(),
+                ))
+                .with_children(|child_builder| {
+                    child_builder.spawn_scene(scene_handle.clone());
+                });
+            println!("SCENE LOADED!");
+            scene_handles.loaded = true;
         }
-        let scale = scene_handles.scale;
-        commands
-            .spawn_bundle((
-                Transform::from_matrix(Mat4::from_scale_rotation_translation(
-                    Vec3::new(scale, scale, scale),
-                    Quat::IDENTITY,
-                    Vec3::new(0.0, 1.0, 0.0),
-                )),
-                GlobalTransform::default(),
-            ))
-            .with_children(|child_builder| {
-                child_builder.spawn_scene(scene_handle.clone());
-            });
-        println!("SCENE LOADED!");
-        scene_handles.loaded = true;
     }
 }
 
