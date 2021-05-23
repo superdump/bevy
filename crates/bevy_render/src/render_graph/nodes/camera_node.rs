@@ -58,17 +58,17 @@ impl SystemNode for CameraNode {
     }
 }
 
-const CAMERA_VIEW_PROJ: &str = "CameraViewProj";
-const CAMERA_PROJ: &str = "CameraProj";
 const CAMERA_PROJ_INV: &str = "CameraProjInv";
-const CAMERA_VIEW: &str = "CameraView";
+const CAMERA_PROJ: &str = "CameraProj";
 const CAMERA_VIEW_INV_3: &str = "CameraViewInv3";
+const CAMERA_VIEW_PROJ: &str = "CameraViewProj";
+const CAMERA_VIEW: &str = "CameraView";
 const CAMERA_MATRICES: [&str; 5] = [
-    CAMERA_VIEW_PROJ,
-    CAMERA_PROJ,
     CAMERA_PROJ_INV,
-    CAMERA_VIEW,
+    CAMERA_PROJ,
     CAMERA_VIEW_INV_3,
+    CAMERA_VIEW_PROJ,
+    CAMERA_VIEW,
 ];
 const CAMERA_POSITION: &str = "CameraPosition";
 
@@ -136,14 +136,10 @@ pub fn camera_node_system(
     let view = global_transform.compute_matrix();
     // NOTE: These MUST be in the same order as CAMERA_MATRICES
     let matrices = [
-        // CAMERA_VIEW_PROJ
-        camera.projection_matrix * view.inverse(),
-        // CAMERA_PROJ
-        camera.projection_matrix,
         // CAMERA_PROJ_INV
         camera.projection_matrix.inverse(),
-        // CAMERA_VIEW
-        view,
+        // CAMERA_PROJ
+        camera.projection_matrix,
         // CAMERA_VIEW_INV_3
         {
             let v = view.to_cols_array();
@@ -161,6 +157,10 @@ pub fn camera_node_system(
                 [0.0, 0.0, 0.0, 1.0],
             ])
         },
+        // CAMERA_VIEW_PROJ
+        camera.projection_matrix * view.inverse(),
+        // CAMERA_VIEW
+        view,
     ];
     let mut offset = 0;
     for (matrix_name, matrix) in CAMERA_MATRICES.iter().zip(matrices.iter()) {
