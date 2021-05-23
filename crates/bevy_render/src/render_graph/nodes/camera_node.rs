@@ -63,6 +63,13 @@ const CAMERA_PROJ: &str = "CameraProj";
 const CAMERA_PROJ_INV: &str = "CameraProjInv";
 const CAMERA_VIEW: &str = "CameraView";
 const CAMERA_VIEW_INV_3: &str = "CameraViewInv3";
+const CAMERA_MATRICES: [&str; 5] = [
+    CAMERA_VIEW_PROJ,
+    CAMERA_PROJ,
+    CAMERA_PROJ_INV,
+    CAMERA_VIEW,
+    CAMERA_VIEW_INV_3,
+];
 const CAMERA_POSITION: &str = "CameraPosition";
 
 #[derive(Debug, Default)]
@@ -99,19 +106,7 @@ pub fn camera_node_system(
         staging_buffer
     } else {
         let staging_buffer = render_resource_context.create_buffer(BufferInfo {
-            size:
-                // ViewProj
-                MATRIX_SIZE +
-                // Projection
-                MATRIX_SIZE +
-                // Projection Inverse
-                MATRIX_SIZE +
-                // View
-                MATRIX_SIZE +
-                // View Inverse Mat3 but in Mat4
-                MATRIX_SIZE +
-                // Position
-                VEC4_SIZE,
+            size: MATRIX_SIZE * CAMERA_MATRICES.len() + VEC4_SIZE,
             buffer_usage: BufferUsage::COPY_SRC | BufferUsage::MAP_WRITE,
             mapped_at_creation: true,
         });
@@ -120,208 +115,72 @@ pub fn camera_node_system(
         staging_buffer
     };
 
-    if bindings.get(CAMERA_VIEW_PROJ).is_none() {
-        let buffer = render_resource_context.create_buffer(BufferInfo {
-            size: MATRIX_SIZE,
-            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
-            ..Default::default()
-        });
-        bindings.set(
-            CAMERA_VIEW_PROJ,
-            RenderResourceBinding::Buffer {
-                buffer,
-                range: 0..MATRIX_SIZE as u64,
-                dynamic_index: None,
-            },
-        );
-    }
-
-    if bindings.get(CAMERA_PROJ).is_none() {
-        let buffer = render_resource_context.create_buffer(BufferInfo {
-            size: MATRIX_SIZE,
-            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
-            ..Default::default()
-        });
-        bindings.set(
-            CAMERA_PROJ,
-            RenderResourceBinding::Buffer {
-                buffer,
-                range: 0..MATRIX_SIZE as u64,
-                dynamic_index: None,
-            },
-        );
-    }
-
-    if bindings.get(CAMERA_PROJ_INV).is_none() {
-        let buffer = render_resource_context.create_buffer(BufferInfo {
-            size: MATRIX_SIZE,
-            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
-            ..Default::default()
-        });
-        bindings.set(
-            CAMERA_PROJ_INV,
-            RenderResourceBinding::Buffer {
-                buffer,
-                range: 0..MATRIX_SIZE as u64,
-                dynamic_index: None,
-            },
-        );
-    }
-
-    if bindings.get(CAMERA_VIEW).is_none() {
-        let buffer = render_resource_context.create_buffer(BufferInfo {
-            size: MATRIX_SIZE,
-            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
-            ..Default::default()
-        });
-        bindings.set(
-            CAMERA_VIEW,
-            RenderResourceBinding::Buffer {
-                buffer,
-                range: 0..MATRIX_SIZE as u64,
-                dynamic_index: None,
-            },
-        );
-    }
-
-    if bindings.get(CAMERA_VIEW_INV_3).is_none() {
-        let buffer = render_resource_context.create_buffer(BufferInfo {
-            size: MATRIX_SIZE,
-            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
-            ..Default::default()
-        });
-        bindings.set(
-            CAMERA_VIEW_INV_3,
-            RenderResourceBinding::Buffer {
-                buffer,
-                range: 0..MATRIX_SIZE as u64,
-                dynamic_index: None,
-            },
-        );
-    }
-
-    if bindings.get(CAMERA_POSITION).is_none() {
-        let buffer = render_resource_context.create_buffer(BufferInfo {
-            size: VEC4_SIZE,
-            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
-            ..Default::default()
-        });
-        bindings.set(
-            CAMERA_POSITION,
-            RenderResourceBinding::Buffer {
-                buffer,
-                range: 0..VEC4_SIZE as u64,
-                dynamic_index: None,
-            },
-        );
+    for matrix_name in CAMERA_MATRICES {
+        if bindings.get(matrix_name).is_none() {
+            let buffer = render_resource_context.create_buffer(BufferInfo {
+                size: MATRIX_SIZE,
+                buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+                ..Default::default()
+            });
+            bindings.set(
+                matrix_name,
+                RenderResourceBinding::Buffer {
+                    buffer,
+                    range: 0..MATRIX_SIZE as u64,
+                    dynamic_index: None,
+                },
+            );
+        }
     }
 
     let view = global_transform.compute_matrix();
+    // NOTE: These MUST be in the same order as CAMERA_MATRICES
+    let matrices = [
+        // CAMERA_VIEW_PROJ
+        camera.projection_matrix * view.inverse(),
+        // CAMERA_PROJ
+        camera.projection_matrix,
+        // CAMERA_PROJ_INV
+        camera.projection_matrix.inverse(),
+        // CAMERA_VIEW
+        view,
+        // CAMERA_VIEW_INV_3
+        {
+            let v = view.to_cols_array();
+            let view_inv_3 = Mat3::from_cols_array_2d(&[
+                [v[0], v[1], v[2]],
+                [v[4], v[5], v[6]],
+                [v[8], v[9], v[10]],
+            ])
+            .inverse()
+            .to_cols_array();
+            Mat4::from_cols_array_2d(&[
+                [view_inv_3[0], view_inv_3[1], view_inv_3[2], 0.0],
+                [view_inv_3[3], view_inv_3[4], view_inv_3[5], 0.0],
+                [view_inv_3[6], view_inv_3[7], view_inv_3[8], 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ])
+        },
+    ];
     let mut offset = 0;
-
-    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_VIEW) {
-        render_resource_context.write_mapped_buffer(
-            staging_buffer,
-            offset..(offset + MATRIX_SIZE as u64),
-            &mut |data, _renderer| {
-                data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&view));
-            },
-        );
-        state.command_queue.copy_buffer_to_buffer(
-            staging_buffer,
-            offset,
-            *buffer,
-            0,
-            MATRIX_SIZE as u64,
-        );
-        offset += MATRIX_SIZE as u64;
-    }
-
-    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_VIEW_INV_3) {
-        let v = view.to_cols_array();
-        let view_inv_3 = Mat3::from_cols_array_2d(&[
-            [v[0], v[1], v[2]],
-            [v[4], v[5], v[6]],
-            [v[8], v[9], v[10]],
-        ])
-        .inverse()
-        .to_cols_array();
-        let view_inv_3_mat4 = Mat4::from_cols_array_2d(&[
-            [view_inv_3[0], view_inv_3[1], view_inv_3[2], 0.0],
-            [view_inv_3[3], view_inv_3[4], view_inv_3[5], 0.0],
-            [view_inv_3[6], view_inv_3[7], view_inv_3[8], 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ]);
-        render_resource_context.write_mapped_buffer(
-            staging_buffer,
-            offset..(offset + MATRIX_SIZE as u64),
-            &mut |data, _renderer| {
-                data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&view_inv_3_mat4));
-            },
-        );
-        state.command_queue.copy_buffer_to_buffer(
-            staging_buffer,
-            offset,
-            *buffer,
-            0,
-            MATRIX_SIZE as u64,
-        );
-        offset += MATRIX_SIZE as u64;
-    }
-
-    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_VIEW_PROJ) {
-        let view_proj = camera.projection_matrix * view.inverse();
-        render_resource_context.write_mapped_buffer(
-            staging_buffer,
-            offset..(offset + MATRIX_SIZE as u64),
-            &mut |data, _renderer| {
-                data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&view_proj));
-            },
-        );
-        state.command_queue.copy_buffer_to_buffer(
-            staging_buffer,
-            offset,
-            *buffer,
-            0,
-            MATRIX_SIZE as u64,
-        );
-        offset += MATRIX_SIZE as u64;
-    }
-
-    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_PROJ) {
-        render_resource_context.write_mapped_buffer(
-            staging_buffer,
-            offset..(offset + MATRIX_SIZE as u64),
-            &mut |data, _renderer| {
-                data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&camera.projection_matrix));
-            },
-        );
-        state.command_queue.copy_buffer_to_buffer(
-            staging_buffer,
-            offset,
-            *buffer,
-            0,
-            MATRIX_SIZE as u64,
-        );
-        offset += MATRIX_SIZE as u64;
-    }
-
-    if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_PROJ_INV) {
-        render_resource_context.write_mapped_buffer(
-            staging_buffer,
-            offset..(offset + MATRIX_SIZE as u64),
-            &mut |data, _renderer| {
-                data[0..MATRIX_SIZE].copy_from_slice(bytes_of(&camera.projection_matrix.inverse()));
-            },
-        );
-        state.command_queue.copy_buffer_to_buffer(
-            staging_buffer,
-            offset,
-            *buffer,
-            0,
-            MATRIX_SIZE as u64,
-        );
-        offset += MATRIX_SIZE as u64;
+    for (matrix_name, matrix) in CAMERA_MATRICES.iter().zip(matrices.iter()) {
+        if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(*matrix_name) {
+            render_resource_context.write_mapped_buffer(
+                staging_buffer,
+                offset..(offset + MATRIX_SIZE as u64),
+                &mut |data, _renderer| {
+                    data[0..MATRIX_SIZE].copy_from_slice(bytes_of(matrix));
+                },
+            );
+            state.command_queue.copy_buffer_to_buffer(
+                staging_buffer,
+                offset,
+                *buffer,
+                0,
+                MATRIX_SIZE as u64,
+            );
+            offset += MATRIX_SIZE as u64;
+        }
     }
 
     if let Some(RenderResourceBinding::Buffer { buffer, .. }) = bindings.get(CAMERA_POSITION) {
