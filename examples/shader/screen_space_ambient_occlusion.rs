@@ -8,6 +8,7 @@ use bevy::{
     input::{system::exit_on_esc_system, InputPlugin},
     log::LogPlugin,
     prelude::{shape, *},
+    reflect::TypeUuid,
     render::{
         camera::PerspectiveProjection,
         draw, mesh,
@@ -54,12 +55,16 @@ mod node {
     pub const BLUR_Y_PASS: &str = "blur_y_pass_node";
     // Textures
     pub const DUMMY_SWAPCHAIN_TEXTURE: &str = "dummy_swapchain_texture";
+    pub const DUMMY_COLOR_ATTACHMENT: &str = "dummy_color_attachment";
     pub const SAMPLED_COLOR_ATTACHMENT: &str = "sampled_color_attachment";
     pub const DEPTH_TEXTURE: &str = "depth_texture";
     pub const NORMAL_TEXTURE: &str = "normal_texture";
     pub const SSAO_A_TEXTURE: &str = "ssao_a_texture";
     pub const SSAO_B_TEXTURE: &str = "ssao_b_texture";
 }
+
+pub const DEPTH_NORMAL_PIPELINE_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(PipelineDescriptor::TYPE_UUID, 12322817479103657807);
 
 #[derive(Clone, Debug, Default, Reflect)]
 #[reflect(Component)]
@@ -87,7 +92,6 @@ impl Default for DepthNormalBundle {
 #[derive(Debug, Default)]
 struct SceneHandles {
     scene: Option<Handle<Scene>>,
-    pipeline: Option<Handle<PipelineDescriptor>>,
     loaded: bool,
     scale: f32,
 }
@@ -133,14 +137,14 @@ fn main() {
         base_render_graph_config: Some(BaseRenderGraphConfig {
             add_2d_camera: true,
             add_3d_camera: true,
-            add_main_depth_texture: false,
-            add_main_pass: false,
+            add_main_depth_texture: true,
+            add_main_pass: true,
             connect_main_pass_to_swapchain: false,
-            connect_main_pass_to_main_depth_texture: false,
+            connect_main_pass_to_main_depth_texture: true,
         }),
     });
 
-    // app.add_plugin(bevy::pbr::PbrPlugin::default());
+    app.add_plugin(bevy::pbr::PbrPlugin::default());
 
     app.add_plugin(bevy::gltf::GltfPlugin::default());
 
@@ -169,8 +173,7 @@ fn main() {
             shader::clear_shader_defs_system::<DepthNormalPass>.system(),
         );
 
-    app.add_asset::<StandardMaterial>()
-        .insert_resource(SceneHandles::default())
+    app.insert_resource(SceneHandles::default())
         .add_plugin(FlyCameraPlugin)
         .add_system(toggle_fly_camera.system())
         .add_startup_system(setup.system().label("setup"))
@@ -254,7 +257,7 @@ fn setup(
     mut pipelines: ResMut<Assets<PipelineDescriptor>>,
     mut shaders: ResMut<Assets<Shader>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    // mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     msaa: Res<Msaa>,
     asset_server: Res<AssetServer>,
 ) {
@@ -307,15 +310,14 @@ fn setup(
         })
     };
 
-    let pipeline_handle = pipelines.add(pipeline_descriptor);
+    pipelines.set_untracked(DEPTH_NORMAL_PIPELINE_HANDLE, pipeline_descriptor);
 
-    // set_up_scene(&mut commands, &mut meshes, &pipeline_handle);
-    // set_up_quad_scene(&mut commands, &mut meshes, &pipeline_handle);
+    // set_up_scene(&mut commands, &mut materials, &mut meshes);
+    // set_up_quad_scene(&mut commands, &mut materials, &mut meshes);
     let scene_handle: Handle<Scene> =
         asset_server.load("models/FlightHelmet/FlightHelmet.gltf#Scene0");
     commands.insert_resource(SceneHandles {
         scene: Some(scene_handle),
-        pipeline: Some(pipeline_handle),
         loaded: false,
         scale: 1.0,
     });
@@ -345,11 +347,23 @@ fn scene_loaded(
     mut scene_handles: ResMut<SceneHandles>,
     mut scenes: ResMut<Assets<Scene>>,
 ) {
-    if scene_handles.loaded || scene_handles.scene.is_none() || scene_handles.pipeline.is_none() {
+    if scene_handles.loaded || scene_handles.scene.is_none() {
         return;
     }
-    if let Some(scene) = scenes.get_mut(scene_handles.scene.as_ref().unwrap()) {
-        let pipeline_handle = scene_handles.pipeline.as_ref().unwrap();
+    if let Some(scene_handle) = scene_handles.scene.as_ref() {
+        if let Some(scene) = scenes.get_mut(scene_handles.scene.as_ref().unwrap()) {
+            let mut query = scene.world.query::<(Entity, &Handle<Mesh>)>();
+            let entities = query
+                .iter(&mut scene.world)
+                .map(|(entity, _mesh_handle)| entity)
+                .collect::<Vec<_>>();
+            for entity in entities {
+                scene
+                    .world
+                    .entity_mut(entity)
+                    .insert_bundle(DepthNormalBundle::default());
+            }
+        }
         let scale = scene_handles.scale;
         commands
             .spawn_bundle((
@@ -361,17 +375,7 @@ fn scene_loaded(
                 GlobalTransform::default(),
             ))
             .with_children(|child_builder| {
-                let mut query = scene.world.query::<(&Handle<Mesh>, &Transform)>();
-                for (mesh, transform) in query.iter(&mut scene.world) {
-                    child_builder.spawn_bundle(MeshBundle {
-                        transform: transform.clone(),
-                        mesh: mesh.clone(),
-                        render_pipelines: RenderPipelines::from_pipelines(vec![
-                            RenderPipeline::new(pipeline_handle.clone()),
-                        ]),
-                        ..Default::default()
-                    });
-                }
+                child_builder.spawn_scene(scene_handle.clone());
             });
         println!("SCENE LOADED!");
         scene_handles.loaded = true;
@@ -380,9 +384,10 @@ fn scene_loaded(
 
 fn set_up_scene(
     commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
-    pipeline_handle: &Handle<PipelineDescriptor>,
 ) {
+    let white_handle = materials.add(Color::WHITE.into());
     let cube_handle = meshes.add(shape::Cube { size: 1.0 }.into());
     let sphere_handle = meshes.add(
         shape::Icosphere {
@@ -392,45 +397,46 @@ fn set_up_scene(
         .into(),
     );
 
-    commands.spawn_bundle(MeshBundle {
-        transform: Transform::from_xyz(-1.0, 0.0, 0.0),
-        mesh: cube_handle.clone(),
-        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle.clone(),
-        )]),
-        ..Default::default()
-    });
-    commands.spawn_bundle(MeshBundle {
-        transform: Transform::from_xyz(0.0, 0.0, -1.0),
-        mesh: cube_handle.clone(),
-        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle.clone(),
-        )]),
-        ..Default::default()
-    });
-    commands.spawn_bundle(MeshBundle {
-        transform: Transform::from_xyz(0.0, -1.0, 0.0),
-        mesh: cube_handle,
-        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle.clone(),
-        )]),
-        ..Default::default()
-    });
-    commands.spawn_bundle(MeshBundle {
-        transform: Transform::from_xyz(0.0, 0.0, 0.0),
-        mesh: sphere_handle,
-        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle.clone(),
-        )]),
-        ..Default::default()
-    });
+    commands
+        .spawn_bundle(PbrBundle {
+            material: white_handle.clone(),
+            mesh: cube_handle.clone(),
+            transform: Transform::from_xyz(-1.0, 0.0, 0.0),
+            ..Default::default()
+        })
+        .insert_bundle(DepthNormalBundle::default());
+    commands
+        .spawn_bundle(PbrBundle {
+            material: white_handle.clone(),
+            mesh: cube_handle.clone(),
+            transform: Transform::from_xyz(0.0, 0.0, -1.0),
+            ..Default::default()
+        })
+        .insert_bundle(DepthNormalBundle::default());
+    commands
+        .spawn_bundle(PbrBundle {
+            material: white_handle.clone(),
+            mesh: cube_handle,
+            transform: Transform::from_xyz(0.0, -1.0, 0.0),
+            ..Default::default()
+        })
+        .insert_bundle(DepthNormalBundle::default());
+    commands
+        .spawn_bundle(PbrBundle {
+            material: white_handle.clone(),
+            mesh: sphere_handle,
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            ..Default::default()
+        })
+        .insert_bundle(DepthNormalBundle::default());
 }
 
 fn set_up_quad_scene(
     commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
-    pipeline_handle: &Handle<PipelineDescriptor>,
 ) {
+    let white_handle = materials.add(Color::WHITE.into());
     let quad_handle = meshes.add(
         shape::Quad {
             size: Vec2::splat(2.0),
@@ -439,48 +445,48 @@ fn set_up_quad_scene(
         .into(),
     );
 
-    commands.spawn_bundle(MeshBundle {
-        mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle.clone(),
-        )]),
-        transform: Transform::from_matrix(Mat4::from_scale_rotation_translation(
-            Vec3::new(0.5, 0.5, 0.1),
-            Quat::IDENTITY,
-            Vec3::new(0.0, 2.0, 0.0),
-        )),
-        ..Default::default()
-    });
-    commands.spawn_bundle(MeshBundle {
-        mesh: quad_handle.clone(),
-        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle.clone(),
-        )]),
-        transform: Transform::from_matrix(Mat4::from_rotation_translation(
-            Quat::from_rotation_y(90.0f32.to_radians()),
-            Vec3::new(-1.0, 2.0, 0.0),
-        )),
-        ..Default::default()
-    });
-    commands.spawn_bundle(MeshBundle {
-        mesh: quad_handle.clone(),
-        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle.clone(),
-        )]),
-        transform: Transform::from_matrix(Mat4::from_rotation_translation(
-            Quat::from_rotation_y(-90.0f32.to_radians()),
-            Vec3::new(1.0, 2.0, 0.0),
-        )),
-        ..Default::default()
-    });
-    commands.spawn_bundle(MeshBundle {
-        mesh: quad_handle.clone(),
-        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
-            pipeline_handle.clone(),
-        )]),
-        transform: Transform::from_xyz(0.0, 2.0, -1.0),
-        ..Default::default()
-    });
+    commands
+        .spawn_bundle(PbrBundle {
+            material: white_handle.clone(),
+            mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+            transform: Transform::from_matrix(Mat4::from_scale_rotation_translation(
+                Vec3::new(0.5, 0.5, 0.1),
+                Quat::IDENTITY,
+                Vec3::new(0.0, 2.0, 0.0),
+            )),
+            ..Default::default()
+        })
+        .insert_bundle(DepthNormalBundle::default());
+    commands
+        .spawn_bundle(PbrBundle {
+            material: white_handle.clone(),
+            mesh: quad_handle.clone(),
+            transform: Transform::from_matrix(Mat4::from_rotation_translation(
+                Quat::from_rotation_y(90.0f32.to_radians()),
+                Vec3::new(-1.0, 2.0, 0.0),
+            )),
+            ..Default::default()
+        })
+        .insert_bundle(DepthNormalBundle::default());
+    commands
+        .spawn_bundle(PbrBundle {
+            material: white_handle.clone(),
+            mesh: quad_handle.clone(),
+            transform: Transform::from_matrix(Mat4::from_rotation_translation(
+                Quat::from_rotation_y(-90.0f32.to_radians()),
+                Vec3::new(1.0, 2.0, 0.0),
+            )),
+            ..Default::default()
+        })
+        .insert_bundle(DepthNormalBundle::default());
+    commands
+        .spawn_bundle(PbrBundle {
+            material: white_handle.clone(),
+            mesh: quad_handle.clone(),
+            transform: Transform::from_xyz(0.0, 2.0, -1.0),
+            ..Default::default()
+        })
+        .insert_bundle(DepthNormalBundle::default());
 }
 
 fn setup_render_graph(
@@ -605,17 +611,18 @@ fn set_up_depth_normal_pre_pass(msaa: &Msaa, render_graph: &mut RenderGraph) {
     };
 
     // Create the pass node
-    let mut depth_normal_pass_node = PassNode::<MainPass, &MainPass>::new(pass_descriptor);
+    let mut depth_normal_pass_node =
+        PassNode::<DepthNormalPass, &DepthNormalPass>::new(pass_descriptor);
     depth_normal_pass_node.add_camera(camera::CAMERA_3D);
     render_graph.add_node(node::DEPTH_NORMAL_PRE_PASS, depth_normal_pass_node);
 
     render_graph.add_system_node(
         node::TRANSFORM,
-        RenderResourcesNode::<GlobalTransform, MainPass>::new(true),
+        RenderResourcesNode::<GlobalTransform, DepthNormalPass>::new(true),
     );
     render_graph.add_system_node(
         node::MODEL_INV_TRANS_3,
-        RenderResourcesNode::<ModelInvTrans3, MainPass>::new(true),
+        RenderResourcesNode::<ModelInvTrans3, DepthNormalPass>::new(true),
     );
     render_graph
         .add_node_edge(node::TRANSFORM, node::DEPTH_NORMAL_PRE_PASS)
@@ -958,7 +965,7 @@ fn set_up_modified_main_pass(
     // let pipeline_descriptor = PipelineDescriptor {
     //     depth_stencil: None,
     //     color_target_states: vec![ColorTargetState {
-    //         format: TextureFormat::Bgra8UnormSrgb,
+    //         format: TextureFormat::default(),
     //         color_blend: BlendState {
     //             src_factor: BlendFactor::SrcAlpha,
     //             dst_factor: BlendFactor::OneMinusSrcAlpha,
@@ -1066,7 +1073,7 @@ fn set_up_depth_render_pass(
     let pipeline_descriptor = PipelineDescriptor {
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
-            format: TextureFormat::Bgra8UnormSrgb,
+            format: TextureFormat::default(),
             blend: Some(BlendState {
                 alpha: BlendComponent {
                     src_factor: BlendFactor::One,
@@ -1131,6 +1138,7 @@ fn set_up_depth_render_pass(
             format!("{}_sampler", node::DEPTH_TEXTURE),
         )
         .unwrap();
+
     if msaa.samples > 1 {
         render_graph.add_node(
             node::SAMPLED_COLOR_ATTACHMENT,
@@ -1179,35 +1187,7 @@ fn set_up_depth_render_pass(
             .unwrap();
     }
 
-    // // Hack to fill all main pass input slots
-    // render_graph.add_node(
-    //     node::DUMMY_SWAPCHAIN_TEXTURE,
-    //     WindowTextureNode::new(
-    //         WindowId::primary(),
-    //         TextureDescriptor {
-    //             size: Extent3d {
-    //                 depth: 1,
-    //                 width: 1,
-    //                 height: 1,
-    //             },
-    //             mip_level_count: 1,
-    //             sample_count: 1,
-    //             dimension: TextureDimension::D2,
-    //             format: TextureFormat::default(),
-    //             usage: TextureUsage::OUTPUT_ATTACHMENT,
-    //         },
-    //         None,
-    //         None,
-    //     ),
-    // );
-    // render_graph
-    //     .add_slot_edge(
-    //         node::DUMMY_SWAPCHAIN_TEXTURE,
-    //         WindowTextureNode::OUT_TEXTURE,
-    //         base::node::MAIN_PASS,
-    //         "color_resolve_target",
-    //     )
-    //     .unwrap();
+    set_up_dummy_main_pass(render_graph, msaa);
 
     render_graph
         .add_node_edge(node::DEPTH_NORMAL_PRE_PASS, node::DEPTH_RENDER_PASS)
@@ -1226,7 +1206,7 @@ fn set_up_normal_render_pass(
     let pipeline_descriptor = PipelineDescriptor {
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
-            format: TextureFormat::Bgra8UnormSrgb,
+            format: TextureFormat::default(),
             blend: Some(BlendState {
                 alpha: BlendComponent {
                     src_factor: BlendFactor::One,
@@ -1291,6 +1271,7 @@ fn set_up_normal_render_pass(
             format!("{}_sampler", node::NORMAL_TEXTURE),
         )
         .unwrap();
+
     if msaa.samples > 1 {
         render_graph.add_node(
             node::SAMPLED_COLOR_ATTACHMENT,
@@ -1339,35 +1320,7 @@ fn set_up_normal_render_pass(
             .unwrap();
     }
 
-    // // Hack to fill all main pass input slots
-    // render_graph.add_node(
-    //     node::DUMMY_SWAPCHAIN_TEXTURE,
-    //     WindowTextureNode::new(
-    //         WindowId::primary(),
-    //         TextureDescriptor {
-    //             size: Extent3d {
-    //                 depth: 1,
-    //                 width: 1,
-    //                 height: 1,
-    //             },
-    //             mip_level_count: 1,
-    //             sample_count: 1,
-    //             dimension: TextureDimension::D2,
-    //             format: TextureFormat::default(),
-    //             usage: TextureUsage::OUTPUT_ATTACHMENT,
-    //         },
-    //         None,
-    //         None,
-    //     ),
-    // );
-    // render_graph
-    //     .add_slot_edge(
-    //         node::DUMMY_SWAPCHAIN_TEXTURE,
-    //         WindowTextureNode::OUT_TEXTURE,
-    //         base::node::MAIN_PASS,
-    //         "color_resolve_target",
-    //     )
-    //     .unwrap();
+    set_up_dummy_main_pass(render_graph, msaa);
 
     render_graph
         .add_node_edge(node::DEPTH_NORMAL_PRE_PASS, node::NORMAL_RENDER_PASS)
@@ -1386,7 +1339,7 @@ fn set_up_occlusion_render_pass(
     let pipeline_descriptor = PipelineDescriptor {
         depth_stencil: None,
         color_target_states: vec![ColorTargetState {
-            format: TextureFormat::Bgra8UnormSrgb,
+            format: TextureFormat::default(),
             blend: Some(BlendState {
                 alpha: BlendComponent {
                     src_factor: BlendFactor::One,
@@ -1451,6 +1404,7 @@ fn set_up_occlusion_render_pass(
             format!("{}_sampler", "occlusion_texture"),
         )
         .unwrap();
+
     if msaa.samples > 1 {
         render_graph.add_node(
             node::SAMPLED_COLOR_ATTACHMENT,
@@ -1499,39 +1453,83 @@ fn set_up_occlusion_render_pass(
             .unwrap();
     }
 
-    // // Hack to fill all main pass input slots
-    // render_graph.add_node(
-    //     node::DUMMY_SWAPCHAIN_TEXTURE,
-    //     WindowTextureNode::new(
-    //         WindowId::primary(),
-    //         TextureDescriptor {
-    //             size: Extent3d {
-    //                 depth: 1,
-    //                 width: 1,
-    //                 height: 1,
-    //             },
-    //             mip_level_count: 1,
-    //             sample_count: 1,
-    //             dimension: TextureDimension::D2,
-    //             format: TextureFormat::default(),
-    //             usage: TextureUsage::OUTPUT_ATTACHMENT,
-    //         },
-    //         None,
-    //         None,
-    //     ),
-    // );
-    // render_graph
-    //     .add_slot_edge(
-    //         node::DUMMY_SWAPCHAIN_TEXTURE,
-    //         WindowTextureNode::OUT_TEXTURE,
-    //         base::node::MAIN_PASS,
-    //         "color_resolve_target",
-    //     )
-    //     .unwrap();
+    set_up_dummy_main_pass(render_graph, msaa);
 
     render_graph
         .add_node_edge(node::SSAO_PASS, node::OCCLUSION_RENDER_PASS)
         .unwrap();
+}
+
+fn set_up_dummy_main_pass(render_graph: &mut RenderGraph, msaa: &Msaa) {
+    // Hack to fill all main pass input slots
+    render_graph.add_node(
+        node::DUMMY_SWAPCHAIN_TEXTURE,
+        WindowTextureNode::new(
+            WindowId::primary(),
+            TextureDescriptor {
+                size: Extent3d {
+                    depth_or_array_layers: 1,
+                    width: 1,
+                    height: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::default(),
+                usage: TextureUsage::OUTPUT_ATTACHMENT,
+            },
+            None,
+            None,
+        ),
+    );
+
+    if msaa.samples > 1 {
+        render_graph.add_node(
+            node::DUMMY_COLOR_ATTACHMENT,
+            WindowTextureNode::new(
+                WindowId::primary(),
+                TextureDescriptor {
+                    size: Extent3d {
+                        depth_or_array_layers: 1,
+                        width: 1,
+                        height: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: msaa.samples,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::default(),
+                    usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
+                },
+                None,
+                None,
+            ),
+        );
+        render_graph
+            .add_slot_edge(
+                node::DUMMY_COLOR_ATTACHMENT,
+                WindowTextureNode::OUT_TEXTURE,
+                base::node::MAIN_PASS,
+                "color_attachment",
+            )
+            .unwrap();
+        render_graph
+            .add_slot_edge(
+                node::DUMMY_SWAPCHAIN_TEXTURE,
+                WindowTextureNode::OUT_TEXTURE,
+                base::node::MAIN_PASS,
+                "color_resolve_target",
+            )
+            .unwrap();
+    } else {
+        render_graph
+            .add_slot_edge(
+                node::DUMMY_SWAPCHAIN_TEXTURE,
+                WindowTextureNode::OUT_TEXTURE,
+                base::node::MAIN_PASS,
+                "color_attachment",
+            )
+            .unwrap();
+    }
 }
 
 /// this component indicates what entities should rotate
