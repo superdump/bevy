@@ -693,22 +693,17 @@ fn set_up_ssao_pass(
     };
 
     // Create the pass node
-    let pass_node = FullscreenPassNode::new(
+    let mut pass_node = FullscreenPassNode::new(
         pass_descriptor,
         pipeline_handle,
         vec![node::DEPTH_TEXTURE.into(), node::NORMAL_TEXTURE.into()],
     );
+    pass_node.add_camera(base::camera::CAMERA_3D);
     render_graph.add_node(node::SSAO_PASS, pass_node);
 
-    // render_graph
-    //     .add_node_edge(base::node::SHARED_BUFFERS, node::SSAO_PASS)
-    //     .unwrap();
-    // render_graph
-    //     .add_node_edge(base::node::CAMERA_3D, node::SSAO_PASS)
-    //     .unwrap();
-    // render_graph
-    //     .add_node_edge(node::CAMERA_INV_PROJ, node::SSAO_PASS)
-    //     .unwrap();
+    render_graph
+        .add_node_edge(base::node::CAMERA_3D, node::SSAO_PASS)
+        .unwrap();
     render_graph
         .add_node_edge(node::DEPTH_NORMAL_PRE_PASS, node::SSAO_PASS)
         .unwrap();
