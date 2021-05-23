@@ -1,9 +1,13 @@
 use std::borrow::Cow;
 
 use bevy_asset::{Assets, Handle};
-use bevy_ecs::{prelude::World, world::WorldCell};
+use bevy_ecs::{
+    prelude::{Mut, World},
+    world::WorldCell,
+};
 
 use crate::{
+    camera::ActiveCameras,
     pass::{PassDescriptor, TextureAttachment},
     pipeline::{
         BindGroupDescriptorId, PipelineCompiler, PipelineDescriptor, PipelineSpecialization,
@@ -45,6 +49,8 @@ pub struct FullscreenPassNode {
     render_resource_bindings: RenderResourceBindings,
     /// SetBindGroupCommands for this frame, collected during prepare and update
     bind_groups: Vec<SetBindGroupCommand>,
+    /// A list of cameras
+    cameras: Vec<String>,
 }
 
 impl FullscreenPassNode {
@@ -106,7 +112,12 @@ impl FullscreenPassNode {
             specialized_pipeline_handle: None,
             render_resource_bindings: RenderResourceBindings::default(),
             bind_groups: Vec::new(),
+            cameras: Vec::new(),
         }
+    }
+
+    pub fn add_camera(&mut self, camera_name: &str) {
+        self.cameras.push(camera_name.to_string());
     }
 }
 
@@ -178,7 +189,7 @@ fn update_bind_groups(
                 index: bind_group_descriptor.index,
                 descriptor_id: bind_group_descriptor.id,
                 bind_group: bind_group.id,
-            })
+            });
         }
     }
 }
@@ -192,35 +203,60 @@ impl Node for FullscreenPassNode {
         // Clear previous frame's bind groups
         self.bind_groups.clear();
 
-        let mut world = world.cell();
+        world.resource_scope(|world, mut active_cameras: Mut<ActiveCameras>| {
+            let mut world = world.cell();
 
-        // Compile the specialized pipeline
-        if self.specialized_pipeline_handle.is_none() {
-            self.setup_specialized_pipeline(&mut world);
-        }
+            // Compile the specialized pipeline
+            if self.specialized_pipeline_handle.is_none() {
+                self.setup_specialized_pipeline(&mut world);
+            }
 
-        // Prepare bind groups
-        // Get the necessary resources
-        let mut render_resource_bindings =
-            world.get_resource_mut::<RenderResourceBindings>().unwrap();
+            // Prepare bind groups
+            // Get the necessary resources
+            let mut render_resource_bindings =
+                world.get_resource_mut::<RenderResourceBindings>().unwrap();
 
-        let pipeline_descriptors = world.get_resource::<Assets<PipelineDescriptor>>().unwrap();
+            let pipeline_descriptors = world.get_resource::<Assets<PipelineDescriptor>>().unwrap();
 
-        let render_resource_context = world
-            .get_resource::<Box<dyn RenderResourceContext>>()
-            .unwrap();
+            let render_resource_context = world
+                .get_resource::<Box<dyn RenderResourceContext>>()
+                .unwrap();
 
-        let pipeline_descriptor = pipeline_descriptors
-            .get(self.specialized_pipeline_handle.as_ref().unwrap())
-            .unwrap();
+            let pipeline_descriptor = pipeline_descriptors
+                .get(self.specialized_pipeline_handle.as_ref().unwrap())
+                .unwrap();
 
-        // Do the update
-        update_bind_groups(
-            &mut render_resource_bindings,
-            pipeline_descriptor,
-            &**render_resource_context,
-            &mut self.bind_groups,
-        );
+            for camera_name in self.cameras.iter() {
+                let active_camera = if let Some(active_camera) = active_cameras.get_mut(camera_name)
+                {
+                    active_camera
+                } else {
+                    continue;
+                };
+
+                let layout = pipeline_descriptor.get_layout().unwrap();
+                for bind_group_descriptor in layout.bind_groups.iter() {
+                    if let Some(bind_group) = active_camera
+                        .bindings
+                        .update_bind_group(bind_group_descriptor, &**render_resource_context)
+                    {
+                        self.bind_groups.push(SetBindGroupCommand {
+                            index: bind_group_descriptor.index,
+                            descriptor_id: bind_group_descriptor.id,
+                            bind_group: bind_group.id,
+                        });
+                    }
+                }
+            }
+
+            // Do the update
+            update_bind_groups(
+                &mut render_resource_bindings,
+                pipeline_descriptor,
+                &**render_resource_context,
+                &mut self.bind_groups,
+            );
+        });
     }
 
     fn update(
