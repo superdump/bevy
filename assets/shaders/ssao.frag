@@ -1,7 +1,7 @@
 #version 450
 
 // FIXME: Make these into uniforms
-const float RADIUS = 0.5;
+const float RADIUS = 0.1;
 const float BIAS = 0.025;
 const int KERNEL_SIZE = 32;
 const float kernel[32][3] = // precalculated hemisphere kernel (low discrepancy noiser)
@@ -44,38 +44,36 @@ layout(location = 0) in vec2 v_Uv;
 
 layout(location = 0) out float o_Target;
 
-// layout(set = 0, binding = 0) uniform CameraProj {
-//     mat4 Proj;
-// };
-// layout(set = 1, binding = 1) uniform CameraInvProj {
-//     mat4 InvProj;
-// };
+layout(set = 0, binding = 0) uniform CameraProj {
+    mat4 Proj;
+};
+layout(set = 0, binding = 1) uniform CameraProjInv {
+    mat4 ProjInv;
+};
 
-layout(set = 0, binding = 0) uniform texture2D depth_texture;
-layout(set = 0, binding = 1) uniform sampler depth_texture_sampler;
-layout(set = 0, binding = 2) uniform texture2D normal_texture;
-layout(set = 0, binding = 3) uniform sampler normal_texture_sampler;
-// layout(set = 2, binding = 4) uniform texture2D noise_texture;
-// layout(set = 2, binding = 5) uniform sampler noise_texture_sampler;
+layout(set = 1, binding = 0) uniform texture2D depth_texture;
+layout(set = 1, binding = 1) uniform sampler depth_texture_sampler;
+layout(set = 1, binding = 2) uniform texture2D normal_texture;
+layout(set = 1, binding = 3) uniform sampler normal_texture_sampler;
+// layout(set = 1, binding = 4) uniform texture2D noise_texture;
+// layout(set = 1, binding = 5) uniform sampler noise_texture_sampler;
 
 float rand(vec2 co) {
     return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
 void main() {
-    // FIXME: Hard=coded perspective_rh with fov_y_radians 45, aspect ratio 16/9, near 0.1, far 1000.0
-    // Can't yet bind camera projection in a fullscreen pass node and that may not make sense
-    mat4 Proj;
-    Proj[0] = vec4(1.357995, 0.0, 0.0, 0.0);
-    Proj[1] = vec4(0.0, 2.4142134, 0.0, 0.0);
-    Proj[2] = vec4(0.0, 0.0, -1.001001, -1.0);
-    Proj[3] = vec4(0.0, 0.0, -1.001001, 0.0);
+    // mat4 Proj;
+    // Proj[0] = vec4(1.357995, 0.0, 0.0, 0.0);
+    // Proj[1] = vec4(0.0, 2.4142134, 0.0, 0.0);
+    // Proj[2] = vec4(0.0, 0.0, -1.001001, -1.0);
+    // Proj[3] = vec4(0.0, 0.0, -1.001001, 0.0);
 
-    mat4 InvProj;
-    InvProj[0] = vec4(0.7363797, 0.0, -0.0, 0.0);
-    InvProj[1] = vec4(0.0, 0.41421357, 0.0, -0.0);
-    InvProj[2] = vec4(-0.0, 0.0, -0.0, -0.99899995);
-    InvProj[3] = vec4(0.0, -0.0, -1.0, 1.0);
+    // mat4 ProjInv;
+    // ProjInv[0] = vec4(0.7363797, 0.0, -0.0, 0.0);
+    // ProjInv[1] = vec4(0.0, 0.41421357, 0.0, -0.0);
+    // ProjInv[2] = vec4(-0.0, 0.0, -0.0, -0.99899995);
+    // ProjInv[3] = vec4(0.0, -0.0, -1.0, 1.0);
 
     // TODO: For the 4x4 noise texture sampling
     // tile noise texture over screen, based on screen dimensions divided by noise size
@@ -90,8 +88,8 @@ void main() {
     }
     // v_Uv.x is [0,1] from left to right. * 2 - 1 remaps to [-1, 1] left to right which is NDC
     // v_Uv.y is [0,1] top to bottom. (1-v)*2-1 = 2-2v-1 = 1-2v remaps to [-1, 1] bottom to top which is NDC
-    vec4 frag_view = InvProj * vec4(v_Uv.x * 2.0 - 1.0, 1.0 - 2.0 * v_Uv.y, frag_depth_ndc, 1.0);
-    frag_view.xyz = frag_view.xyz / frag_view.w;
+    vec4 frag_view = ProjInv * vec4(v_Uv.x * 2.0 - 1.0, 1.0 - 2.0 * v_Uv.y, frag_depth_ndc, 1.0);
+    frag_view.xyz /= frag_view.w;
     vec3 normal_view = (texture(sampler2D(normal_texture, normal_texture_sampler), v_Uv).xyz - 0.5) * 2.0;
     // TODO: Bind a 4x4 noise texture
     // vec3 randomVec = texture(sampler2D(noise_texture, noise_texture_sampler), v_Uv * noiseScale).xyz;
@@ -112,7 +110,7 @@ void main() {
         vec2 depth_uv = vec2(sample_ndc.x * 0.5 + 0.5, sample_ndc.y * -0.5 + 0.5);
 
         float sample_depth_ndc = texture(sampler2D(depth_texture, depth_texture_sampler), depth_uv).x;
-        vec4 sample_depth_view = InvProj * vec4(0.0, 0.0, sample_depth_ndc, 1.0);
+        vec4 sample_depth_view = ProjInv * vec4(0.0, 0.0, sample_depth_ndc, 1.0);
         sample_depth_view.xyz /= sample_depth_view.w;
 
         float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(frag_view.z - sample_depth_view.z));
