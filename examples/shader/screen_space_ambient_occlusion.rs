@@ -10,26 +10,28 @@ use bevy::{
     prelude::{shape, *},
     render::{
         camera::PerspectiveProjection,
+        draw, mesh,
         pass::{
             LoadOp, Operations, PassDescriptor, RenderPassColorAttachment,
             RenderPassDepthStencilAttachment, TextureAttachment,
         },
         pipeline::{
-            BlendComponent, BlendFactor, BlendOperation, BlendState, ColorTargetState, ColorWrite,
-            CompareFunction, DepthBiasState, DepthStencilState, PipelineDescriptor, RenderPipeline,
-            StencilFaceState, StencilState,
+            self, BlendComponent, BlendFactor, BlendOperation, BlendState, ColorTargetState,
+            ColorWrite, CompareFunction, DepthBiasState, DepthStencilState, PipelineDescriptor,
+            RenderPipeline, StencilFaceState, StencilState,
         },
         render_graph::{
-            base::{self, camera, BaseRenderGraphConfig, MainPass},
+            base::{self, camera, BaseRenderGraphConfig},
             fullscreen_pass_node, FullscreenPassNode, PassNode, RenderGraph, RenderResourcesNode,
             WindowSwapChainNode, WindowTextureNode,
         },
         renderer::RenderResources,
-        shader::{ShaderStage, ShaderStages},
+        shader::{self, ShaderStage, ShaderStages},
         texture::{
             Extent3d, SamplerDescriptor, TextureDescriptor, TextureDimension, TextureFormat,
             TextureUsage,
         },
+        RenderStage,
     },
     scene::ScenePlugin,
     transform::TransformSystem,
@@ -57,6 +59,29 @@ mod node {
     pub const NORMAL_TEXTURE: &str = "normal_texture";
     pub const SSAO_A_TEXTURE: &str = "ssao_a_texture";
     pub const SSAO_B_TEXTURE: &str = "ssao_b_texture";
+}
+
+#[derive(Clone, Debug, Default, Reflect)]
+#[reflect(Component)]
+pub struct DepthNormalPass;
+
+#[derive(Bundle)]
+pub struct DepthNormalBundle {
+    render_pipelines: RenderPipelines<DepthNormalPass>,
+    depth_normal_pass: DepthNormalPass,
+    draw: Draw<DepthNormalPass>,
+}
+
+impl Default for DepthNormalBundle {
+    fn default() -> Self {
+        Self {
+            render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
+                DEPTH_NORMAL_PIPELINE_HANDLE.typed(),
+            )]),
+            depth_normal_pass: Default::default(),
+            draw: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -122,6 +147,27 @@ fn main() {
     app.add_plugin(bevy::winit::WinitPlugin::default());
 
     app.add_plugin(bevy::wgpu::WgpuPlugin::default());
+
+    // Needed for the DepthNormalPass
+    app.register_type::<Draw<DepthNormalPass>>()
+        .register_type::<RenderPipelines<DepthNormalPass>>()
+        .register_type::<DepthNormalPass>()
+        .add_system_to_stage(
+            CoreStage::PreUpdate,
+            draw::clear_draw_system::<DepthNormalPass>.system(),
+        )
+        .add_system_to_stage(
+            RenderStage::RenderResource,
+            mesh::mesh_resource_provider_system::<DepthNormalPass>.system(),
+        )
+        .add_system_to_stage(
+            RenderStage::Draw,
+            pipeline::draw_render_pipelines_system::<DepthNormalPass>.system(),
+        )
+        .add_system_to_stage(
+            RenderStage::PostRender,
+            shader::clear_shader_defs_system::<DepthNormalPass>.system(),
+        );
 
     app.add_asset::<StandardMaterial>()
         .insert_resource(SceneHandles::default())
