@@ -133,6 +133,22 @@ pub fn camera_node_system(
         }
     }
 
+    if bindings.get(CAMERA_POSITION).is_none() {
+        let buffer = render_resource_context.create_buffer(BufferInfo {
+            size: VEC4_SIZE,
+            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+            ..Default::default()
+        });
+        bindings.set(
+            CAMERA_POSITION,
+            RenderResourceBinding::Buffer {
+                buffer,
+                range: 0..VEC4_SIZE as u64,
+                dynamic_index: None,
+            },
+        );
+    }
+
     let view = global_transform.compute_matrix();
     // NOTE: These MUST be in the same order as CAMERA_MATRICES
     let matrices = [
