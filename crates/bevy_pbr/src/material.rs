@@ -34,6 +34,9 @@ pub struct StandardMaterial {
     pub double_sided: bool,
     #[shader_def]
     pub occlusion_texture: Option<Handle<Texture>>,
+    /// 0 - mesh UV
+    /// 1 - screen UV
+    pub occlusion_texture_coordinate_space: u32,
     // Use a color for user friendliness even though we technically don't use the alpha channel
     // Might be used in the future for exposure correction in HDR
     pub emissive: Color,
@@ -65,6 +68,7 @@ impl Default for StandardMaterial {
             normal_map: None,
             double_sided: false,
             occlusion_texture: None,
+            occlusion_texture_coordinate_space: 0,
             emissive: Color::BLACK,
             emissive_texture: None,
             unlit: false,
