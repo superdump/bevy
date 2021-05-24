@@ -395,7 +395,10 @@ fn setup(
                 .looking_at(Vec3::new(0.0, 1.7, 0.0), Vec3::Y),
             ..Default::default()
         })
-        .insert(FlyCamera::default());
+        .insert(FlyCamera {
+            enabled: false,
+            ..Default::default()
+        });
     // .insert(Rotates);
     commands
         .spawn_bundle(PointLightBundle {
