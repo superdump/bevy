@@ -149,7 +149,7 @@ impl Default for SsaoConfig {
 struct SceneHandles {
     scene: Option<Handle<Scene>>,
     loaded: bool,
-    scale: f32,
+    transform: Transform,
 }
 
 #[derive(Debug, RenderResources)]
@@ -376,7 +376,11 @@ fn setup(
     commands.insert_resource(SceneHandles {
         scene: Some(scene_handle),
         loaded: false,
-        scale: 1.0,
+        transform: Transform::from_matrix(Mat4::from_scale_rotation_translation(
+            Vec3::splat(1.0),
+            Quat::IDENTITY,
+            Vec3::new(0.0, 0.0, 0.0),
+        )),
     });
 
     commands
@@ -424,16 +428,9 @@ fn scene_loaded(
                     .entity_mut(entity)
                     .insert_bundle(DepthNormalBundle::default());
             }
-            let scale = scene_handles.scale;
+            let transform = scene_handles.transform;
             commands
-                .spawn_bundle((
-                    Transform::from_matrix(Mat4::from_scale_rotation_translation(
-                        Vec3::new(scale, scale, scale),
-                        Quat::IDENTITY,
-                        Vec3::new(0.0, 1.0, 0.0),
-                    )),
-                    GlobalTransform::default(),
-                ))
+                .spawn_bundle((transform, GlobalTransform::default()))
                 .with_children(|child_builder| {
                     child_builder.spawn_scene(scene_handle.clone());
                 });
