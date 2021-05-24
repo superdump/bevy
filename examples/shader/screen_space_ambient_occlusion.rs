@@ -65,6 +65,8 @@ mod node {
     pub const SSAO_B_TEXTURE: &str = "ssao_b_texture";
 }
 
+pub const OCCLUSION_TEXTURE_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Texture::TYPE_UUID, 9247677681468533886);
 pub const DEPTH_NORMAL_PIPELINE_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(PipelineDescriptor::TYPE_UUID, 12322817479103657807);
 
@@ -195,7 +197,7 @@ fn main() {
             add_3d_camera: true,
             add_main_depth_texture: true,
             add_main_pass: true,
-            connect_main_pass_to_swapchain: false,
+            connect_main_pass_to_swapchain: true,
             connect_main_pass_to_main_depth_texture: true,
         }),
     });
@@ -411,6 +413,7 @@ fn scene_loaded(
     mut commands: Commands,
     mut scene_handles: ResMut<SceneHandles>,
     mut scenes: ResMut<Assets<Scene>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if scene_handles.loaded || scene_handles.scene.is_none() {
         return;
@@ -427,6 +430,17 @@ fn scene_loaded(
                     .world
                     .entity_mut(entity)
                     .insert_bundle(DepthNormalBundle::default());
+                let material_handle = scene
+                    .world
+                    .entity(entity)
+                    .get::<Handle<StandardMaterial>>()
+                    .expect("MainPass entity does not have a Handle<StandardMaterial>")
+                    .clone();
+                let mut material = materials
+                    .get_mut(material_handle)
+                    .expect("Failed to get material");
+                material.occlusion_texture = Some(OCCLUSION_TEXTURE_HANDLE.typed());
+                material.occlusion_texture_coordinate_space = 1;
             }
             let transform = scene_handles.transform;
             commands
@@ -600,7 +614,7 @@ fn setup_render_graph(
                 usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
             },
             Some(SamplerDescriptor::default()),
-            None,
+            Some(OCCLUSION_TEXTURE_HANDLE),
         ),
     );
     render_graph.add_node(
@@ -635,7 +649,7 @@ fn setup_render_graph(
     // Set up SSAO pass pipeline
     set_up_ssao_pass(shaders, pipelines, msaa, render_graph, asset_server);
     // Render the occlusion texture after the ssao pass
-    set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
+    // set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
 
     // // Set up blur X pass pipeline
     // set_up_blur_x_pass(shaders, pipelines, msaa, render_graph);
@@ -792,6 +806,9 @@ fn set_up_ssao_pass(
         .unwrap();
     render_graph
         .add_node_edge(node::DEPTH_NORMAL_PRE_PASS, node::SSAO_PASS)
+        .unwrap();
+    render_graph
+        .add_node_edge(node::SSAO_PASS, base::node::MAIN_PASS)
         .unwrap();
 
     render_graph
