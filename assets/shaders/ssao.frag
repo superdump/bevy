@@ -1,42 +1,5 @@
 #version 450
 
-// FIXME: Make these into uniforms
-const float kernel[32][3] = // precalculated hemisphere kernel (low discrepancy noiser)
-    {
-        { -0.668154f, -0.084296f, 0.219458f },
-        { -0.092521f, 0.141327f, 0.505343f },
-        { -0.041960f, 0.700333f, 0.365754f },
-        { 0.722389f, -0.015338f, 0.084357f },
-        { -0.815016f, 0.253065f, 0.465702f },
-        { 0.018993f, -0.397084f, 0.136878f },
-        { 0.617953f, -0.234334f, 0.513754f },
-        { -0.281008f, -0.697906f, 0.240010f },
-        { 0.303332f, -0.443484f, 0.588136f },
-        { -0.477513f, 0.559972f, 0.310942f },
-        { 0.307240f, 0.076276f, 0.324207f },
-        { -0.404343f, -0.615461f, 0.098425f },
-        { 0.152483f, -0.326314f, 0.399277f },
-        { 0.435708f, 0.630501f, 0.169620f },
-        { 0.878907f, 0.179609f, 0.266964f },
-        { -0.049752f, -0.232228f, 0.264012f },
-        { 0.537254f, -0.047783f, 0.693834f },
-        { 0.001000f, 0.177300f, 0.096643f },
-        { 0.626400f, 0.524401f, 0.492467f },
-        { -0.708714f, -0.223893f, 0.182458f },
-        { -0.106760f, 0.020965f, 0.451976f },
-        { -0.285181f, -0.388014f, 0.241756f },
-        { 0.241154f, -0.174978f, 0.574671f },
-        { -0.405747f, 0.080275f, 0.055816f },
-        { 0.079375f, 0.289697f, 0.348373f },
-        { 0.298047f, -0.309351f, 0.114787f },
-        { -0.616434f, -0.117369f, 0.475924f },
-        { -0.035249f, 0.134591f, 0.840251f },
-        { 0.175849f, 0.971033f, 0.211778f },
-        { 0.024805f, 0.348056f, 0.240006f },
-        { -0.267123f, 0.204885f, 0.688595f },
-        { -0.077639f, -0.753205f, 0.070938f }
-    };
-
 layout(location = 0) in vec2 v_Uv;
 
 layout(location = 0) out float o_Target;
@@ -56,9 +19,10 @@ layout(set = 1, binding = 3) uniform sampler normal_texture_sampler;
 // layout(set = 1, binding = 5) uniform sampler noise_texture_sampler;
 
 struct SsaoConfig_t {
+    vec4 kernel[32];
+    uint kernel_size;
     float radius;
     float bias;
-    uint kernel_size;
 };
 layout(set = 2, binding = 0) uniform SsaoConfig {
     SsaoConfig_t config;
@@ -95,7 +59,7 @@ void main() {
 
     float occlusion = 0.0;
     for (int i = 0; i < config.kernel_size; ++i) {
-        vec3 sample_offset_view = TBN * vec3(kernel[i][0], kernel[i][1], kernel[i][2]); // from tangent to view space
+        vec3 sample_offset_view = TBN * config.kernel[i].xyz; // from tangent to view space
         vec4 sample_view = vec4(frag_view.xyz + sample_offset_view * config.radius, 1.0);
         vec4 sample_clip = Proj * sample_view; // from view to clip space
         vec3 sample_ndc = sample_clip.xyz / sample_clip.w; // perspective divide
