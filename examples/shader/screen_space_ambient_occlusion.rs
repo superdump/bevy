@@ -7,6 +7,7 @@ use bevy::{
     diagnostic::DiagnosticsPlugin,
     input::{system::exit_on_esc_system, InputPlugin},
     log::LogPlugin,
+    pbr::AmbientLight,
     prelude::{shape, *},
     reflect::TypeUuid,
     render::{
@@ -163,10 +164,10 @@ fn main() {
 
     app
         // Pbr
-        // .insert_resource(AmbientLight {
-        //     color: Color::WHITE,
-        //     brightness: 1.0 / 5.0f32,
-        // })
+        .insert_resource(AmbientLight {
+            color: Color::WHITE,
+            brightness: 0.75,
+        })
         .insert_resource(Msaa { samples: 1 })
         .insert_resource(WindowDescriptor {
             title: "SSAO demo".to_string(),
@@ -392,6 +393,10 @@ fn setup(
     // .insert(Rotates);
     commands
         .spawn_bundle(PointLightBundle {
+            point_light: PointLight {
+                intensity: 20.0,
+                ..Default::default()
+            },
             transform: Transform::from_xyz(3.0, 5.0, 3.0),
             ..Default::default()
         })
