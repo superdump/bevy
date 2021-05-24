@@ -140,8 +140,8 @@ impl Default for SsaoConfig {
                 Vec4::new(-0.267123, 0.204885, 0.688595, 0.0),
                 Vec4::new(-0.077639, -0.753205, 0.070938, 0.0),
             ],
-            kernel_size: 4,
-            radius: 0.1,
+            kernel_size: 8,
+            radius: 0.2,
             bias: 0.025,
         }
     }
