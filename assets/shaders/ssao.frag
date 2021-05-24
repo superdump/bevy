@@ -1,9 +1,6 @@
 #version 450
 
 // FIXME: Make these into uniforms
-const float RADIUS = 0.1;
-const float BIAS = 0.025;
-const int KERNEL_SIZE = 32;
 const float kernel[32][3] = // precalculated hemisphere kernel (low discrepancy noiser)
     {
         { -0.668154f, -0.084296f, 0.219458f },
@@ -58,23 +55,20 @@ layout(set = 1, binding = 3) uniform sampler normal_texture_sampler;
 // layout(set = 1, binding = 4) uniform texture2D noise_texture;
 // layout(set = 1, binding = 5) uniform sampler noise_texture_sampler;
 
+struct SsaoConfig_t {
+    float radius;
+    float bias;
+    uint kernel_size;
+};
+layout(set = 2, binding = 0) uniform SsaoConfig {
+    SsaoConfig_t config;
+};
+
 float rand(vec2 co) {
     return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
 void main() {
-    // mat4 Proj;
-    // Proj[0] = vec4(1.357995, 0.0, 0.0, 0.0);
-    // Proj[1] = vec4(0.0, 2.4142134, 0.0, 0.0);
-    // Proj[2] = vec4(0.0, 0.0, -1.001001, -1.0);
-    // Proj[3] = vec4(0.0, 0.0, -1.001001, 0.0);
-
-    // mat4 ProjInv;
-    // ProjInv[0] = vec4(0.7363797, 0.0, -0.0, 0.0);
-    // ProjInv[1] = vec4(0.0, 0.41421357, 0.0, -0.0);
-    // ProjInv[2] = vec4(-0.0, 0.0, -0.0, -0.99899995);
-    // ProjInv[3] = vec4(0.0, -0.0, -1.0, 1.0);
-
     // TODO: For the 4x4 noise texture sampling
     // tile noise texture over screen, based on screen dimensions divided by noise size
     // const ivec2 size = textureSize(sampler2D(normal_texture, normal_texture_sampler), 0);
@@ -100,9 +94,9 @@ void main() {
     mat3 TBN = mat3(tangent, bitangent, normal_view);
 
     float occlusion = 0.0;
-    for (int i = 0; i < KERNEL_SIZE; ++i) {
+    for (int i = 0; i < config.kernel_size; ++i) {
         vec3 sample_offset_view = TBN * vec3(kernel[i][0], kernel[i][1], kernel[i][2]); // from tangent to view space
-        vec4 sample_view = vec4(frag_view.xyz + sample_offset_view * RADIUS, 1.0);
+        vec4 sample_view = vec4(frag_view.xyz + sample_offset_view * config.radius, 1.0);
         vec4 sample_clip = Proj * sample_view; // from view to clip space
         vec3 sample_ndc = sample_clip.xyz / sample_clip.w; // perspective divide
         // sample_ndc.x is [-1,1] left to right, so * 0.5 + 0.5 remaps to [0,1] left to right
@@ -113,10 +107,10 @@ void main() {
         vec4 sample_depth_view = ProjInv * vec4(0.0, 0.0, sample_depth_ndc, 1.0);
         sample_depth_view.xyz /= sample_depth_view.w;
 
-        float rangeCheck = smoothstep(0.0, 1.0, RADIUS / abs(frag_view.z - sample_depth_view.z));
-        occlusion += (sample_depth_view.z >= sample_view.z + BIAS ? 1.0 : 0.0) * rangeCheck;
+        float rangeCheck = smoothstep(0.0, 1.0, config.radius / abs(frag_view.z - sample_depth_view.z));
+        occlusion += (sample_depth_view.z >= sample_view.z + config.bias ? 1.0 : 0.0) * rangeCheck;
     }
-    occlusion = 1.0 - (occlusion / KERNEL_SIZE);
+    occlusion = 1.0 - (occlusion / config.kernel_size);
 
     o_Target = occlusion;
 }

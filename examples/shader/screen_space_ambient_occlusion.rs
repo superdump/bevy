@@ -3,7 +3,7 @@ use std::io::Write;
 
 use bevy::{
     asset::{AssetPlugin, AssetServerSettings},
-    core::CorePlugin,
+    core::{Bytes, CorePlugin},
     diagnostic::DiagnosticsPlugin,
     input::{system::exit_on_esc_system, InputPlugin},
     log::LogPlugin,
@@ -23,10 +23,10 @@ use bevy::{
         },
         render_graph::{
             base::{self, camera, BaseRenderGraphConfig, MainPass},
-            fullscreen_pass_node, FullscreenPassNode, PassNode, RenderGraph, RenderResourcesNode,
-            WindowSwapChainNode, WindowTextureNode,
+            fullscreen_pass_node, FullscreenPassNode, GlobalRenderResourcesNode, PassNode,
+            RenderGraph, RenderResourcesNode, WindowSwapChainNode, WindowTextureNode,
         },
-        renderer::RenderResources,
+        renderer::{RenderResource, RenderResources},
         shader::{self, ShaderStage, ShaderStages},
         texture::{
             Extent3d, SamplerDescriptor, TextureDescriptor, TextureDimension, TextureFormat,
@@ -43,6 +43,7 @@ use bevy_fly_camera::{FlyCamera, FlyCameraPlugin};
 mod node {
     // Resource bindings
     pub const WINDOW_TEXTURE_SIZE: &str = "WindowTextureSize";
+    pub const SSAO_CONFIG: &str = "ssao_config";
     // Nodes
     pub const TRANSFORM: &str = "transform";
     pub const MODEL_INV_TRANS_3: &str = "model_inv_trans_3";
@@ -85,6 +86,24 @@ impl Default for DepthNormalBundle {
             )]),
             depth_normal_pass: Default::default(),
             draw: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Bytes, RenderResources, RenderResource)]
+#[render_resources(from_self)]
+pub struct SsaoConfig {
+    radius: f32,
+    bias: f32,
+    kernel_size: u32,
+}
+
+impl Default for SsaoConfig {
+    fn default() -> Self {
+        Self {
+            radius: 0.1,
+            bias: 0.025,
+            kernel_size: 4,
         }
     }
 }
@@ -174,6 +193,7 @@ fn main() {
         );
 
     app.insert_resource(SceneHandles::default())
+        .insert_resource(SsaoConfig::default())
         .add_plugin(FlyCameraPlugin)
         .add_system(toggle_fly_camera.system())
         .add_startup_system(setup.system().label("setup"))
@@ -720,6 +740,14 @@ fn set_up_ssao_pass(
     );
     pass_node.add_camera(base::camera::CAMERA_3D);
     render_graph.add_node(node::SSAO_PASS, pass_node);
+
+    render_graph.add_system_node(
+        node::SSAO_CONFIG,
+        GlobalRenderResourcesNode::<SsaoConfig>::new(),
+    );
+    render_graph
+        .add_node_edge(node::SSAO_CONFIG, node::SSAO_PASS)
+        .unwrap();
 
     render_graph
         .add_node_edge(base::node::CAMERA_3D, node::SSAO_PASS)
