@@ -43,10 +43,8 @@ use bevy::{
 use bevy_fly_camera::{FlyCamera, FlyCameraPlugin};
 
 mod node {
-    // Resource bindings
     pub const WINDOW_TEXTURE_SIZE: &str = "WindowTextureSize";
     pub const SSAO_CONFIG: &str = "ssao_config";
-    // Nodes
     pub const TRANSFORM: &str = "transform";
     pub const MODEL_INV_TRANS_3: &str = "model_inv_trans_3";
     pub const STANDARD_MATERIAL: &str = "standard_material";
@@ -54,20 +52,20 @@ mod node {
     pub const DEPTH_RENDER_PASS: &str = "depth_render_pass";
     pub const NORMAL_RENDER_PASS: &str = "normal_render_pass";
     pub const SSAO_PASS: &str = "ssao_pass_node";
-    pub const OCCLUSION_RENDER_PASS: &str = "occlusion_render_pass";
+    pub const SSAO_RENDER_PASS: &str = "ssao_render_pass";
     pub const BLUR_X_PASS: &str = "blur_x_pass_node";
     pub const BLUR_Y_PASS: &str = "blur_y_pass_node";
-    // Textures
     pub const DUMMY_SWAPCHAIN_TEXTURE: &str = "dummy_swapchain_texture";
     pub const DUMMY_COLOR_ATTACHMENT: &str = "dummy_color_attachment";
     pub const SAMPLED_COLOR_ATTACHMENT: &str = "sampled_color_attachment";
     pub const DEPTH_TEXTURE: &str = "depth_texture";
     pub const NORMAL_TEXTURE: &str = "normal_texture";
+    pub const SSAO_TEXTURE: &str = "ssao_texture";
     pub const SSAO_A_TEXTURE: &str = "ssao_a_texture";
     pub const SSAO_B_TEXTURE: &str = "ssao_b_texture";
 }
 
-pub const OCCLUSION_TEXTURE_HANDLE: HandleUntyped =
+pub const SSAO_TEXTURE_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Texture::TYPE_UUID, 9247677681468533886);
 pub const DEPTH_NORMAL_PIPELINE_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(PipelineDescriptor::TYPE_UUID, 12322817479103657807);
@@ -167,7 +165,6 @@ fn main() {
     let mut app = App::build();
 
     app
-        // Pbr
         .insert_resource(AmbientLight {
             color: Color::WHITE,
             brightness: 0.75,
@@ -448,7 +445,7 @@ fn scene_loaded(
                 let mut material = materials
                     .get_mut(material_handle)
                     .expect("Failed to get material");
-                material.ssao_texture = Some(OCCLUSION_TEXTURE_HANDLE.typed());
+                material.ssao_texture = Some(SSAO_TEXTURE_HANDLE.typed());
             }
             let transform = scene_handles.transform;
             commands
@@ -622,7 +619,7 @@ fn setup_render_graph(
                 usage: TextureUsage::OUTPUT_ATTACHMENT | TextureUsage::SAMPLED,
             },
             Some(SamplerDescriptor::default()),
-            Some(OCCLUSION_TEXTURE_HANDLE),
+            Some(SSAO_TEXTURE_HANDLE),
         ),
     );
     render_graph.add_node(
@@ -657,7 +654,7 @@ fn setup_render_graph(
     // Set up SSAO pass pipeline
     set_up_ssao_pass(shaders, pipelines, msaa, render_graph, asset_server);
     // Render the occlusion texture after the ssao pass
-    // set_up_occlusion_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
+    // set_up_ssao_render_pass(shaders, pipelines, msaa, render_graph, asset_server);
 
     // // Set up blur X pass pipeline
     // set_up_blur_x_pass(shaders, pipelines, msaa, render_graph);
@@ -788,7 +785,7 @@ fn set_up_ssao_pass(
     // Setup pass
     let pass_descriptor = PassDescriptor {
         color_attachments: vec![RenderPassColorAttachment {
-            attachment: TextureAttachment::Input("occlusion_texture".to_string()),
+            attachment: TextureAttachment::Input(node::SSAO_TEXTURE.to_string()),
             resolve_target: None,
             ops: Operations {
                 load: LoadOp::Clear(Color::BLACK),
@@ -863,7 +860,7 @@ fn set_up_ssao_pass(
             node::SSAO_A_TEXTURE,
             WindowTextureNode::OUT_TEXTURE,
             node::SSAO_PASS,
-            "occlusion_texture",
+            node::SSAO_TEXTURE,
         )
         .unwrap();
 }
@@ -1191,7 +1188,7 @@ fn set_up_depth_render_pass(
                 ShaderStage::Vertex,
                 fullscreen_pass_node::shaders::VERTEX_SHADER,
             )),
-            fragment: Some(asset_server.load::<Shader, _>("shaders/depth.frag")),
+            fragment: Some(asset_server.load::<Shader, _>("shaders/depth_render.frag")),
         })
     };
 
@@ -1324,7 +1321,7 @@ fn set_up_normal_render_pass(
                 ShaderStage::Vertex,
                 fullscreen_pass_node::shaders::VERTEX_SHADER,
             )),
-            fragment: Some(asset_server.load::<Shader, _>("shaders/normal.frag")),
+            fragment: Some(asset_server.load::<Shader, _>("shaders/normal_render.frag")),
         })
     };
 
@@ -1425,7 +1422,7 @@ fn set_up_normal_render_pass(
         .unwrap();
 }
 
-fn set_up_occlusion_render_pass(
+fn set_up_ssao_render_pass(
     shaders: &mut Assets<Shader>,
     pipelines: &mut Assets<PipelineDescriptor>,
     msaa: &Msaa,
@@ -1457,7 +1454,7 @@ fn set_up_occlusion_render_pass(
                 ShaderStage::Vertex,
                 fullscreen_pass_node::shaders::VERTEX_SHADER,
             )),
-            fragment: Some(asset_server.load::<Shader, _>("shaders/occlusion.frag")),
+            fragment: Some(asset_server.load::<Shader, _>("shaders/ssao_render.frag")),
         })
     };
 
@@ -1481,25 +1478,25 @@ fn set_up_occlusion_render_pass(
     let pass_node = FullscreenPassNode::new(
         pass_descriptor,
         pipeline_handle,
-        vec!["occlusion_texture".into()],
+        vec![node::SSAO_TEXTURE.into()],
     );
-    render_graph.add_node(node::OCCLUSION_RENDER_PASS, pass_node);
+    render_graph.add_node(node::SSAO_RENDER_PASS, pass_node);
 
     // NOTE: The blur Y pass will read from B and write to A
     render_graph
         .add_slot_edge(
             node::SSAO_A_TEXTURE,
             WindowTextureNode::OUT_TEXTURE,
-            node::OCCLUSION_RENDER_PASS,
-            "occlusion_texture",
+            node::SSAO_RENDER_PASS,
+            node::SSAO_TEXTURE,
         )
         .unwrap();
     render_graph
         .add_slot_edge(
             node::SSAO_A_TEXTURE,
             WindowTextureNode::OUT_SAMPLER,
-            node::OCCLUSION_RENDER_PASS,
-            format!("{}_sampler", "occlusion_texture"),
+            node::SSAO_RENDER_PASS,
+            format!("{}_sampler", node::SSAO_TEXTURE),
         )
         .unwrap();
 
@@ -1528,7 +1525,7 @@ fn set_up_occlusion_render_pass(
             .add_slot_edge(
                 node::SAMPLED_COLOR_ATTACHMENT,
                 WindowTextureNode::OUT_TEXTURE,
-                node::OCCLUSION_RENDER_PASS,
+                node::SSAO_RENDER_PASS,
                 "color_attachment",
             )
             .unwrap();
@@ -1536,7 +1533,7 @@ fn set_up_occlusion_render_pass(
             .add_slot_edge(
                 base::node::PRIMARY_SWAP_CHAIN,
                 WindowSwapChainNode::OUT_TEXTURE,
-                node::OCCLUSION_RENDER_PASS,
+                node::SSAO_RENDER_PASS,
                 "color_resolve_target",
             )
             .unwrap();
@@ -1545,7 +1542,7 @@ fn set_up_occlusion_render_pass(
             .add_slot_edge(
                 base::node::PRIMARY_SWAP_CHAIN,
                 WindowSwapChainNode::OUT_TEXTURE,
-                node::OCCLUSION_RENDER_PASS,
+                node::SSAO_RENDER_PASS,
                 "color_attachment",
             )
             .unwrap();
@@ -1554,7 +1551,7 @@ fn set_up_occlusion_render_pass(
     set_up_dummy_main_pass(render_graph, msaa);
 
     render_graph
-        .add_node_edge(node::SSAO_PASS, node::OCCLUSION_RENDER_PASS)
+        .add_node_edge(node::SSAO_PASS, node::SSAO_RENDER_PASS)
         .unwrap();
 }
 
