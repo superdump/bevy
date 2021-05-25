@@ -448,8 +448,7 @@ fn scene_loaded(
                 let mut material = materials
                     .get_mut(material_handle)
                     .expect("Failed to get material");
-                material.occlusion_texture = Some(OCCLUSION_TEXTURE_HANDLE.typed());
-                material.occlusion_texture_coordinate_space = 1;
+                material.ssao_texture = Some(OCCLUSION_TEXTURE_HANDLE.typed());
             }
             let transform = scene_handles.transform;
             commands
