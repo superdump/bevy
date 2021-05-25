@@ -125,6 +125,11 @@ layout(set = 3,
        binding = 14) uniform sampler StandardMaterial_emissive_texture_sampler;
 #    endif
 
+#    ifdef STANDARDMATERIAL_SSAO_TEXTURE
+layout(set = 3, binding = 15) uniform texture2D StandardMaterial_ssao_texture;
+layout(set = 3, binding = 16) uniform sampler StandardMaterial_ssao_texture_sampler;
+#    endif
+
 #    define saturate(x) clamp(x, 0.0, 1.0)
 const float PI = 3.141592653589793;
 
@@ -392,6 +397,12 @@ void main() {
     float occlusion = texture(sampler2D(StandardMaterial_occlusion_texture, StandardMaterial_occlusion_texture_sampler), v_Uv).r;
 #    else
     float occlusion = 1.0;
+#    endif
+
+#    ifdef STANDARDMATERIAL_SSAO_TEXTURE
+    const ivec2 size = textureSize(sampler2D(StandardMaterial_ssao_texture, StandardMaterial_ssao_texture_sampler), 0);
+    const vec2 screen_uv = gl_FragCoord.xy / vec2(size);
+    occlusion = min(occlusion, texture(sampler2D(StandardMaterial_ssao_texture, StandardMaterial_ssao_texture_sampler), screen_uv).r);
 #    endif
 
 #    ifdef STANDARDMATERIAL_EMISSIVE_TEXTURE

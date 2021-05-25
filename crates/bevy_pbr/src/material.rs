@@ -34,6 +34,8 @@ pub struct StandardMaterial {
     pub double_sided: bool,
     #[shader_def]
     pub occlusion_texture: Option<Handle<Texture>>,
+    #[shader_def]
+    pub ssao_texture: Option<Handle<Texture>>,
     // Use a color for user friendliness even though we technically don't use the alpha channel
     // Might be used in the future for exposure correction in HDR
     pub emissive: Color,
@@ -65,6 +67,9 @@ impl Default for StandardMaterial {
             normal_map: None,
             double_sided: false,
             occlusion_texture: None,
+            /// Screen-space occlusion texture for SSAO and similar techniques
+            /// The occlusion_texture and this are combined with min()
+            ssao_texture: None,
             emissive: Color::BLACK,
             emissive_texture: None,
             unlit: false,
