@@ -24,8 +24,9 @@ use bevy::{
         },
         render_graph::{
             base::{self, camera, BaseRenderGraphConfig, MainPass},
-            fullscreen_pass_node, FullscreenPassNode, GlobalRenderResourcesNode, PassNode,
-            RenderGraph, RenderResourcesNode, WindowSwapChainNode, WindowTextureNode,
+            fullscreen_pass_node, AssetRenderResourcesNode, FullscreenPassNode,
+            GlobalRenderResourcesNode, PassNode, RenderGraph, RenderResourcesNode,
+            WindowSwapChainNode, WindowTextureNode,
         },
         renderer::{RenderResource, RenderResources},
         shader::{self, ShaderStage, ShaderStages},
@@ -48,6 +49,7 @@ mod node {
     // Nodes
     pub const TRANSFORM: &str = "transform";
     pub const MODEL_INV_TRANS_3: &str = "model_inv_trans_3";
+    pub const STANDARD_MATERIAL: &str = "standard_material";
     pub const DEPTH_NORMAL_PRE_PASS: &str = "depth_normal_pre_pass_node";
     pub const DEPTH_RENDER_PASS: &str = "depth_render_pass";
     pub const NORMAL_RENDER_PASS: &str = "normal_render_pass";
