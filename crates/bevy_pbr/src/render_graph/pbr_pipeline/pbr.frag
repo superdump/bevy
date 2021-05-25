@@ -113,19 +113,16 @@ layout(set = 3,
 layout(set = 3, binding = 10) uniform texture2D StandardMaterial_occlusion_texture;
 layout(set = 3,
        binding = 11) uniform sampler StandardMaterial_occlusion_texture_sampler;
-layout(set = 3, binding = 12) uniform StandardMaterial_occlusion_texture_coordinate_space {
-    uint occlusion_texture_coordinate_space;
-};
 #    endif
 
-layout(set = 3, binding = 13) uniform StandardMaterial_emissive {
+layout(set = 3, binding = 12) uniform StandardMaterial_emissive {
     vec4 emissive;
 };
 
 #    if defined(STANDARDMATERIAL_EMISSIVE_TEXTURE)
-layout(set = 3, binding = 14) uniform texture2D StandardMaterial_emissive_texture;
+layout(set = 3, binding = 13) uniform texture2D StandardMaterial_emissive_texture;
 layout(set = 3,
-       binding = 15) uniform sampler StandardMaterial_emissive_texture_sampler;
+       binding = 14) uniform sampler StandardMaterial_emissive_texture_sampler;
 #    endif
 
 #    define saturate(x) clamp(x, 0.0, 1.0)
@@ -392,16 +389,7 @@ void main() {
 #    endif
 
 #    ifdef STANDARDMATERIAL_OCCLUSION_TEXTURE
-    vec2 occlusion_uv;
-    if (occlusion_texture_coordinate_space == 1) {
-        // Screen-space UVs
-        const ivec2 size = textureSize(sampler2D(StandardMaterial_occlusion_texture, StandardMaterial_occlusion_texture_sampler), 0);
-        occlusion_uv = gl_FragCoord.xy / vec2(size);
-    } else {
-        // Mesh UVs
-        occlusion_uv = v_Uv;
-    }
-    float occlusion = texture(sampler2D(StandardMaterial_occlusion_texture, StandardMaterial_occlusion_texture_sampler), occlusion_uv).r;
+    float occlusion = texture(sampler2D(StandardMaterial_occlusion_texture, StandardMaterial_occlusion_texture_sampler), v_Uv).r;
 #    else
     float occlusion = 1.0;
 #    endif
