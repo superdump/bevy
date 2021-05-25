@@ -229,6 +229,10 @@ fn main() {
         .add_system_to_stage(
             RenderStage::PostRender,
             shader::clear_shader_defs_system::<DepthNormalPass>.system(),
+        )
+        .add_system_to_stage(
+            CoreStage::PostUpdate,
+            shader::asset_shader_defs_system::<StandardMaterial, DepthNormalPass>.system(),
         );
 
     app.insert_resource(SceneHandles::default())
@@ -699,11 +703,18 @@ fn set_up_depth_normal_pre_pass(msaa: &Msaa, render_graph: &mut RenderGraph) {
         node::MODEL_INV_TRANS_3,
         RenderResourcesNode::<ModelInvTrans3, DepthNormalPass>::new(true),
     );
+    render_graph.add_system_node(
+        node::STANDARD_MATERIAL,
+        AssetRenderResourcesNode::<StandardMaterial, DepthNormalPass>::new(true),
+    );
     render_graph
         .add_node_edge(node::TRANSFORM, node::DEPTH_NORMAL_PRE_PASS)
         .unwrap();
     render_graph
         .add_node_edge(node::MODEL_INV_TRANS_3, node::DEPTH_NORMAL_PRE_PASS)
+        .unwrap();
+    render_graph
+        .add_node_edge(node::STANDARD_MATERIAL, node::DEPTH_NORMAL_PRE_PASS)
         .unwrap();
 
     render_graph
