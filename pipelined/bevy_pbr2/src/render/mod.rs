@@ -1,7 +1,7 @@
 mod light;
 pub use light::*;
 
-use crate::StandardMaterial;
+use crate::{StandardMaterial, StandardMaterialUniformData};
 use bevy_asset::{Assets, Handle};
 use bevy_ecs::{prelude::*, system::SystemState};
 use bevy_math::Mat4;
@@ -11,13 +11,16 @@ use bevy_render2::{
     pipeline::*,
     render_graph::{Node, NodeRunError, RenderGraphContext},
     render_phase::{Draw, DrawFunctions, Drawable, RenderPhase, TrackedRenderPass},
-    render_resource::{BindGroupBuilder, BindGroupId, BufferId, DynamicUniformVec},
+    render_resource::{
+        BindGroupBuilder, BindGroupId, BufferId, DynamicUniformVec, RenderResourceBinding,
+    },
     renderer::{RenderContext, RenderResources},
     shader::{Shader, ShaderStage, ShaderStages},
     texture::{TextureFormat, TextureSampleType},
     view::{ViewMeta, ViewUniform},
 };
 use bevy_transform::components::GlobalTransform;
+use crevice::std140::AsStd140;
 
 pub struct PbrShaders {
     pipeline: PipelineId,
@@ -143,6 +146,8 @@ struct ExtractedMesh {
     vertex_buffer: BufferId,
     index_info: Option<IndexInfo>,
     transform_binding_offset: u32,
+    material_buffer: BufferId,
+    material_bind_group_id: Option<BindGroupId>,
 }
 
 struct IndexInfo {
@@ -157,22 +162,29 @@ pub struct ExtractedMeshes {
 pub fn extract_meshes(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
-    _materials: Res<Assets<StandardMaterial>>,
+    materials: Res<Assets<StandardMaterial>>,
     query: Query<(&GlobalTransform, &Handle<Mesh>, &Handle<StandardMaterial>)>,
 ) {
     let mut extracted_meshes = Vec::new();
-    for (transform, mesh_handle, _material_handle) in query.iter() {
+    for (transform, mesh_handle, material_handle) in query.iter() {
         if let Some(mesh) = meshes.get(mesh_handle) {
-            if let Some(gpu_data) = &mesh.gpu_data() {
-                extracted_meshes.push(ExtractedMesh {
-                    transform: transform.compute_matrix(),
-                    vertex_buffer: gpu_data.vertex_buffer,
-                    index_info: gpu_data.index_buffer.map(|i| IndexInfo {
-                        buffer: i,
-                        count: mesh.indices().unwrap().len() as u32,
-                    }),
-                    transform_binding_offset: 0,
-                })
+            if let Some(mesh_gpu_data) = &mesh.gpu_data() {
+                if let Some(material) = materials.get(material_handle) {
+                    if let Some(material_gpu_data) = &material.gpu_data() {
+                        extracted_meshes.push(ExtractedMesh {
+                            transform: transform.compute_matrix(),
+                            vertex_buffer: mesh_gpu_data.vertex_buffer,
+                            index_info: mesh_gpu_data.index_buffer.map(|i| IndexInfo {
+                                buffer: i,
+                                count: mesh.indices().unwrap().len() as u32,
+                            }),
+                            transform_binding_offset: 0,
+                            material_buffer: material_gpu_data.buffer,
+                            // The BindGroup gets made when making other BindGroups in queue_meshes()
+                            material_bind_group_id: None,
+                        });
+                    }
+                }
             }
         }
     }
@@ -220,7 +232,7 @@ pub fn queue_meshes(
     mesh_meta: Res<MeshMeta>,
     light_meta: Res<LightMeta>,
     view_meta: Res<ViewMeta>,
-    extracted_meshes: Res<ExtractedMeshes>,
+    mut extracted_meshes: ResMut<ExtractedMeshes>,
     mut views: Query<(Entity, &ViewLights, &mut RenderPhase<Transparent3dPhase>)>,
     mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
 ) {
@@ -250,7 +262,21 @@ pub fn queue_meshes(
         });
 
         let draw_pbr = draw_functions.read().get_id::<DrawPbr>().unwrap();
-        for i in 0..extracted_meshes.meshes.len() {
+        for (i, mesh) in extracted_meshes.meshes.iter_mut().enumerate() {
+            if mesh.material_bind_group_id.is_none() {
+                let material_bind_group = BindGroupBuilder::default()
+                    .add_binding(
+                        0,
+                        RenderResourceBinding::Buffer {
+                            buffer: mesh.material_buffer,
+                            range: 0..StandardMaterialUniformData::std140_size_static() as u64,
+                        },
+                    )
+                    .finish();
+                render_resources.create_bind_group(layout.bind_group(2).id, &material_bind_group);
+                mesh.material_bind_group_id = Some(material_bind_group.id);
+            }
+
             // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
             transparent_phase.add(Drawable {
                 draw_function: draw_pbr,
@@ -355,6 +381,14 @@ impl Draw for DrawPbr {
             layout.bind_group(1).id,
             mesh_view_bind_groups.mesh_transform_bind_group,
             Some(&[extracted_mesh.transform_binding_offset]),
+        );
+        pass.set_bind_group(
+            2,
+            layout.bind_group(2).id,
+            extracted_mesh
+                .material_bind_group_id
+                .expect("Cannot set bind group as there is no material bind group id"),
+            None,
         );
         pass.set_vertex_buffer(0, extracted_mesh.vertex_buffer, 0);
         if let Some(index_info) = &extracted_mesh.index_info {

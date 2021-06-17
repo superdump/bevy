@@ -9,7 +9,6 @@ pub use material::*;
 pub use render::*;
 
 use bevy_app::prelude::*;
-use bevy_asset::AddAsset;
 use bevy_ecs::prelude::*;
 use bevy_render2::{
     core_pipeline,
@@ -29,7 +28,7 @@ pub struct PbrPlugin;
 
 impl Plugin for PbrPlugin {
     fn build(&self, app: &mut App) {
-        app.add_asset::<StandardMaterial>();
+        app.add_plugin(StandardMaterialPlugin);
 
         let render_app = app.sub_app_mut(0);
         render_app
