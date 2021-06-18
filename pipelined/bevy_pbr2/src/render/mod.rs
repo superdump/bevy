@@ -1,4 +1,5 @@
 mod light;
+use bevy_utils::HashMap;
 pub use light::*;
 
 use crate::{StandardMaterial, StandardMaterialUniformData};
@@ -147,7 +148,6 @@ struct ExtractedMesh {
     index_info: Option<IndexInfo>,
     transform_binding_offset: u32,
     material_buffer: BufferId,
-    material_bind_group_id: Option<BindGroupId>,
 }
 
 struct IndexInfo {
@@ -180,8 +180,6 @@ pub fn extract_meshes(
                             }),
                             transform_binding_offset: 0,
                             material_buffer: material_gpu_data.buffer,
-                            // The BindGroup gets made when making other BindGroups in queue_meshes()
-                            material_bind_group_id: None,
                         });
                     }
                 }
@@ -223,6 +221,11 @@ struct MeshViewBindGroups {
     mesh_transform_bind_group: BindGroupId,
 }
 
+#[derive(Default)]
+pub struct MaterialMeta {
+    material_bind_groups: Vec<BindGroupId>,
+}
+
 pub fn queue_meshes(
     mut commands: Commands,
     draw_functions: Res<DrawFunctions>,
@@ -230,6 +233,7 @@ pub fn queue_meshes(
     pbr_shaders: Res<PbrShaders>,
     shadow_shaders: Res<ShadowShaders>,
     mesh_meta: Res<MeshMeta>,
+    mut material_meta: ResMut<MaterialMeta>,
     light_meta: Res<LightMeta>,
     view_meta: Res<ViewMeta>,
     mut extracted_meshes: ResMut<ExtractedMeshes>,
@@ -261,27 +265,38 @@ pub fn queue_meshes(
             mesh_transform_bind_group: mesh_transform_bind_group.id,
         });
 
+        // TODO: free old bind groups? clear_unused_bind_groups() currently does this for us? Moving to RAII would also do this for us?
+        material_meta.material_bind_groups.clear();
+        let mut material_bind_group_indices = HashMap::default();
+
         let draw_pbr = draw_functions.read().get_id::<DrawPbr>().unwrap();
         for (i, mesh) in extracted_meshes.meshes.iter_mut().enumerate() {
-            if mesh.material_bind_group_id.is_none() {
-                let material_bind_group = BindGroupBuilder::default()
-                    .add_binding(
-                        0,
-                        RenderResourceBinding::Buffer {
-                            buffer: mesh.material_buffer,
-                            range: 0..StandardMaterialUniformData::std140_size_static() as u64,
-                        },
-                    )
-                    .finish();
-                render_resources.create_bind_group(layout.bind_group(2).id, &material_bind_group);
-                mesh.material_bind_group_id = Some(material_bind_group.id);
-            }
+            let material_bind_group_index = *material_bind_group_indices
+                .entry(mesh.material_buffer)
+                .or_insert_with(|| {
+                    let index = material_meta.material_bind_groups.len();
+                    let material_bind_group = BindGroupBuilder::default()
+                        .add_binding(
+                            0,
+                            RenderResourceBinding::Buffer {
+                                buffer: mesh.material_buffer,
+                                range: 0..StandardMaterialUniformData::std140_size_static() as u64,
+                            },
+                        )
+                        .finish();
+                    render_resources
+                        .create_bind_group(layout.bind_group(2).id, &material_bind_group);
+                    material_meta
+                        .material_bind_groups
+                        .push(material_bind_group.id);
+                    index
+                });
 
             // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
             transparent_phase.add(Drawable {
                 draw_function: draw_pbr,
                 draw_key: i,
-                sort_key: 0, // TODO: sort back-to-front
+                sort_key: material_bind_group_index, // TODO: sort back-to-front, sorting by material for now
             });
         }
 
@@ -338,6 +353,7 @@ impl Node for PbrNode {
 
 type DrawPbrParams<'a> = (
     Res<'a, PbrShaders>,
+    Res<'a, MaterialMeta>,
     Res<'a, ExtractedMeshes>,
     Query<'a, (&'a ViewUniform, &'a MeshViewBindGroups, &'a ViewLights)>,
 );
@@ -360,9 +376,9 @@ impl Draw for DrawPbr {
         pass: &mut TrackedRenderPass,
         view: Entity,
         draw_key: usize,
-        _sort_key: usize,
+        sort_key: usize,
     ) {
-        let (pbr_shaders, extracted_meshes, views) = self.params.get(world);
+        let (pbr_shaders, material_meta, extracted_meshes, views) = self.params.get(world);
         let (view_uniforms, mesh_view_bind_groups, view_lights) = views.get(view).unwrap();
         let layout = &pbr_shaders.pipeline_descriptor.layout;
         let extracted_mesh = &extracted_meshes.meshes[draw_key];
@@ -385,9 +401,7 @@ impl Draw for DrawPbr {
         pass.set_bind_group(
             2,
             layout.bind_group(2).id,
-            extracted_mesh
-                .material_bind_group_id
-                .expect("Cannot set bind group as there is no material bind group id"),
+            material_meta.material_bind_groups[sort_key],
             None,
         );
         pass.set_vertex_buffer(0, extracted_mesh.vertex_buffer, 0);
