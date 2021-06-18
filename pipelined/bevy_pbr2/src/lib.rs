@@ -18,6 +18,15 @@ use bevy_render2::{
     RenderStage,
 };
 
+pub mod prelude {
+    #[doc(hidden)]
+    pub use crate::{
+        bundle::*,
+        light::PointLight,
+        material::StandardMaterial,
+    };
+}
+
 pub mod draw_3d_graph {
     pub mod node {
         pub const SHADOW_PASS: &'static str = "shadow_pass";

@@ -1,5 +1,7 @@
 /// `use bevy::prelude::*;` to import common components, bundles, and plugins.
 pub mod prelude;
+/// `use bevy::prelude2::*;` to import common components, bundles, and plugins with the pipelined renderer.
+pub mod prelude2;
 
 mod default_plugins;
 pub use default_plugins::*;

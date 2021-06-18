@@ -29,6 +29,18 @@ use bevy_app::{App, Plugin, StartupStage};
 use bevy_ecs::prelude::*;
 use bevy_utils::tracing::warn;
 
+pub mod prelude {
+    #[doc(hidden)]
+    pub use crate::{
+        camera::*,
+        color::Color,
+        mesh::{shape, Mesh},
+        pass::ClearColor,
+        shader::Shader,
+        texture::Texture,
+    };
+}
+
 #[derive(Default)]
 pub struct RenderPlugin;
 

@@ -14,6 +14,14 @@ use bevy_render2::{
     core_pipeline, render_graph::RenderGraph, render_phase::DrawFunctions, RenderStage,
 };
 
+pub mod prelude {
+    #[doc(hidden)]
+    pub use crate::{
+        bundle::PipelinedSpriteBundle,
+        Sprite, SpriteResizeMode,
+    };
+}
+
 #[derive(Default)]
 pub struct SpritePlugin;
 
