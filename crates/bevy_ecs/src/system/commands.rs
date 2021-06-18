@@ -85,9 +85,7 @@ impl<'a> Commands<'a> {
     }
 
     pub fn get_or_spawn(&mut self, entity: Entity) -> EntityCommands<'a, '_> {
-        self.add(GetOrSpawn {
-            entity,
-        });
+        self.add(GetOrSpawn { entity });
         EntityCommands {
             entity,
             commands: self,
@@ -318,8 +316,7 @@ pub struct GetOrSpawn {
     entity: Entity,
 }
 
-impl Command for GetOrSpawn
-{
+impl Command for GetOrSpawn {
     fn write(self: Box<Self>, world: &mut World) {
         world.get_or_spawn(self.entity);
     }
