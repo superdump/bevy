@@ -1,5 +1,39 @@
 #version 450
 
+// From the Filament design doc
+// https://google.github.io/filament/Filament.html#table_symbols
+// Symbol Definition
+// v    View unit vector
+// l    Incident light unit vector
+// n    Surface normal unit vector
+// h    Half unit vector between l and v
+// f    BRDF
+// f_d    Diffuse component of a BRDF
+// f_r    Specular component of a BRDF
+// α    Roughness, remapped from using input perceptualRoughness
+// σ    Diffuse reflectance
+// Ω    Spherical domain
+// f0    Reflectance at normal incidence
+// f90    Reflectance at grazing angle
+// χ+(a)    Heaviside function (1 if a>0 and 0 otherwise)
+// nior    Index of refraction (IOR) of an interface
+// ⟨n⋅l⟩    Dot product clamped to [0..1]
+// ⟨a⟩    Saturated value (clamped to [0..1])
+
+// The Bidirectional Reflectance Distribution Function (BRDF) describes the surface response of a standard material
+// and consists of two components, the diffuse component (f_d) and the specular component (f_r):
+// f(v,l) = f_d(v,l) + f_r(v,l)
+//
+// The form of the microfacet model is the same for diffuse and specular
+// f_r(v,l) = f_d(v,l) = 1 / { |n⋅v||n⋅l| } ∫_Ω D(m,α) G(v,l,m) f_m(v,l,m) (v⋅m) (l⋅m) dm
+//
+// In which:
+// D, also called the Normal Distribution Function (NDF) models the distribution of the microfacets
+// G models the visibility (or occlusion or shadow-masking) of the microfacets
+// f_m is the microfacet BRDF and differs between specular and diffuse components
+//
+// The above integration needs to be approximated.
+
 layout(location = 0) in vec4 v_WorldPosition;
 layout(location = 1) in vec3 v_WorldNormal;
 layout(location = 2) in vec2 v_Uv;
@@ -14,9 +48,22 @@ struct PointLight {
     mat4 projection;
 };
 
-// NOTE: this must be kept in sync with lights::MAX_LIGHTS
+// NOTE: this must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
 // TODO: this can be removed if we move to storage buffers for light arrays
 const int MAX_POINT_LIGHTS = 10;
+
+struct StandardMaterial_t {
+    vec4 base_color;
+    vec4 emissive;
+    float perceptual_roughness;
+    float metallic;
+    float reflectance;
+    // 'flags' is a bit field indicating various option. uint is 32 bits so we have up to 32 options.
+    uint flags;
+};
+
+// NOTE: These must match those defined in bevy_pbr2/src/material.rs
+const uint FLAGS_DOUBLE_SIDED_BIT = (1 << 0);
 
 // View bindings - set 0
 layout(set = 0, binding = 0) uniform View {
@@ -31,16 +78,21 @@ layout(set = 0, binding = 2) uniform texture2DArray t_Shadow;
 layout(set = 0, binding = 3) uniform samplerShadow s_Shadow;
 
 // Material bindings - set 2
-struct StandardMaterial_t {
-    vec4 color;
-    float roughness;
-    float metallic;
-    float reflectance;
-    vec4 emissive;
-};
 layout(set = 2, binding = 0) uniform StandardMaterial {
     StandardMaterial_t Material;
 };
+
+layout(set = 2, binding = 1) uniform texture2D StandardMaterial_base_color_texture;
+layout(set = 2, binding = 2) uniform sampler StandardMaterial_base_color_texture_sampler;
+
+layout(set = 2, binding = 3) uniform texture2D StandardMaterial_emissive_texture;
+layout(set = 2, binding = 4) uniform sampler StandardMaterial_emissive_texture_sampler;
+
+layout(set = 2, binding = 5) uniform texture2D StandardMaterial_metallic_roughness_texture;
+layout(set = 2, binding = 6) uniform sampler StandardMaterial_metallic_roughness_texture_sampler;
+
+layout(set = 2, binding = 7) uniform texture2D StandardMaterial_occlusion_texture;
+layout(set = 2, binding = 8) uniform sampler StandardMaterial_occlusion_texture_sampler;
 
 #    define saturate(x) clamp(x, 0.0, 1.0)
 const float PI = 3.141592653589793;
@@ -265,47 +317,86 @@ float fetch_shadow(int light_id, vec4 homogeneous_coords) {
 }
 
 void main() {
-    vec4 color = Material.color;
-    float metallic = Material.metallic;
-    float reflectance = Material.reflectance;
-    float perceptual_roughness = Material.roughness;
-    vec3 emissive = Material.emissive.xyz;
+    // FIXME: Add view binding from an AmbientLight resource
     vec3 ambient_color = vec3(0.1, 0.1, 0.1);
-    float occlusion = 1.0;
 
-    float roughness = perceptualRoughnessToRoughness(perceptual_roughness);    
+    vec4 output_color = Material.base_color
+        * texture(sampler2D(StandardMaterial_base_color_texture, StandardMaterial_base_color_texture_sampler), v_Uv);
+
+// FIXME: Just use a separate shader for unlit?
+// #ifndef STANDARDMATERIAL_UNLIT
+    // TODO use .a for exposure compensation in HDR
+    vec4 emissive = Material.emissive;
+    emissive.rgb *= texture(sampler2D(StandardMaterial_emissive_texture, StandardMaterial_emissive_texture_sampler), v_Uv).rgb;
+
+    // calculate non-linear roughness from linear perceptualRoughness
+    vec4 metallic_roughness = texture(sampler2D(StandardMaterial_metallic_roughness_texture, StandardMaterial_metallic_roughness_texture_sampler), v_Uv);
+    // Sampling from GLTF standard channels for now
+    float metallic = Material.metallic * metallic_roughness.b;
+    float perceptual_roughness = Material.perceptual_roughness * metallic_roughness.g;
+
+    float roughness = perceptualRoughnessToRoughness(perceptual_roughness);
+
+    float occlusion = texture(sampler2D(StandardMaterial_occlusion_texture, StandardMaterial_occlusion_texture_sampler), v_Uv).r;
+
     vec3 N = normalize(v_WorldNormal);
+
+// FIXME: Normal maps need an additional vertex attribute and vertex stage output/fragment stage input
+//        Just use a separate shader for lit with normal maps?
+// #    ifdef STANDARDMATERIAL_NORMAL_MAP
+//     vec3 T = normalize(v_WorldTangent.xyz);
+//     vec3 B = cross(N, T) * v_WorldTangent.w;
+// #    endif
+
+    if ((Material.flags & FLAGS_DOUBLE_SIDED_BIT) != 0) {
+        N = gl_FrontFacing ? N : -N;
+// #        ifdef STANDARDMATERIAL_NORMAL_MAP
+//     T = gl_FrontFacing ? T : -T;
+//     B = gl_FrontFacing ? B : -B;
+// #        endif
+    }
+
+// #    ifdef STANDARDMATERIAL_NORMAL_MAP
+//     mat3 TBN = mat3(T, B, N);
+//     N = TBN * normalize(texture(sampler2D(StandardMaterial_normal_map, StandardMaterial_normal_map_sampler), v_Uv).rgb * 2.0 - 1.0);
+// #    endif
+
     vec3 V = normalize(ViewWorldPosition.xyz - v_WorldPosition.xyz);
-    vec3 R = reflect(-V, N);
     // Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"
     float NdotV = max(dot(N, V), 1e-4);
 
     // Remapping [0,1] reflectance to F0
     // See https://google.github.io/filament/Filament.html#materialsystem/parameterization/remapping
-    vec3 F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + color.rgb * metallic;
+    float reflectance = Material.reflectance;
+    vec3 F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + output_color.rgb * metallic;
 
     // Diffuse strength inversely related to metallicity
-    vec3 diffuse_color = color.rgb * (1.0 - metallic);
+    vec3 diffuse_color = output_color.rgb * (1.0 - metallic);
 
-    vec3 output_color = vec3(0.0);
+    vec3 R = reflect(-V, N);
+
+    // accumulate color
+    vec3 light_accum = vec3(0.0);
     for (int i = 0; i < int(NumLights); ++i) {
         PointLight light = PointLights[i];
         vec3 light_contrib = point_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
         float shadow = fetch_shadow(i, light.projection * v_WorldPosition);
-        output_color += light_contrib * shadow;
+        light_accum += light_contrib * shadow;
     }
 
     vec3 diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
     vec3 specular_ambient = EnvBRDFApprox(F0, perceptual_roughness, NdotV);
 
-    output_color += (diffuse_ambient + specular_ambient) * ambient_color * occlusion;
-    output_color += emissive * color.a;
+    output_color.rgb = light_accum;
+    output_color.rgb += (diffuse_ambient + specular_ambient) * ambient_color * occlusion;
+    output_color.rgb += emissive.rgb * output_color.a;
 
     // tone_mapping
-    output_color = reinhard_luminance(output_color);
+    output_color.rgb = reinhard_luminance(output_color.rgb);
     // Gamma correction.
     // Not needed with sRGB buffer
-    // output_color = pow(output_color, vec3(1.0 / 2.2));
+    // output_color.rgb = pow(output_color.rgb, vec3(1.0 / 2.2));
+// #endif
 
-    o_Target = vec4(output_color, 1.0);
+    o_Target = output_color;
 }

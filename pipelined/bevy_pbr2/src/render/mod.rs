@@ -10,14 +10,19 @@ use bevy_render2::{
     core_pipeline::Transparent3dPhase,
     mesh::Mesh,
     pipeline::*,
+    render_command::RenderCommandQueue,
     render_graph::{Node, NodeRunError, RenderGraphContext},
     render_phase::{Draw, DrawFunctions, Drawable, RenderPhase, TrackedRenderPass},
     render_resource::{
-        BindGroupBuilder, BindGroupId, BufferId, DynamicUniformVec, RenderResourceBinding,
+        BindGroupBuilder, BindGroupId, BufferId, BufferInfo, BufferUsage, DynamicUniformVec,
+        RenderResourceBinding, SamplerId, TextureId, TextureViewId,
     },
     renderer::{RenderContext, RenderResources},
     shader::{Shader, ShaderStage, ShaderStages},
-    texture::{TextureFormat, TextureSampleType},
+    texture::{
+        SamplerDescriptor, Texture, TextureDescriptor, TextureFormat, TextureGpuData,
+        TextureSampleType, TextureViewDescriptor,
+    },
     view::{ViewMeta, ViewUniform},
 };
 use bevy_transform::components::GlobalTransform;
@@ -26,6 +31,10 @@ use crevice::std140::AsStd140;
 pub struct PbrShaders {
     pipeline: PipelineId,
     pipeline_descriptor: RenderPipelineDescriptor,
+    // This dummy white texture is to be used in place of optional StandardMaterial textures
+    dummy_white_texture: TextureId,
+    dummy_white_texture_view: TextureViewId,
+    dummy_white_texture_sampler: SamplerId,
 }
 
 // TODO: this pattern for initializing the shaders / pipeline isn't ideal. this should be handled by the asset system
@@ -135,11 +144,62 @@ impl FromWorld for PbrShaders {
 
         let pipeline = render_resources.create_render_pipeline(&pipeline_descriptor);
 
+        // A 1x1x1 'all 1.0' texture to use as a dummy texture to use in place of optional StandardMaterial textures
+        let (dummy_white_texture, dummy_white_texture_view, dummy_white_texture_sampler) = {
+            let texture_descriptor = TextureDescriptor::default();
+            let texture_id = render_resources.create_texture(texture_descriptor);
+            let sampler_id = render_resources.create_sampler(&SamplerDescriptor::default());
+
+            let width = texture_descriptor.size.width as usize;
+            let aligned_width = render_resources.get_aligned_texture_size(width);
+            let format_size = texture_descriptor.format.pixel_size();
+            let aligned_data = vec![
+                255;
+                format_size
+                    * aligned_width
+                    * texture_descriptor.size.height as usize
+                    * texture_descriptor.size.depth_or_array_layers as usize
+            ];
+            let staging_buffer_id = render_resources.create_buffer_with_data(
+                BufferInfo {
+                    buffer_usage: BufferUsage::COPY_SRC,
+                    ..Default::default()
+                },
+                &aligned_data,
+            );
+
+            let texture_view_id =
+                render_resources.create_texture_view(texture_id, TextureViewDescriptor::default());
+
+            let mut render_command_queue = world.get_resource_mut::<RenderCommandQueue>().unwrap();
+            render_command_queue.copy_buffer_to_texture(
+                staging_buffer_id,
+                0,
+                (format_size * aligned_width) as u32,
+                texture_id,
+                [0, 0, 0],
+                0,
+                texture_descriptor.size,
+            );
+            render_command_queue.free_buffer(staging_buffer_id);
+
+            (texture_id, texture_view_id, sampler_id)
+        };
         PbrShaders {
             pipeline,
             pipeline_descriptor,
+            dummy_white_texture,
+            dummy_white_texture_view,
+            dummy_white_texture_sampler,
         }
     }
+}
+
+struct ExtractedStandardMaterialTextures {
+    base_color_texture: Option<TextureGpuData>,
+    emissive_texture: Option<TextureGpuData>,
+    metallic_roughness_texture: Option<TextureGpuData>,
+    occlusion_texture: Option<TextureGpuData>,
 }
 
 struct ExtractedMesh {
@@ -148,6 +208,7 @@ struct ExtractedMesh {
     index_info: Option<IndexInfo>,
     transform_binding_offset: u32,
     material_buffer: BufferId,
+    material_textures: ExtractedStandardMaterialTextures,
 }
 
 struct IndexInfo {
@@ -163,6 +224,7 @@ pub fn extract_meshes(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
     materials: Res<Assets<StandardMaterial>>,
+    textures: Res<Assets<Texture>>,
     query: Query<(&GlobalTransform, &Handle<Mesh>, &Handle<StandardMaterial>)>,
 ) {
     let mut extracted_meshes = Vec::new();
@@ -180,6 +242,40 @@ pub fn extract_meshes(
                             }),
                             transform_binding_offset: 0,
                             material_buffer: material_gpu_data.buffer,
+                            material_textures: ExtractedStandardMaterialTextures {
+                                base_color_texture: material.base_color_texture.as_ref().map_or(
+                                    None,
+                                    |texture_handle| {
+                                        textures
+                                            .get(texture_handle)
+                                            .map_or(None, |texture| texture.gpu_data.clone())
+                                    },
+                                ),
+                                emissive_texture: material.emissive_texture.as_ref().map_or(
+                                    None,
+                                    |texture_handle| {
+                                        textures
+                                            .get(texture_handle)
+                                            .map_or(None, |texture| texture.gpu_data.clone())
+                                    },
+                                ),
+                                metallic_roughness_texture: material
+                                    .metallic_roughness_texture
+                                    .as_ref()
+                                    .map_or(None, |texture_handle| {
+                                        textures
+                                            .get(texture_handle)
+                                            .map_or(None, |texture| texture.gpu_data.clone())
+                                    }),
+                                occlusion_texture: material.occlusion_texture.as_ref().map_or(
+                                    None,
+                                    |texture_handle| {
+                                        textures
+                                            .get(texture_handle)
+                                            .map_or(None, |texture| texture.gpu_data.clone())
+                                    },
+                                ),
+                            },
                         });
                     }
                 }
@@ -275,15 +371,64 @@ pub fn queue_meshes(
                 .entry(mesh.material_buffer)
                 .or_insert_with(|| {
                     let index = material_meta.material_bind_groups.len();
-                    let material_bind_group = BindGroupBuilder::default()
-                        .add_binding(
-                            0,
-                            RenderResourceBinding::Buffer {
-                                buffer: mesh.material_buffer,
-                                range: 0..StandardMaterialUniformData::std140_size_static() as u64,
-                            },
-                        )
-                        .finish();
+                    let material_bind_group = {
+                        let (base_color_texture_view, base_color_texture_sampler) =
+                            mesh.material_textures.base_color_texture.as_ref().map_or(
+                                (
+                                    pbr_shaders.dummy_white_texture_view,
+                                    pbr_shaders.dummy_white_texture_sampler,
+                                ),
+                                |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+                            );
+
+                        let (emissive_texture_view, emissive_texture_sampler) =
+                            mesh.material_textures.emissive_texture.as_ref().map_or(
+                                (
+                                    pbr_shaders.dummy_white_texture_view,
+                                    pbr_shaders.dummy_white_texture_sampler,
+                                ),
+                                |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+                            );
+
+                        let (metallic_roughness_texture_view, metallic_roughness_texture_sampler) =
+                            mesh.material_textures
+                                .metallic_roughness_texture
+                                .as_ref()
+                                .map_or(
+                                    (
+                                        pbr_shaders.dummy_white_texture_view,
+                                        pbr_shaders.dummy_white_texture_sampler,
+                                    ),
+                                    |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+                                );
+                        let (occlusion_texture_view, occlusion_texture_sampler) =
+                            mesh.material_textures.occlusion_texture.as_ref().map_or(
+                                (
+                                    pbr_shaders.dummy_white_texture_view,
+                                    pbr_shaders.dummy_white_texture_sampler,
+                                ),
+                                |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+                            );
+
+                        BindGroupBuilder::default()
+                            .add_binding(
+                                0,
+                                RenderResourceBinding::Buffer {
+                                    buffer: mesh.material_buffer,
+                                    range: 0..StandardMaterialUniformData::std140_size_static()
+                                        as u64,
+                                },
+                            )
+                            .add_texture_view(1, base_color_texture_view)
+                            .add_sampler(2, base_color_texture_sampler)
+                            .add_texture_view(3, emissive_texture_view)
+                            .add_sampler(4, emissive_texture_sampler)
+                            .add_texture_view(5, metallic_roughness_texture_view)
+                            .add_sampler(6, metallic_roughness_texture_sampler)
+                            .add_texture_view(7, occlusion_texture_view)
+                            .add_sampler(8, occlusion_texture_sampler)
+                            .finish()
+                    };
                     render_resources
                         .create_bind_group(layout.bind_group(2).id, &material_bind_group);
                     material_meta
