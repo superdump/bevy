@@ -23,7 +23,7 @@ use bevy_render2::{
         SamplerDescriptor, Texture, TextureDescriptor, TextureFormat, TextureGpuData,
         TextureSampleType, TextureViewDescriptor,
     },
-    view::{ViewMeta, ViewUniform},
+    view::{ExtractedView, ViewMeta, ViewUniform},
 };
 use bevy_transform::components::GlobalTransform;
 use crevice::std140::AsStd140;
@@ -333,13 +333,18 @@ pub fn queue_meshes(
     light_meta: Res<LightMeta>,
     view_meta: Res<ViewMeta>,
     mut extracted_meshes: ResMut<ExtractedMeshes>,
-    mut views: Query<(Entity, &ViewLights, &mut RenderPhase<Transparent3dPhase>)>,
+    mut views: Query<(
+        Entity,
+        &ExtractedView,
+        &ViewLights,
+        &mut RenderPhase<Transparent3dPhase>,
+    )>,
     mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
 ) {
     if extracted_meshes.meshes.is_empty() {
         return;
     }
-    for (entity, view_lights, mut transparent_phase) in views.iter_mut() {
+    for (entity, view, view_lights, mut transparent_phase) in views.iter_mut() {
         let layout = &pbr_shaders.pipeline_descriptor.layout;
         let view_bind_group = BindGroupBuilder::default()
             .add_binding(0, view_meta.uniforms.binding())
@@ -366,6 +371,8 @@ pub fn queue_meshes(
         let mut material_bind_group_indices = HashMap::default();
 
         let draw_pbr = draw_functions.read().get_id::<DrawPbr>().unwrap();
+        let view_matrix = view.transform.compute_matrix();
+        let view_row_2 = view_matrix.row(2);
         for (i, mesh) in extracted_meshes.meshes.iter_mut().enumerate() {
             let material_bind_group_index = *material_bind_group_indices
                 .entry(mesh.material_buffer)
@@ -437,11 +444,19 @@ pub fn queue_meshes(
                     index
                 });
 
+            // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
+            //       gives the z component of translation of the mesh in view space
+            let mesh_z = view_row_2.dot(mesh.transform.col(3));
+            // FIXME: Switch from usize to u64 for portability and use sort key encoding
+            //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
+            // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
+            let sort_key = (((mesh_z * 1000.0) as usize) << 10)
+                | (material_bind_group_index & ((1 << 10) - 1));
             // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
             transparent_phase.add(Drawable {
                 draw_function: draw_pbr,
                 draw_key: i,
-                sort_key: material_bind_group_index, // TODO: sort back-to-front, sorting by material for now
+                sort_key,
             });
         }
 
@@ -546,7 +561,7 @@ impl Draw for DrawPbr {
         pass.set_bind_group(
             2,
             layout.bind_group(2).id,
-            material_meta.material_bind_groups[sort_key],
+            material_meta.material_bind_groups[sort_key & ((1 << 10) - 1)],
             None,
         );
         pass.set_vertex_buffer(0, extracted_mesh.vertex_buffer, 0);
