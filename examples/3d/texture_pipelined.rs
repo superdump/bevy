@@ -1,7 +1,7 @@
 use bevy::{
     ecs::prelude::*,
     math::{Quat, Vec2, Vec3},
-    pbr2::{PbrBundle, StandardMaterial},
+    pbr2::{PbrBundle, PointLightBundle, StandardMaterial},
     prelude::{App, AssetServer, Assets, Transform},
     render2::{
         camera::PerspectiveCameraBundle,
@@ -92,6 +92,11 @@ fn setup(
     });
     // camera
     commands.spawn_bundle(PerspectiveCameraBundle {
+        transform: Transform::from_xyz(3.0, 5.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..Default::default()
+    });
+    // camera
+    commands.spawn_bundle(PointLightBundle {
         transform: Transform::from_xyz(3.0, 5.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..Default::default()
     });
