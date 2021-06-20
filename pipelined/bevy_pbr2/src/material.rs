@@ -205,7 +205,7 @@ pub fn standard_material_resource_system(
                 flags |= StandardMaterialFlags::UNLIT;
             }
             let value = StandardMaterialUniformData {
-                base_color: material.base_color.into(),
+                base_color: material.base_color.as_rgba_linear().into(),
                 emissive: material.emissive.into(),
                 roughness: material.perceptual_roughness,
                 metallic: material.metallic,
