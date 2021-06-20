@@ -34,7 +34,7 @@ pub struct PbrShaders {
     // This dummy white texture is to be used in place of optional StandardMaterial textures
     dummy_white_texture: TextureId,
     dummy_white_texture_view: TextureViewId,
-    dummy_white_texture_sampler: SamplerId,
+    dummy_white_sampler: SamplerId,
 }
 
 // TODO: this pattern for initializing the shaders / pipeline isn't ideal. this should be handled by the asset system
@@ -145,7 +145,7 @@ impl FromWorld for PbrShaders {
         let pipeline = render_resources.create_render_pipeline(&pipeline_descriptor);
 
         // A 1x1x1 'all 1.0' texture to use as a dummy texture to use in place of optional StandardMaterial textures
-        let (dummy_white_texture, dummy_white_texture_view, dummy_white_texture_sampler) = {
+        let (dummy_white_texture, dummy_white_texture_view, dummy_white_sampler) = {
             let texture_descriptor = TextureDescriptor::default();
             let texture_id = render_resources.create_texture(texture_descriptor);
             let sampler_id = render_resources.create_sampler(&SamplerDescriptor::default());
@@ -190,7 +190,7 @@ impl FromWorld for PbrShaders {
             pipeline_descriptor,
             dummy_white_texture,
             dummy_white_texture_view,
-            dummy_white_texture_sampler,
+            dummy_white_sampler,
         }
     }
 }
@@ -379,40 +379,40 @@ pub fn queue_meshes(
                 .or_insert_with(|| {
                     let index = material_meta.material_bind_groups.len();
                     let material_bind_group = {
-                        let (base_color_texture_view, base_color_texture_sampler) =
+                        let (base_color_texture_view, base_color_sampler) =
                             mesh.material_textures.base_color_texture.as_ref().map_or(
                                 (
                                     pbr_shaders.dummy_white_texture_view,
-                                    pbr_shaders.dummy_white_texture_sampler,
+                                    pbr_shaders.dummy_white_sampler,
                                 ),
                                 |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
                             );
 
-                        let (emissive_texture_view, emissive_texture_sampler) =
+                        let (emissive_texture_view, emissive_sampler) =
                             mesh.material_textures.emissive_texture.as_ref().map_or(
                                 (
                                     pbr_shaders.dummy_white_texture_view,
-                                    pbr_shaders.dummy_white_texture_sampler,
+                                    pbr_shaders.dummy_white_sampler,
                                 ),
                                 |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
                             );
 
-                        let (metallic_roughness_texture_view, metallic_roughness_texture_sampler) =
-                            mesh.material_textures
-                                .metallic_roughness_texture
-                                .as_ref()
-                                .map_or(
-                                    (
-                                        pbr_shaders.dummy_white_texture_view,
-                                        pbr_shaders.dummy_white_texture_sampler,
-                                    ),
-                                    |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
-                                );
-                        let (occlusion_texture_view, occlusion_texture_sampler) =
+                        let (metallic_roughness_texture_view, metallic_roughness_sampler) = mesh
+                            .material_textures
+                            .metallic_roughness_texture
+                            .as_ref()
+                            .map_or(
+                                (
+                                    pbr_shaders.dummy_white_texture_view,
+                                    pbr_shaders.dummy_white_sampler,
+                                ),
+                                |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+                            );
+                        let (occlusion_texture_view, occlusion_sampler) =
                             mesh.material_textures.occlusion_texture.as_ref().map_or(
                                 (
                                     pbr_shaders.dummy_white_texture_view,
-                                    pbr_shaders.dummy_white_texture_sampler,
+                                    pbr_shaders.dummy_white_sampler,
                                 ),
                                 |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
                             );
@@ -427,13 +427,13 @@ pub fn queue_meshes(
                                 },
                             )
                             .add_texture_view(1, base_color_texture_view)
-                            .add_sampler(2, base_color_texture_sampler)
+                            .add_sampler(2, base_color_sampler)
                             .add_texture_view(3, emissive_texture_view)
-                            .add_sampler(4, emissive_texture_sampler)
+                            .add_sampler(4, emissive_sampler)
                             .add_texture_view(5, metallic_roughness_texture_view)
-                            .add_sampler(6, metallic_roughness_texture_sampler)
+                            .add_sampler(6, metallic_roughness_sampler)
                             .add_texture_view(7, occlusion_texture_view)
-                            .add_sampler(8, occlusion_texture_sampler)
+                            .add_sampler(8, occlusion_sampler)
                             .finish()
                     };
                     render_resources

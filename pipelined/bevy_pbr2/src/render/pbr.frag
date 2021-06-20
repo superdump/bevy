@@ -87,17 +87,17 @@ layout(set = 2, binding = 0) uniform StandardMaterial {
     StandardMaterial_t Material;
 };
 
-layout(set = 2, binding = 1) uniform texture2D StandardMaterial_base_color_texture;
-layout(set = 2, binding = 2) uniform sampler StandardMaterial_base_color_texture_sampler;
+layout(set = 2, binding = 1) uniform texture2D base_color_texture;
+layout(set = 2, binding = 2) uniform sampler base_color_sampler;
 
-layout(set = 2, binding = 3) uniform texture2D StandardMaterial_emissive_texture;
-layout(set = 2, binding = 4) uniform sampler StandardMaterial_emissive_texture_sampler;
+layout(set = 2, binding = 3) uniform texture2D emissive_texture;
+layout(set = 2, binding = 4) uniform sampler emissive_sampler;
 
-layout(set = 2, binding = 5) uniform texture2D StandardMaterial_metallic_roughness_texture;
-layout(set = 2, binding = 6) uniform sampler StandardMaterial_metallic_roughness_texture_sampler;
+layout(set = 2, binding = 5) uniform texture2D metallic_roughness_texture;
+layout(set = 2, binding = 6) uniform sampler metallic_roughness_sampler;
 
-layout(set = 2, binding = 7) uniform texture2D StandardMaterial_occlusion_texture;
-layout(set = 2, binding = 8) uniform sampler StandardMaterial_occlusion_texture_sampler;
+layout(set = 2, binding = 7) uniform texture2D occlusion_texture;
+layout(set = 2, binding = 8) uniform sampler occlusion_sampler;
 
 #    define saturate(x) clamp(x, 0.0, 1.0)
 const float PI = 3.141592653589793;
@@ -327,9 +327,7 @@ void main() {
 
     vec4 output_color = Material.base_color;
     if ((Material.flags & FLAGS_BASE_COLOR_TEXTURE_BIT) != 0) {
-        output_color *= texture(sampler2D(StandardMaterial_base_color_texture,
-                                          StandardMaterial_base_color_texture_sampler),
-                                v_Uv);
+        output_color *= texture(sampler2D(base_color_texture, base_color_sampler), v_Uv);
     }
 
     // NOTE: Unlit bit not set means == 0 is true, so the true case is if lit
@@ -337,18 +335,14 @@ void main() {
         // TODO use .a for exposure compensation in HDR
         vec4 emissive = Material.emissive;
         if ((Material.flags & FLAGS_EMISSIVE_TEXTURE_BIT) != 0) {
-            emissive.rgb *= texture(sampler2D(StandardMaterial_emissive_texture,
-                                              StandardMaterial_emissive_texture_sampler),
-                                    v_Uv).rgb;
+            emissive.rgb *= texture(sampler2D(emissive_texture, emissive_sampler), v_Uv).rgb;
         }
 
         // calculate non-linear roughness from linear perceptualRoughness
         float metallic = Material.metallic;
         float perceptual_roughness = Material.perceptual_roughness;
         if ((Material.flags & FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT) != 0) {
-            vec4 metallic_roughness = texture(sampler2D(StandardMaterial_metallic_roughness_texture,
-                                                        StandardMaterial_metallic_roughness_texture_sampler),
-                                              v_Uv);
+            vec4 metallic_roughness = texture(sampler2D(metallic_roughness_texture, metallic_roughness_sampler), v_Uv);
             // Sampling from GLTF standard channels for now
             metallic *= metallic_roughness.b;
             perceptual_roughness *= metallic_roughness.g;
@@ -357,9 +351,7 @@ void main() {
 
         float occlusion = 1.0;
         if ((Material.flags & FLAGS_OCCLUSION_TEXTURE_BIT) != 0) {
-            occlusion = texture(sampler2D(StandardMaterial_occlusion_texture,
-                                        StandardMaterial_occlusion_texture_sampler),
-                                v_Uv).r;
+            occlusion = texture(sampler2D(occlusion_texture, occlusion_sampler), v_Uv).r;
         }
 
         vec3 N = normalize(v_WorldNormal);
@@ -381,7 +373,7 @@ void main() {
 
     // #    ifdef STANDARDMATERIAL_NORMAL_MAP
     //     mat3 TBN = mat3(T, B, N);
-    //     N = TBN * normalize(texture(sampler2D(StandardMaterial_normal_map, StandardMaterial_normal_map_sampler), v_Uv).rgb * 2.0 - 1.0);
+    //     N = TBN * normalize(texture(sampler2D(normal_map, normal_map_sampler), v_Uv).rgb * 2.0 - 1.0);
     // #    endif
 
         vec3 V = normalize(ViewWorldPosition.xyz - v_WorldPosition.xyz);
