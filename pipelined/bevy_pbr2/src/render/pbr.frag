@@ -63,7 +63,12 @@ struct StandardMaterial_t {
 };
 
 // NOTE: These must match those defined in bevy_pbr2/src/material.rs
-const uint FLAGS_DOUBLE_SIDED_BIT = (1 << 0);
+const uint FLAGS_BASE_COLOR_TEXTURE_BIT         = (1 << 0);
+const uint FLAGS_EMISSIVE_TEXTURE_BIT           = (1 << 1);
+const uint FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT = (1 << 2);
+const uint FLAGS_OCCLUSION_TEXTURE_BIT          = (1 << 3);
+const uint FLAGS_DOUBLE_SIDED_BIT               = (1 << 4);
+const uint FLAGS_UNLIT_BIT                      = (1 << 5);
 
 // View bindings - set 0
 layout(set = 0, binding = 0) uniform View {
@@ -320,83 +325,101 @@ void main() {
     // FIXME: Add view binding from an AmbientLight resource
     vec3 ambient_color = vec3(0.1, 0.1, 0.1);
 
-    vec4 output_color = Material.base_color
-        * texture(sampler2D(StandardMaterial_base_color_texture, StandardMaterial_base_color_texture_sampler), v_Uv);
-
-// FIXME: Just use a separate shader for unlit?
-// #ifndef STANDARDMATERIAL_UNLIT
-    // TODO use .a for exposure compensation in HDR
-    vec4 emissive = Material.emissive;
-    emissive.rgb *= texture(sampler2D(StandardMaterial_emissive_texture, StandardMaterial_emissive_texture_sampler), v_Uv).rgb;
-
-    // calculate non-linear roughness from linear perceptualRoughness
-    vec4 metallic_roughness = texture(sampler2D(StandardMaterial_metallic_roughness_texture, StandardMaterial_metallic_roughness_texture_sampler), v_Uv);
-    // Sampling from GLTF standard channels for now
-    float metallic = Material.metallic * metallic_roughness.b;
-    float perceptual_roughness = Material.perceptual_roughness * metallic_roughness.g;
-
-    float roughness = perceptualRoughnessToRoughness(perceptual_roughness);
-
-    float occlusion = texture(sampler2D(StandardMaterial_occlusion_texture, StandardMaterial_occlusion_texture_sampler), v_Uv).r;
-
-    vec3 N = normalize(v_WorldNormal);
-
-// FIXME: Normal maps need an additional vertex attribute and vertex stage output/fragment stage input
-//        Just use a separate shader for lit with normal maps?
-// #    ifdef STANDARDMATERIAL_NORMAL_MAP
-//     vec3 T = normalize(v_WorldTangent.xyz);
-//     vec3 B = cross(N, T) * v_WorldTangent.w;
-// #    endif
-
-    if ((Material.flags & FLAGS_DOUBLE_SIDED_BIT) != 0) {
-        N = gl_FrontFacing ? N : -N;
-// #        ifdef STANDARDMATERIAL_NORMAL_MAP
-//     T = gl_FrontFacing ? T : -T;
-//     B = gl_FrontFacing ? B : -B;
-// #        endif
+    vec4 output_color = Material.base_color;
+    if ((Material.flags & FLAGS_BASE_COLOR_TEXTURE_BIT) != 0) {
+        output_color *= texture(sampler2D(StandardMaterial_base_color_texture,
+                                          StandardMaterial_base_color_texture_sampler),
+                                v_Uv);
     }
 
-// #    ifdef STANDARDMATERIAL_NORMAL_MAP
-//     mat3 TBN = mat3(T, B, N);
-//     N = TBN * normalize(texture(sampler2D(StandardMaterial_normal_map, StandardMaterial_normal_map_sampler), v_Uv).rgb * 2.0 - 1.0);
-// #    endif
+    // NOTE: Unlit bit not set means == 0 is true, so the true case is if lit
+    if ((Material.flags & FLAGS_UNLIT_BIT) == 0) {
+        // TODO use .a for exposure compensation in HDR
+        vec4 emissive = Material.emissive;
+        if ((Material.flags & FLAGS_EMISSIVE_TEXTURE_BIT) != 0) {
+            emissive.rgb *= texture(sampler2D(StandardMaterial_emissive_texture,
+                                              StandardMaterial_emissive_texture_sampler),
+                                    v_Uv).rgb;
+        }
 
-    vec3 V = normalize(ViewWorldPosition.xyz - v_WorldPosition.xyz);
-    // Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"
-    float NdotV = max(dot(N, V), 1e-4);
+        // calculate non-linear roughness from linear perceptualRoughness
+        float metallic = Material.metallic;
+        float perceptual_roughness = Material.perceptual_roughness;
+        if ((Material.flags & FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT) != 0) {
+            vec4 metallic_roughness = texture(sampler2D(StandardMaterial_metallic_roughness_texture,
+                                                        StandardMaterial_metallic_roughness_texture_sampler),
+                                              v_Uv);
+            // Sampling from GLTF standard channels for now
+            metallic *= metallic_roughness.b;
+            perceptual_roughness *= metallic_roughness.g;
+        }
+        float roughness = perceptualRoughnessToRoughness(perceptual_roughness);
 
-    // Remapping [0,1] reflectance to F0
-    // See https://google.github.io/filament/Filament.html#materialsystem/parameterization/remapping
-    float reflectance = Material.reflectance;
-    vec3 F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + output_color.rgb * metallic;
+        float occlusion = 1.0;
+        if ((Material.flags & FLAGS_OCCLUSION_TEXTURE_BIT) != 0) {
+            occlusion = texture(sampler2D(StandardMaterial_occlusion_texture,
+                                        StandardMaterial_occlusion_texture_sampler),
+                                v_Uv).r;
+        }
 
-    // Diffuse strength inversely related to metallicity
-    vec3 diffuse_color = output_color.rgb * (1.0 - metallic);
+        vec3 N = normalize(v_WorldNormal);
 
-    vec3 R = reflect(-V, N);
+    // FIXME: Normal maps need an additional vertex attribute and vertex stage output/fragment stage input
+    //        Just use a separate shader for lit with normal maps?
+    // #    ifdef STANDARDMATERIAL_NORMAL_MAP
+    //     vec3 T = normalize(v_WorldTangent.xyz);
+    //     vec3 B = cross(N, T) * v_WorldTangent.w;
+    // #    endif
 
-    // accumulate color
-    vec3 light_accum = vec3(0.0);
-    for (int i = 0; i < int(NumLights); ++i) {
-        PointLight light = PointLights[i];
-        vec3 light_contrib = point_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
-        float shadow = fetch_shadow(i, light.projection * v_WorldPosition);
-        light_accum += light_contrib * shadow;
+        if ((Material.flags & FLAGS_DOUBLE_SIDED_BIT) != 0) {
+            N = gl_FrontFacing ? N : -N;
+    // #        ifdef STANDARDMATERIAL_NORMAL_MAP
+    //     T = gl_FrontFacing ? T : -T;
+    //     B = gl_FrontFacing ? B : -B;
+    // #        endif
+        }
+
+    // #    ifdef STANDARDMATERIAL_NORMAL_MAP
+    //     mat3 TBN = mat3(T, B, N);
+    //     N = TBN * normalize(texture(sampler2D(StandardMaterial_normal_map, StandardMaterial_normal_map_sampler), v_Uv).rgb * 2.0 - 1.0);
+    // #    endif
+
+        vec3 V = normalize(ViewWorldPosition.xyz - v_WorldPosition.xyz);
+        // Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"
+        float NdotV = max(dot(N, V), 1e-4);
+
+        // Remapping [0,1] reflectance to F0
+        // See https://google.github.io/filament/Filament.html#materialsystem/parameterization/remapping
+        float reflectance = Material.reflectance;
+        vec3 F0 = 0.16 * reflectance * reflectance * (1.0 - metallic) + output_color.rgb * metallic;
+
+        // Diffuse strength inversely related to metallicity
+        vec3 diffuse_color = output_color.rgb * (1.0 - metallic);
+
+        vec3 R = reflect(-V, N);
+
+        // accumulate color
+        vec3 light_accum = vec3(0.0);
+        for (int i = 0; i < int(NumLights); ++i) {
+            PointLight light = PointLights[i];
+            vec3 light_contrib = point_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
+            float shadow = fetch_shadow(i, light.projection * v_WorldPosition);
+            light_accum += light_contrib * shadow;
+        }
+
+        vec3 diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
+        vec3 specular_ambient = EnvBRDFApprox(F0, perceptual_roughness, NdotV);
+
+        output_color.rgb = light_accum;
+        output_color.rgb += (diffuse_ambient + specular_ambient) * ambient_color * occlusion;
+        output_color.rgb += emissive.rgb * output_color.a;
+
+        // tone_mapping
+        output_color.rgb = reinhard_luminance(output_color.rgb);
+        // Gamma correction.
+        // Not needed with sRGB buffer
+        // output_color.rgb = pow(output_color.rgb, vec3(1.0 / 2.2));
     }
-
-    vec3 diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
-    vec3 specular_ambient = EnvBRDFApprox(F0, perceptual_roughness, NdotV);
-
-    output_color.rgb = light_accum;
-    output_color.rgb += (diffuse_ambient + specular_ambient) * ambient_color * occlusion;
-    output_color.rgb += emissive.rgb * output_color.a;
-
-    // tone_mapping
-    output_color.rgb = reinhard_luminance(output_color.rgb);
-    // Gamma correction.
-    // Not needed with sRGB buffer
-    // output_color.rgb = pow(output_color.rgb, vec3(1.0 / 2.2));
-// #endif
 
     o_Target = output_color;
 }

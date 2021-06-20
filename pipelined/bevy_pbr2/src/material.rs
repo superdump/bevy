@@ -19,12 +19,18 @@ pub struct StandardMaterialGpuData {
     pub buffer: BufferId,
 }
 
+// NOTE: These must match the bit flags in bevy_pbr2/src/render/pbr.frag!
 bitflags::bitflags! {
     #[repr(transparent)]
-    pub struct StandardMaterialFlags: u32 {
-        const DOUBLE_SIDED = 1;
-        const NONE = 0;
-        const UNINITIALIZED = 0xFFFF;
+    struct StandardMaterialFlags: u32 {
+        const BASE_COLOR_TEXTURE         = (1 << 0);
+        const EMISSIVE_TEXTURE           = (1 << 1);
+        const METALLIC_ROUGHNESS_TEXTURE = (1 << 2);
+        const OCCLUSION_TEXTURE          = (1 << 3);
+        const DOUBLE_SIDED               = (1 << 4);
+        const UNLIT                      = (1 << 5);
+        const NONE                       = 0;
+        const UNINITIALIZED              = 0xFFFF;
     }
 }
 
@@ -56,8 +62,8 @@ pub struct StandardMaterial {
     /// defaults to 0.5 which is mapped to 4% reflectance in the shader
     pub reflectance: f32,
     pub occlusion_texture: Option<Handle<Texture>>,
-    /// Flags to configure shader options
-    pub flags: StandardMaterialFlags,
+    pub double_sided: bool,
+    pub unlit: bool,
     pub gpu_data: Option<StandardMaterialGpuData>,
 }
 
@@ -88,7 +94,8 @@ impl Default for StandardMaterial {
             // Expressed in a linear scale and equivalent to 4% reflectance see https://google.github.io/filament/Material%20Properties.pdf
             reflectance: 0.5,
             occlusion_texture: None,
-            flags: StandardMaterialFlags::NONE,
+            double_sided: false,
+            unlit: false,
             gpu_data: None,
         }
     }
@@ -178,13 +185,32 @@ pub fn standard_material_resource_system(
                 continue;
             }
 
+            let mut flags = StandardMaterialFlags::NONE;
+            if material.base_color_texture.is_some() {
+                flags |= StandardMaterialFlags::BASE_COLOR_TEXTURE;
+            }
+            if material.emissive_texture.is_some() {
+                flags |= StandardMaterialFlags::EMISSIVE_TEXTURE;
+            }
+            if material.metallic_roughness_texture.is_some() {
+                flags |= StandardMaterialFlags::METALLIC_ROUGHNESS_TEXTURE;
+            }
+            if material.occlusion_texture.is_some() {
+                flags |= StandardMaterialFlags::OCCLUSION_TEXTURE;
+            }
+            if material.double_sided {
+                flags |= StandardMaterialFlags::DOUBLE_SIDED;
+            }
+            if material.unlit {
+                flags |= StandardMaterialFlags::UNLIT;
+            }
             let value = StandardMaterialUniformData {
                 base_color: material.base_color.into(),
                 emissive: material.emissive.into(),
                 roughness: material.perceptual_roughness,
                 metallic: material.metallic,
                 reflectance: material.reflectance,
-                flags: material.flags.bits,
+                flags: flags.bits,
             };
             let value_std140 = value.as_std140();
 

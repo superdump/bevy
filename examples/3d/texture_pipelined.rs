@@ -40,6 +40,7 @@ fn setup(
     // this material renders the texture normally
     let material_handle = materials.add(StandardMaterial {
         base_color_texture: Some(texture_handle.clone()),
+        unlit: true,
         ..Default::default()
     });
 
@@ -47,6 +48,7 @@ fn setup(
     let red_material_handle = materials.add(StandardMaterial {
         base_color: Color::rgba(1.0, 0.0, 0.0, 0.5),
         base_color_texture: Some(texture_handle.clone()),
+        unlit: true,
         ..Default::default()
     });
 
@@ -54,6 +56,7 @@ fn setup(
     let blue_material_handle = materials.add(StandardMaterial {
         base_color: Color::rgba(0.0, 0.0, 1.0, 0.5),
         base_color_texture: Some(texture_handle),
+        unlit: true,
         ..Default::default()
     });
 
@@ -92,11 +95,6 @@ fn setup(
     });
     // camera
     commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(3.0, 5.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..Default::default()
-    });
-    // camera
-    commands.spawn_bundle(PointLightBundle {
         transform: Transform::from_xyz(3.0, 5.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..Default::default()
     });
