@@ -323,7 +323,7 @@ float fetch_shadow(int light_id, vec4 homogeneous_coords) {
 
 void main() {
     // FIXME: Add view binding from an AmbientLight resource
-    vec3 ambient_color = vec3(0.1, 0.1, 0.1);
+    vec3 ambient_color = vec3(0.05, 0.05, 0.05);
 
     vec4 output_color = Material.base_color;
     if ((Material.flags & FLAGS_BASE_COLOR_TEXTURE_BIT) != 0) {
