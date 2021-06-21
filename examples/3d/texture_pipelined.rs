@@ -1,7 +1,7 @@
 use bevy::{
     ecs::prelude::*,
     math::{Quat, Vec2, Vec3},
-    pbr2::{PbrBundle, PointLightBundle, StandardMaterial},
+    pbr2::{PbrBundle, StandardMaterial},
     prelude::{App, AssetServer, Assets, Transform},
     render2::{
         camera::PerspectiveCameraBundle,

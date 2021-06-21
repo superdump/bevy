@@ -40,7 +40,7 @@ layout(location = 2) in vec2 v_Uv;
 
 layout(location = 0) out vec4 o_Target;
 
-struct PointLight {
+struct OmniLight {
     vec4 color;
     float range;
     float radius;
@@ -50,7 +50,7 @@ struct PointLight {
 
 // NOTE: this must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
 // TODO: this can be removed if we move to storage buffers for light arrays
-const int MAX_POINT_LIGHTS = 10;
+const int MAX_OMNI_LIGHTS = 10;
 
 struct StandardMaterial_t {
     vec4 base_color;
@@ -78,7 +78,7 @@ layout(set = 0, binding = 0) uniform View {
 layout(std140, set = 0, binding = 1) uniform Lights {
     vec4 AmbientColor;
     uint NumLights;
-    PointLight PointLights[MAX_POINT_LIGHTS];
+    OmniLight OmniLights[MAX_OMNI_LIGHTS];
 };
 layout(set = 0, binding = 2) uniform texture2DArray t_Shadow;
 layout(set = 0, binding = 3) uniform samplerShadow s_Shadow;
@@ -258,7 +258,7 @@ vec3 reinhard_extended_luminance(vec3 color, float max_white_l) {
     return change_luminance(color, l_new);
 }
 
-vec3 point_light(PointLight light, float roughness, float NdotV, vec3 N, vec3 V, vec3 R, vec3 F0, vec3 diffuseColor) {
+vec3 omni_light(OmniLight light, float roughness, float NdotV, vec3 N, vec3 V, vec3 R, vec3 F0, vec3 diffuseColor) {
     vec3 light_to_frag = light.position.xyz - v_WorldPosition.xyz;
     float distance_square = dot(light_to_frag, light_to_frag);
     float rangeAttenuation =
@@ -399,8 +399,8 @@ void main() {
         // accumulate color
         vec3 light_accum = vec3(0.0);
         for (int i = 0; i < int(NumLights); ++i) {
-            PointLight light = PointLights[i];
-            vec3 light_contrib = point_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
+            OmniLight light = OmniLights[i];
+            vec3 light_contrib = omni_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
             float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition);
             light_accum += light_contrib * shadow;
         }

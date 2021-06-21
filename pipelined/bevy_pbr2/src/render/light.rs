@@ -1,4 +1,4 @@
-use crate::{render::MeshViewBindGroups, AmbientLight, ExtractedMeshes, PointLight};
+use crate::{render::MeshViewBindGroups, AmbientLight, ExtractedMeshes, OmniLight};
 use bevy_ecs::{prelude::*, system::SystemState};
 use bevy_math::{Mat4, Vec3, Vec4};
 use bevy_render2::{
@@ -46,15 +46,15 @@ pub struct GpuLight {
 pub struct GpuLights {
     ambient_color: Vec4,
     len: u32,
-    lights: [GpuLight; MAX_POINT_LIGHTS],
+    lights: [GpuLight; MAX_OMNI_LIGHTS],
 }
 
-// NOTE: this must be kept in sync MAX_POINT_LIGHTS in pbr.frag
-pub const MAX_POINT_LIGHTS: usize = 10;
+// NOTE: this must be kept in sync MAX_OMNI_LIGHTS in pbr.frag
+pub const MAX_OMNI_LIGHTS: usize = 10;
 pub const SHADOW_SIZE: Extent3d = Extent3d {
     width: 1024,
     height: 1024,
-    depth_or_array_layers: MAX_POINT_LIGHTS as u32,
+    depth_or_array_layers: MAX_OMNI_LIGHTS as u32,
 };
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
@@ -165,7 +165,7 @@ impl FromWorld for ShadowShaders {
 pub fn extract_lights(
     mut commands: Commands,
     ambient_light: Res<AmbientLight>,
-    lights: Query<(Entity, &PointLight, &GlobalTransform)>,
+    lights: Query<(Entity, &OmniLight, &GlobalTransform)>,
 ) {
     commands.insert_resource(ExtractedAmbientLight {
         color: ambient_light.color,
@@ -232,11 +232,11 @@ pub fn prepare_lights(
         let mut gpu_lights = GpuLights {
             ambient_color: ambient_color.into(),
             len: lights.iter().len() as u32,
-            lights: [GpuLight::default(); MAX_POINT_LIGHTS],
+            lights: [GpuLight::default(); MAX_OMNI_LIGHTS],
         };
 
         // TODO: this should select lights based on relevance to the view instead of the first ones that show up in a query
-        for (i, light) in lights.iter().enumerate().take(MAX_POINT_LIGHTS) {
+        for (i, light) in lights.iter().enumerate().take(MAX_OMNI_LIGHTS) {
             let depth_texture_view = render_resources.create_texture_view(
                 light_depth_texture.texture,
                 TextureViewDescriptor {

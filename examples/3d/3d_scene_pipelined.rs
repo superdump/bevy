@@ -4,7 +4,7 @@ use bevy::{
     ecs::prelude::*,
     input::Input,
     math::Vec3,
-    pbr2::{PbrBundle, PointLightBundle, StandardMaterial},
+    pbr2::{PbrBundle, OmniLightBundle, StandardMaterial},
     prelude::{App, Assets, KeyCode, Transform},
     render2::{
         camera::PerspectiveCameraBundle,
@@ -75,7 +75,7 @@ fn setup(
         })
         .insert(Movable);
     // light
-    commands.spawn_bundle(PointLightBundle {
+    commands.spawn_bundle(OmniLightBundle {
         transform: Transform::from_xyz(5.0, 8.0, 2.0),
         ..Default::default()
     });
