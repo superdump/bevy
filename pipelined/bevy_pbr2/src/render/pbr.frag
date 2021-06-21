@@ -45,7 +45,7 @@ struct PointLight {
     float range;
     float radius;
     vec3 position;
-    mat4 projection;
+    mat4 view_projection;
 };
 
 // NOTE: this must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
@@ -401,7 +401,7 @@ void main() {
         for (int i = 0; i < int(NumLights); ++i) {
             PointLight light = PointLights[i];
             vec3 light_contrib = point_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
-            float shadow = fetch_shadow(i, light.projection * v_WorldPosition);
+            float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition);
             light_accum += light_contrib * shadow;
         }
 
