@@ -376,7 +376,15 @@ void main() {
     //     N = TBN * normalize(texture(sampler2D(normal_map, normal_map_sampler), v_Uv).rgb * 2.0 - 1.0);
     // #    endif
 
-        vec3 V = normalize(ViewWorldPosition.xyz - v_WorldPosition.xyz);
+        vec3 V;
+        if (ViewProj[3][3] != 1.0) { // If the projection is not orthographic
+            // Only valid for a perpective projection
+            V = normalize(ViewWorldPosition.xyz - v_WorldPosition.xyz);
+        } else {
+            // Ortho view vec
+            V = normalize(vec3(-ViewProj[0][2], -ViewProj[1][2], -ViewProj[2][2]));
+        }
+
         // Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"
         float NdotV = max(dot(N, V), 1e-4);
 
