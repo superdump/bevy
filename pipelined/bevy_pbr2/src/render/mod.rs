@@ -220,6 +220,19 @@ pub struct ExtractedMeshes {
     meshes: Vec<ExtractedMesh>,
 }
 
+fn texture_to_gpu_data(
+    textures: &Assets<Texture>,
+    texture_handle_option: &Option<Handle<Texture>>,
+) -> Option<TextureGpuData> {
+    texture_handle_option
+        .as_ref()
+        .map_or(None, |texture_handle| {
+            textures
+                .get(texture_handle)
+                .map_or(None, |texture| texture.gpu_data.clone())
+        })
+}
+
 pub fn extract_meshes(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
@@ -243,37 +256,21 @@ pub fn extract_meshes(
                             transform_binding_offset: 0,
                             material_buffer: material_gpu_data.buffer,
                             material_textures: ExtractedStandardMaterialTextures {
-                                base_color_texture: material.base_color_texture.as_ref().map_or(
-                                    None,
-                                    |texture_handle| {
-                                        textures
-                                            .get(texture_handle)
-                                            .map_or(None, |texture| texture.gpu_data.clone())
-                                    },
+                                base_color_texture: texture_to_gpu_data(
+                                    &*textures,
+                                    &material.base_color_texture,
                                 ),
-                                emissive_texture: material.emissive_texture.as_ref().map_or(
-                                    None,
-                                    |texture_handle| {
-                                        textures
-                                            .get(texture_handle)
-                                            .map_or(None, |texture| texture.gpu_data.clone())
-                                    },
+                                emissive_texture: texture_to_gpu_data(
+                                    &*textures,
+                                    &material.emissive_texture,
                                 ),
-                                metallic_roughness_texture: material
-                                    .metallic_roughness_texture
-                                    .as_ref()
-                                    .map_or(None, |texture_handle| {
-                                        textures
-                                            .get(texture_handle)
-                                            .map_or(None, |texture| texture.gpu_data.clone())
-                                    }),
-                                occlusion_texture: material.occlusion_texture.as_ref().map_or(
-                                    None,
-                                    |texture_handle| {
-                                        textures
-                                            .get(texture_handle)
-                                            .map_or(None, |texture| texture.gpu_data.clone())
-                                    },
+                                metallic_roughness_texture: texture_to_gpu_data(
+                                    &*textures,
+                                    &material.metallic_roughness_texture,
+                                ),
+                                occlusion_texture: texture_to_gpu_data(
+                                    &*textures,
+                                    &material.occlusion_texture,
                                 ),
                             },
                         });
@@ -320,6 +317,19 @@ struct MeshViewBindGroups {
 #[derive(Default)]
 pub struct MaterialMeta {
     material_bind_groups: Vec<BindGroupId>,
+}
+
+fn texture_gpu_data_to_view_sampler(
+    pbr_shaders: &PbrShaders,
+    gpu_data_option: &Option<TextureGpuData>,
+) -> (TextureViewId, SamplerId) {
+    gpu_data_option.as_ref().map_or(
+        (
+            pbr_shaders.dummy_white_texture_view,
+            pbr_shaders.dummy_white_sampler,
+        ),
+        |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+    )
 }
 
 pub fn queue_meshes(
@@ -380,41 +390,26 @@ pub fn queue_meshes(
                     let index = material_meta.material_bind_groups.len();
                     let material_bind_group = {
                         let (base_color_texture_view, base_color_sampler) =
-                            mesh.material_textures.base_color_texture.as_ref().map_or(
-                                (
-                                    pbr_shaders.dummy_white_texture_view,
-                                    pbr_shaders.dummy_white_sampler,
-                                ),
-                                |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+                            texture_gpu_data_to_view_sampler(
+                                &*pbr_shaders,
+                                &mesh.material_textures.base_color_texture,
                             );
 
                         let (emissive_texture_view, emissive_sampler) =
-                            mesh.material_textures.emissive_texture.as_ref().map_or(
-                                (
-                                    pbr_shaders.dummy_white_texture_view,
-                                    pbr_shaders.dummy_white_sampler,
-                                ),
-                                |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+                            texture_gpu_data_to_view_sampler(
+                                &*pbr_shaders,
+                                &mesh.material_textures.emissive_texture,
                             );
 
-                        let (metallic_roughness_texture_view, metallic_roughness_sampler) = mesh
-                            .material_textures
-                            .metallic_roughness_texture
-                            .as_ref()
-                            .map_or(
-                                (
-                                    pbr_shaders.dummy_white_texture_view,
-                                    pbr_shaders.dummy_white_sampler,
-                                ),
-                                |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+                        let (metallic_roughness_texture_view, metallic_roughness_sampler) =
+                            texture_gpu_data_to_view_sampler(
+                                &*pbr_shaders,
+                                &mesh.material_textures.metallic_roughness_texture,
                             );
                         let (occlusion_texture_view, occlusion_sampler) =
-                            mesh.material_textures.occlusion_texture.as_ref().map_or(
-                                (
-                                    pbr_shaders.dummy_white_texture_view,
-                                    pbr_shaders.dummy_white_sampler,
-                                ),
-                                |gpu_data| (gpu_data.texture_view, gpu_data.sampler),
+                            texture_gpu_data_to_view_sampler(
+                                &*pbr_shaders,
+                                &mesh.material_textures.occlusion_texture,
                             );
 
                         BindGroupBuilder::default()
