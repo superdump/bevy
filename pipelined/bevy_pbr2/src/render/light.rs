@@ -1,4 +1,4 @@
-use crate::{render::MeshViewBindGroups, ExtractedMeshes, PointLight};
+use crate::{render::MeshViewBindGroups, AmbientLight, ExtractedMeshes, PointLight};
 use bevy_ecs::{prelude::*, system::SystemState};
 use bevy_math::{Mat4, Vec3, Vec4};
 use bevy_render2::{
@@ -17,6 +17,11 @@ use bevy_render2::{
 use bevy_transform::components::GlobalTransform;
 use crevice::std140::AsStd140;
 use std::num::NonZeroU32;
+
+pub struct ExtractedAmbientLight {
+    color: Color,
+    brightness: f32,
+}
 
 pub struct ExtractedPointLight {
     color: Color,
@@ -39,6 +44,7 @@ pub struct GpuLight {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, AsStd140)]
 pub struct GpuLights {
+    ambient_color: Vec4,
     len: u32,
     lights: [GpuLight; MAX_POINT_LIGHTS],
 }
@@ -158,8 +164,13 @@ impl FromWorld for ShadowShaders {
 // TODO: ultimately these could be filtered down to lights relevant to actual views
 pub fn extract_lights(
     mut commands: Commands,
+    ambient_light: Res<AmbientLight>,
     lights: Query<(Entity, &PointLight, &GlobalTransform)>,
 ) {
+    commands.insert_resource(ExtractedAmbientLight {
+        color: ambient_light.color,
+        brightness: ambient_light.brightness,
+    });
     for (entity, light, transform) in lights.iter() {
         commands.get_or_spawn(entity).insert(ExtractedPointLight {
             color: light.color,
@@ -193,6 +204,7 @@ pub fn prepare_lights(
     render_resources: Res<RenderResources>,
     mut light_meta: ResMut<LightMeta>,
     views: Query<Entity, With<RenderPhase<Transparent3dPhase>>>,
+    ambient_light: Res<ExtractedAmbientLight>,
     lights: Query<&ExtractedPointLight>,
 ) {
     // PERF: view.iter().count() could be views.iter().len() if we implemented ExactSizeIterator for archetype-only filters
@@ -200,6 +212,7 @@ pub fn prepare_lights(
         .view_gpu_lights
         .reserve_and_clear(views.iter().count(), &render_resources);
 
+    let ambient_color = ambient_light.color.as_rgba_linear() * ambient_light.brightness;
     // set up light data for each view
     for entity in views.iter() {
         let light_depth_texture = texture_cache.get(
@@ -217,6 +230,7 @@ pub fn prepare_lights(
         let mut view_lights = Vec::new();
 
         let mut gpu_lights = GpuLights {
+            ambient_color: ambient_color.into(),
             len: lights.iter().len() as u32,
             lights: [GpuLight::default(); MAX_POINT_LIGHTS],
         };

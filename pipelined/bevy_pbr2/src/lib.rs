@@ -29,7 +29,8 @@ pub struct PbrPlugin;
 
 impl Plugin for PbrPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(StandardMaterialPlugin);
+        app.add_plugin(StandardMaterialPlugin)
+            .init_resource::<AmbientLight>();
 
         let render_app = app.sub_app_mut(0);
         render_app

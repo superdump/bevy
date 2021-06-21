@@ -76,6 +76,7 @@ layout(set = 0, binding = 0) uniform View {
     vec3 ViewWorldPosition;
 };
 layout(std140, set = 0, binding = 1) uniform Lights {
+    vec4 AmbientColor;
     uint NumLights;
     PointLight PointLights[MAX_POINT_LIGHTS];
 };
@@ -322,9 +323,6 @@ float fetch_shadow(int light_id, vec4 homogeneous_coords) {
 }
 
 void main() {
-    // FIXME: Add view binding from an AmbientLight resource
-    vec3 ambient_color = vec3(0.05, 0.05, 0.05);
-
     vec4 output_color = Material.base_color;
     if ((Material.flags & FLAGS_BASE_COLOR_TEXTURE_BIT) != 0) {
         output_color *= texture(sampler2D(base_color_texture, base_color_sampler), v_Uv);
@@ -411,7 +409,7 @@ void main() {
         vec3 specular_ambient = EnvBRDFApprox(F0, perceptual_roughness, NdotV);
 
         output_color.rgb = light_accum;
-        output_color.rgb += (diffuse_ambient + specular_ambient) * ambient_color * occlusion;
+        output_color.rgb += (diffuse_ambient + specular_ambient) * AmbientColor.rgb * occlusion;
         output_color.rgb += emissive.rgb * output_color.a;
 
         // tone_mapping
