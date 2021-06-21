@@ -239,7 +239,8 @@ pub fn prepare_lights(
             let view_transform = GlobalTransform::from_translation(light.transform.translation)
                 .looking_at(Vec3::default(), Vec3::Y);
             // TODO: configure light projection based on light configuration
-            let projection = Mat4::perspective_rh(1.0472, 1.0, 1.0, 20.0);
+            let projection =
+                Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, light.range);
 
             gpu_lights.lights[i] = GpuLight {
                 // premultiply color by intensity
