@@ -1,6 +1,8 @@
-use crate::{render::MeshViewBindGroups, AmbientLight, ExtractedMeshes, OmniLight};
+use crate::{
+    render::MeshViewBindGroups, AmbientLight, DirectionalLight, ExtractedMeshes, OmniLight,
+};
 use bevy_ecs::{prelude::*, system::SystemState};
-use bevy_math::{Mat4, Vec3, Vec4};
+use bevy_math::{Mat4, UVec4, Vec3, Vec4};
 use bevy_render2::{
     color::Color,
     core_pipeline::Transparent3dPhase,
@@ -23,7 +25,7 @@ pub struct ExtractedAmbientLight {
     brightness: f32,
 }
 
-pub struct ExtractedPointLight {
+pub struct ExtractedOmniLight {
     color: Color,
     intensity: f32,
     range: f32,
@@ -31,9 +33,15 @@ pub struct ExtractedPointLight {
     transform: GlobalTransform,
 }
 
+pub struct ExtractedDirectionalLight {
+    color: Color,
+    illuminance: f32,
+    direction: Vec3,
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
-pub struct GpuLight {
+pub struct GpuOmniLight {
     color: Vec4,
     range: f32,
     radius: f32,
@@ -42,15 +50,24 @@ pub struct GpuLight {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone, AsStd140, Default, Debug)]
+pub struct GpuDirectionalLight {
+    color: Vec4,
+    dir_to_light: Vec3,
+}
+
+#[repr(C)]
 #[derive(Copy, Clone, Debug, AsStd140)]
 pub struct GpuLights {
     ambient_color: Vec4,
-    len: u32,
-    lights: [GpuLight; MAX_OMNI_LIGHTS],
+    len: UVec4,
+    omni_lights: [GpuOmniLight; MAX_OMNI_LIGHTS],
+    directional_lights: [GpuDirectionalLight; MAX_DIRECTIONAL_LIGHTS],
 }
 
-// NOTE: this must be kept in sync MAX_OMNI_LIGHTS in pbr.frag
+// NOTE: this must be kept in sync with the same constants in pbr.frag
 pub const MAX_OMNI_LIGHTS: usize = 10;
+pub const MAX_DIRECTIONAL_LIGHTS: usize = 1;
 pub const SHADOW_SIZE: Extent3d = Extent3d {
     width: 1024,
     height: 1024,
@@ -165,20 +182,30 @@ impl FromWorld for ShadowShaders {
 pub fn extract_lights(
     mut commands: Commands,
     ambient_light: Res<AmbientLight>,
-    lights: Query<(Entity, &OmniLight, &GlobalTransform)>,
+    omni_lights: Query<(Entity, &OmniLight, &GlobalTransform)>,
+    directional_lights: Query<(Entity, &DirectionalLight)>,
 ) {
     commands.insert_resource(ExtractedAmbientLight {
         color: ambient_light.color,
         brightness: ambient_light.brightness,
     });
-    for (entity, light, transform) in lights.iter() {
-        commands.get_or_spawn(entity).insert(ExtractedPointLight {
-            color: light.color,
-            intensity: light.intensity,
-            range: light.range,
-            radius: light.radius,
+    for (entity, omni_light, transform) in omni_lights.iter() {
+        commands.get_or_spawn(entity).insert(ExtractedOmniLight {
+            color: omni_light.color,
+            intensity: omni_light.intensity,
+            range: omni_light.range,
+            radius: omni_light.radius,
             transform: transform.clone(),
         });
+    }
+    for (entity, directional_light) in directional_lights.iter() {
+        commands
+            .get_or_spawn(entity)
+            .insert(ExtractedDirectionalLight {
+                color: directional_light.color,
+                illuminance: directional_light.illuminance,
+                direction: directional_light.get_direction(),
+            });
     }
 }
 
@@ -205,7 +232,8 @@ pub fn prepare_lights(
     mut light_meta: ResMut<LightMeta>,
     views: Query<Entity, With<RenderPhase<Transparent3dPhase>>>,
     ambient_light: Res<ExtractedAmbientLight>,
-    lights: Query<&ExtractedPointLight>,
+    omni_lights: Query<&ExtractedOmniLight>,
+    directional_lights: Query<&ExtractedDirectionalLight>,
 ) {
     // PERF: view.iter().count() could be views.iter().len() if we implemented ExactSizeIterator for archetype-only filters
     light_meta
@@ -231,12 +259,18 @@ pub fn prepare_lights(
 
         let mut gpu_lights = GpuLights {
             ambient_color: ambient_color.into(),
-            len: lights.iter().len() as u32,
-            lights: [GpuLight::default(); MAX_OMNI_LIGHTS],
+            len: UVec4::new(
+                omni_lights.iter().len() as u32,
+                directional_lights.iter().len() as u32,
+                0,
+                0,
+            ),
+            omni_lights: [GpuOmniLight::default(); MAX_OMNI_LIGHTS],
+            directional_lights: [GpuDirectionalLight::default(); MAX_DIRECTIONAL_LIGHTS],
         };
 
         // TODO: this should select lights based on relevance to the view instead of the first ones that show up in a query
-        for (i, light) in lights.iter().enumerate().take(MAX_OMNI_LIGHTS) {
+        for (i, light) in omni_lights.iter().enumerate().take(MAX_OMNI_LIGHTS) {
             let depth_texture_view = render_resources.create_texture_view(
                 light_depth_texture.texture,
                 TextureViewDescriptor {
@@ -256,7 +290,7 @@ pub fn prepare_lights(
             let projection =
                 Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, light.range);
 
-            gpu_lights.lights[i] = GpuLight {
+            gpu_lights.omni_lights[i] = GpuOmniLight {
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: (light.color.as_rgba_linear() * light.intensity).into(),
@@ -283,6 +317,35 @@ pub fn prepare_lights(
                 ))
                 .id();
             view_lights.push(view_light_entity);
+        }
+
+        for (i, light) in directional_lights
+            .iter()
+            .enumerate()
+            .take(MAX_DIRECTIONAL_LIGHTS)
+        {
+            // direction is negated to be ready for N.L
+            let dir_to_light = -light.direction;
+
+            // convert from illuminance (lux) to candelas
+            //
+            // exposure is hard coded at the moment but should be replaced
+            // by values coming from the camera
+            // see: https://google.github.io/filament/Filament.html#imagingpipeline/physicallybasedcamera/exposuresettings
+            const APERTURE: f32 = 4.0;
+            const SHUTTER_SPEED: f32 = 1.0 / 250.0;
+            const SENSITIVITY: f32 = 100.0;
+            let ev100 =
+                f32::log2(APERTURE * APERTURE / SHUTTER_SPEED) - f32::log2(SENSITIVITY / 100.0);
+            let exposure = 1.0 / (f32::powf(2.0, ev100) * 1.2);
+            let intensity = light.illuminance * exposure;
+
+            // premultiply color by intensity
+            // we don't use the alpha at all, so no reason to multiply only [0..3]
+            gpu_lights.directional_lights[i] = GpuDirectionalLight {
+                color: (light.color.as_rgba_linear() * intensity).into(),
+                dir_to_light: dir_to_light.into(),
+            };
         }
 
         commands.entity(entity).insert(ViewLights {

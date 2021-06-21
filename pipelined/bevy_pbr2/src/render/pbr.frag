@@ -47,10 +47,16 @@ struct OmniLight {
     vec3 position;
     mat4 view_projection;
 };
+ 
+struct DirectionalLight {
+    vec4 color;
+    vec3 dir_to_light;
+};
 
 // NOTE: this must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
 // TODO: this can be removed if we move to storage buffers for light arrays
 const int MAX_OMNI_LIGHTS = 10;
+const int MAX_DIRECTIONAL_LIGHTS = 1;
 
 struct StandardMaterial_t {
     vec4 base_color;
@@ -77,8 +83,9 @@ layout(set = 0, binding = 0) uniform View {
 };
 layout(std140, set = 0, binding = 1) uniform Lights {
     vec4 AmbientColor;
-    uint NumLights;
+    uvec4 NumLights; // x is omni lights, y is directional lights
     OmniLight OmniLights[MAX_OMNI_LIGHTS];
+    DirectionalLight DirectionalLights[MAX_DIRECTIONAL_LIGHTS];
 };
 layout(set = 0, binding = 2) uniform texture2DArray t_Shadow;
 layout(set = 0, binding = 3) uniform samplerShadow s_Shadow;
@@ -306,6 +313,21 @@ vec3 omni_light(OmniLight light, float roughness, float NdotV, vec3 N, vec3 V, v
     return ((diffuse + specular) * light.color.rgb) * (rangeAttenuation * NoL);
 }
 
+vec3 directional_light(DirectionalLight light, float roughness, float NdotV, vec3 normal, vec3 view, vec3 R, vec3 F0, vec3 diffuseColor) {
+    vec3 incident_light = light.dir_to_light.xyz;
+
+    vec3 half_vector = normalize(incident_light + view);
+    float NoL = saturate(dot(normal, incident_light));
+    float NoH = saturate(dot(normal, half_vector));
+    float LoH = saturate(dot(incident_light, half_vector));
+
+    vec3 diffuse = diffuseColor * Fd_Burley(roughness, NdotV, NoL, LoH);
+    float specularIntensity = 1.0;
+    vec3 specular = specular(F0, roughness, half_vector, NdotV, NoL, NoH, LoH, specularIntensity);
+
+    return (specular + diffuse) * light.color.rgb * NoL;
+}
+
 float fetch_shadow(int light_id, vec4 homogeneous_coords) {
     if (homogeneous_coords.w <= 0.0) {
         return 1.0;
@@ -398,11 +420,14 @@ void main() {
 
         // accumulate color
         vec3 light_accum = vec3(0.0);
-        for (int i = 0; i < int(NumLights); ++i) {
+        for (int i = 0; i < int(NumLights.x); ++i) {
             OmniLight light = OmniLights[i];
             vec3 light_contrib = omni_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
             float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition);
             light_accum += light_contrib * shadow;
+        }
+        for (int i = 0; i < int(NumLights.y) && i < MAX_DIRECTIONAL_LIGHTS; ++i) {
+            light_accum += directional_light(DirectionalLights[i], roughness, NdotV, N, V, R, F0, diffuse_color);
         }
 
         vec3 diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
