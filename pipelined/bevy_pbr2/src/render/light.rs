@@ -259,7 +259,7 @@ pub fn prepare_lights(
             gpu_lights.lights[i] = GpuLight {
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
-                color: (light.color * light.intensity).into(),
+                color: (light.color.as_rgba_linear() * light.intensity).into(),
                 radius: light.radius.into(),
                 position: light.transform.translation.into(),
                 range: 1.0 / (light.range * light.range),
