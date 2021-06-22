@@ -51,6 +51,7 @@ struct OmniLight {
 struct DirectionalLight {
     vec4 color;
     vec3 dir_to_light;
+    mat4 view_projection;
 };
 
 // NOTE: this must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
@@ -87,8 +88,8 @@ layout(std140, set = 0, binding = 1) uniform Lights {
     OmniLight OmniLights[MAX_OMNI_LIGHTS];
     DirectionalLight DirectionalLights[MAX_DIRECTIONAL_LIGHTS];
 };
-layout(set = 0, binding = 2) uniform texture2DArray t_Shadow;
-layout(set = 0, binding = 3) uniform samplerShadow s_Shadow;
+layout(set = 0, binding = 2) uniform texture2DArray shadow_texture;
+layout(set = 0, binding = 3) uniform samplerShadow shadow_sampler;
 
 // Material bindings - set 2
 layout(set = 2, binding = 0) uniform StandardMaterial {
@@ -341,7 +342,7 @@ float fetch_shadow(int light_id, vec4 homogeneous_coords) {
         homogeneous_coords.z / homogeneous_coords.w
     );
     // do the lookup, using HW PCF and comparison
-    return texture(sampler2DArrayShadow(t_Shadow, s_Shadow), light_local);
+    return texture(sampler2DArrayShadow(shadow_texture, shadow_sampler), light_local);
 }
 
 void main() {
@@ -427,7 +428,10 @@ void main() {
             light_accum += light_contrib * shadow;
         }
         for (int i = 0; i < int(NumLights.y) && i < MAX_DIRECTIONAL_LIGHTS; ++i) {
-            light_accum += directional_light(DirectionalLights[i], roughness, NdotV, N, V, R, F0, diffuse_color);
+            DirectionalLight light = DirectionalLights[i];
+            vec3 light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
+            float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition);
+            light_accum += light_contrib * shadow;
         }
 
         vec3 diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);

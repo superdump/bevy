@@ -1,11 +1,8 @@
-use bevy_ecs::reflect::ReflectComponent;
 use bevy_math::Vec3;
-use bevy_reflect::Reflect;
-use bevy_render2::color::Color;
+use bevy_render2::{camera::OrthographicProjection, color::Color};
 
 /// An omnidirectional light
-#[derive(Debug, Clone, Copy, Reflect)]
-#[reflect(Component)]
+#[derive(Debug, Clone, Copy)]
 pub struct OmniLight {
     pub color: Color,
     pub intensity: f32,
@@ -50,21 +47,27 @@ impl Default for OmniLight {
 /// | 32,000–100,000    | Direct sunlight                                |
 ///
 /// Source: [Wikipedia](https://en.wikipedia.org/wiki/Lux)
-#[derive(Debug, Clone, Copy, Reflect)]
-#[reflect(Component)]
+#[derive(Debug, Clone)]
 pub struct DirectionalLight {
     pub color: Color,
     pub illuminance: f32,
     direction: Vec3,
+    pub shadow_projection: OrthographicProjection,
 }
 
 impl DirectionalLight {
     /// Create a new directional light component.
-    pub fn new(color: Color, illuminance: f32, direction: Vec3) -> Self {
+    pub fn new(
+        color: Color,
+        illuminance: f32,
+        direction: Vec3,
+        shadow_projection: OrthographicProjection,
+    ) -> Self {
         DirectionalLight {
             color,
             illuminance,
             direction: direction.normalize(),
+            shadow_projection,
         }
     }
 
@@ -80,10 +83,20 @@ impl DirectionalLight {
 
 impl Default for DirectionalLight {
     fn default() -> Self {
+        let size = 100.0;
         DirectionalLight {
             color: Color::rgb(1.0, 1.0, 1.0),
             illuminance: 100000.0,
             direction: Vec3::new(0.0, -1.0, 0.0),
+            shadow_projection: OrthographicProjection {
+                left: -size,
+                right: size,
+                bottom: -size,
+                top: size,
+                near: -size,
+                far: size,
+                ..Default::default()
+            },
         }
     }
 }

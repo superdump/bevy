@@ -4,6 +4,7 @@ use crate::{
 use bevy_ecs::{prelude::*, system::SystemState};
 use bevy_math::{Mat4, UVec4, Vec3, Vec4};
 use bevy_render2::{
+    camera::CameraProjection,
     color::Color,
     core_pipeline::Transparent3dPhase,
     pass::*,
@@ -37,6 +38,7 @@ pub struct ExtractedDirectionalLight {
     color: Color,
     illuminance: f32,
     direction: Vec3,
+    projection: Mat4,
 }
 
 #[repr(C)]
@@ -54,6 +56,7 @@ pub struct GpuOmniLight {
 pub struct GpuDirectionalLight {
     color: Vec4,
     dir_to_light: Vec3,
+    view_projection: Mat4,
 }
 
 #[repr(C)]
@@ -205,6 +208,7 @@ pub fn extract_lights(
                 color: directional_light.color,
                 illuminance: directional_light.illuminance,
                 direction: directional_light.get_direction(),
+                projection: directional_light.shadow_projection.get_projection_matrix(),
             });
     }
 }
@@ -340,12 +344,49 @@ pub fn prepare_lights(
             let exposure = 1.0 / (f32::powf(2.0, ev100) * 1.2);
             let intensity = light.illuminance * exposure;
 
-            // premultiply color by intensity
-            // we don't use the alpha at all, so no reason to multiply only [0..3]
+            // NOTE: A directional light seems to have to have an eye position on the line along the direction of the light
+            //       through the world origin. I (Rob Swain) do not yet understand why it cannot be translated away from this.
+            let view = Mat4::look_at_rh(-40.0 * light.direction, Vec3::ZERO, Vec3::Y);
+            // NOTE: This orthographic projection defines the volume within which shadows from a directional light can be cast
+            let projection = light.projection;
+
             gpu_lights.directional_lights[i] = GpuDirectionalLight {
+                // premultiply color by intensity
+                // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: (light.color.as_rgba_linear() * intensity).into(),
                 dir_to_light: dir_to_light.into(),
+                // NOTE: * view is correct, it should not be view.inverse() here
+                view_projection: projection * view,
             };
+
+            let depth_texture_view = render_resources.create_texture_view(
+                light_depth_texture.texture,
+                TextureViewDescriptor {
+                    format: None,
+                    dimension: Some(TextureViewDimension::D2),
+                    aspect: TextureAspect::All,
+                    base_mip_level: 0,
+                    level_count: None,
+                    base_array_layer: i as u32,
+                    array_layer_count: NonZeroU32::new(1),
+                },
+            );
+            let view_light_entity = commands
+                .spawn()
+                .insert_bundle((
+                    ViewLight {
+                        depth_texture: depth_texture_view,
+                    },
+                    ExtractedView {
+                        width: SHADOW_SIZE.width,
+                        height: SHADOW_SIZE.height,
+                        transform: GlobalTransform::from_matrix(view.inverse()),
+                        projection,
+                    },
+                    RenderPhase::<ShadowPhase>::default(),
+                ))
+                .id();
+            view_lights.push(view_light_entity);
         }
 
         commands.entity(entity).insert(ViewLights {
