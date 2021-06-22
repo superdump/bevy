@@ -2,7 +2,7 @@ use crate::{
     render::MeshViewBindGroups, AmbientLight, DirectionalLight, ExtractedMeshes, OmniLight,
 };
 use bevy_ecs::{prelude::*, system::SystemState};
-use bevy_math::{Mat4, UVec4, Vec3, Vec4};
+use bevy_math::{Mat4, UVec4, Vec2, Vec3, Vec4};
 use bevy_render2::{
     camera::CameraProjection,
     color::Color,
@@ -32,6 +32,7 @@ pub struct ExtractedOmniLight {
     range: f32,
     radius: f32,
     transform: GlobalTransform,
+    shadow_bias_min_max: Vec2,
 }
 
 pub struct ExtractedDirectionalLight {
@@ -39,6 +40,7 @@ pub struct ExtractedDirectionalLight {
     illuminance: f32,
     direction: Vec3,
     projection: Mat4,
+    shadow_bias_min_max: Vec2,
 }
 
 #[repr(C)]
@@ -48,6 +50,7 @@ pub struct GpuOmniLight {
     range: f32,
     radius: f32,
     position: Vec3,
+    shadow_bias_min_max: Vec2,
     view_proj: Mat4,
 }
 
@@ -56,6 +59,7 @@ pub struct GpuOmniLight {
 pub struct GpuDirectionalLight {
     color: Vec4,
     dir_to_light: Vec3,
+    shadow_bias_min_max: Vec2,
     view_projection: Mat4,
 }
 
@@ -199,6 +203,7 @@ pub fn extract_lights(
             range: omni_light.range,
             radius: omni_light.radius,
             transform: transform.clone(),
+            shadow_bias_min_max: omni_light.shadow_bias_min_max,
         });
     }
     for (entity, directional_light) in directional_lights.iter() {
@@ -209,6 +214,7 @@ pub fn extract_lights(
                 illuminance: directional_light.illuminance,
                 direction: directional_light.get_direction(),
                 projection: directional_light.shadow_projection.get_projection_matrix(),
+                shadow_bias_min_max: directional_light.shadow_bias_min_max,
             });
     }
 }
@@ -303,6 +309,7 @@ pub fn prepare_lights(
                 range: 1.0 / (light.range * light.range),
                 // this could technically be copied to the gpu from the light's ViewUniforms
                 view_proj: projection * view_transform.compute_matrix().inverse(),
+                shadow_bias_min_max: light.shadow_bias_min_max,
             };
 
             let view_light_entity = commands
@@ -357,6 +364,7 @@ pub fn prepare_lights(
                 dir_to_light: dir_to_light.into(),
                 // NOTE: * view is correct, it should not be view.inverse() here
                 view_projection: projection * view,
+                shadow_bias_min_max: light.shadow_bias_min_max,
             };
 
             let depth_texture_view = render_resources.create_texture_view(

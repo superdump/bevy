@@ -45,12 +45,14 @@ struct OmniLight {
     float range;
     float radius;
     vec3 position;
+    vec2 shadow_bias_min_max;
     mat4 view_projection;
 };
  
 struct DirectionalLight {
     vec4 color;
     vec3 dir_to_light;
+    vec2 shadow_bias_min_max;
     mat4 view_projection;
 };
 
@@ -329,7 +331,7 @@ vec3 directional_light(DirectionalLight light, float roughness, float NdotV, vec
     return (specular + diffuse) * light.color.rgb * NoL;
 }
 
-float fetch_shadow(int light_id, vec4 homogeneous_coords) {
+float fetch_shadow(int light_id, vec4 homogeneous_coords, float shadow_bias) {
     if (homogeneous_coords.w <= 0.0) {
         return 1.0;
     }
@@ -339,7 +341,7 @@ float fetch_shadow(int light_id, vec4 homogeneous_coords) {
     vec4 light_local = vec4(
         homogeneous_coords.xy * flip_correction/homogeneous_coords.w + 0.5,
         light_id,
-        homogeneous_coords.z / homogeneous_coords.w
+        homogeneous_coords.z / homogeneous_coords.w - shadow_bias
     );
     // do the lookup, using HW PCF and comparison
     return texture(sampler2DArrayShadow(shadow_texture, shadow_sampler), light_local);
@@ -424,13 +426,22 @@ void main() {
         for (int i = 0; i < int(NumLights.x); ++i) {
             OmniLight light = OmniLights[i];
             vec3 light_contrib = omni_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
-            float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition);
+            vec3 dir_to_light = normalize(light.position.xyz - v_WorldPosition.xyz);
+            float shadow_bias = max(
+                light.shadow_bias_min_max.y * (1.0 - dot(v_WorldNormal, dir_to_light)),
+                light.shadow_bias_min_max.x
+            );
+            float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition, shadow_bias);
             light_accum += light_contrib * shadow;
         }
         for (int i = 0; i < int(NumLights.y) && i < MAX_DIRECTIONAL_LIGHTS; ++i) {
             DirectionalLight light = DirectionalLights[i];
             vec3 light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
-            float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition);
+            float shadow_bias = max(
+                light.shadow_bias_min_max.y * (1.0 - dot(v_WorldNormal, light.dir_to_light)),
+                light.shadow_bias_min_max.x
+            );
+            float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition, shadow_bias);
             light_accum += light_contrib * shadow;
         }
 
