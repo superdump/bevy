@@ -78,7 +78,7 @@ pub const MAX_DIRECTIONAL_LIGHTS: usize = 1;
 pub const SHADOW_SIZE: Extent3d = Extent3d {
     width: 1024,
     height: 1024,
-    depth_or_array_layers: MAX_OMNI_LIGHTS as u32,
+    depth_or_array_layers: (MAX_OMNI_LIGHTS + MAX_DIRECTIONAL_LIGHTS) as u32,
 };
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
@@ -330,6 +330,7 @@ pub fn prepare_lights(
             view_lights.push(view_light_entity);
         }
 
+        let n_omni_lights = view_lights.len();
         for (i, light) in directional_lights
             .iter()
             .enumerate()
@@ -375,7 +376,7 @@ pub fn prepare_lights(
                     aspect: TextureAspect::All,
                     base_mip_level: 0,
                     level_count: None,
-                    base_array_layer: i as u32,
+                    base_array_layer: (n_omni_lights + i) as u32,
                     array_layer_count: NonZeroU32::new(1),
                 },
             );

@@ -421,9 +421,11 @@ void main() {
 
         vec3 R = reflect(-V, N);
 
+        const int n_omni_lights = int(NumLights.x);
+        const int n_dir_lights = int(NumLights.y);
         // accumulate color
         vec3 light_accum = vec3(0.0);
-        for (int i = 0; i < int(NumLights.x); ++i) {
+        for (int i = 0; i < n_omni_lights && i < MAX_OMNI_LIGHTS; ++i) {
             OmniLight light = OmniLights[i];
             vec3 light_contrib = omni_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
             vec3 dir_to_light = normalize(light.position.xyz - v_WorldPosition.xyz);
@@ -434,14 +436,14 @@ void main() {
             float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition, shadow_bias);
             light_accum += light_contrib * shadow;
         }
-        for (int i = 0; i < int(NumLights.y) && i < MAX_DIRECTIONAL_LIGHTS; ++i) {
+        for (int i = 0; i < n_dir_lights && i < MAX_DIRECTIONAL_LIGHTS; ++i) {
             DirectionalLight light = DirectionalLights[i];
             vec3 light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
             float shadow_bias = max(
                 light.shadow_bias_min_max.y * (1.0 - dot(v_WorldNormal, light.dir_to_light)),
                 light.shadow_bias_min_max.x
             );
-            float shadow = fetch_shadow(i, light.view_projection * v_WorldPosition, shadow_bias);
+            float shadow = fetch_shadow(n_omni_lights + i, light.view_projection * v_WorldPosition, shadow_bias);
             light_accum += light_contrib * shadow;
         }
 
