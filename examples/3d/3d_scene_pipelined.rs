@@ -4,10 +4,13 @@ use bevy::{
     ecs::prelude::*,
     input::Input,
     math::Vec3,
-    pbr2::{PbrBundle, OmniLightBundle, StandardMaterial},
+    pbr2::{
+        AmbientLight, DirectionalLight, DirectionalLightBundle, OmniLight, OmniLightBundle,
+        PbrBundle, StandardMaterial,
+    },
     prelude::{App, Assets, KeyCode, Transform},
     render2::{
-        camera::PerspectiveCameraBundle,
+        camera::{OrthographicProjection, PerspectiveCameraBundle},
         color::Color,
         mesh::{shape, Mesh},
     },
@@ -23,6 +26,7 @@ fn main() {
         .add_plugin(WgpuResourceDiagnosticsPlugin::default())
         .add_startup_system(setup.system())
         .add_system(movement.system())
+        .add_system(animate_light_direction.system())
         .run();
 }
 
@@ -34,11 +38,15 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    commands.insert_resource(AmbientLight {
+        color: Color::ORANGE_RED,
+        brightness: 0.02,
+    });
     // plane
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
+        mesh: meshes.add(Mesh::from(shape::Plane { size: 10.0 })),
         material: materials.add(StandardMaterial {
-            base_color: Color::INDIGO,
+            base_color: Color::WHITE,
             perceptual_roughness: 1.0,
             ..Default::default()
         }),
@@ -73,14 +81,53 @@ fn setup(
         .insert(Movable);
     // light
     commands.spawn_bundle(OmniLightBundle {
+        omni_light: OmniLight {
+            color: Color::RED,
+            ..Default::default()
+        },
         transform: Transform::from_xyz(5.0, 8.0, 2.0),
         ..Default::default()
     });
-    // camera
-    commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+    commands.spawn_bundle(OmniLightBundle {
+        omni_light: OmniLight {
+            color: Color::GREEN,
+            ..Default::default()
+        },
+        transform: Transform::from_xyz(5.0, 8.0, -2.0),
         ..Default::default()
     });
+    const HALF_SIZE: f32 = 5.0;
+    let mut directional_light = DirectionalLight::default();
+    directional_light.color = Color::BLUE;
+    directional_light.shadow_projection = OrthographicProjection {
+        left: -HALF_SIZE,
+        right: HALF_SIZE,
+        bottom: -HALF_SIZE,
+        top: HALF_SIZE,
+        near: -10.0 * HALF_SIZE,
+        far: 10.0 * HALF_SIZE,
+        ..Default::default()
+    };
+    commands
+        .spawn_bundle(DirectionalLightBundle {
+            directional_light,
+            ..Default::default()
+        })
+        .id();
+    // camera
+    commands
+        .spawn_bundle(PerspectiveCameraBundle {
+            transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..Default::default()
+        })
+        .id();
+}
+
+fn animate_light_direction(time: Res<Time>, mut query: Query<&mut DirectionalLight>) {
+    for mut light in query.iter_mut() {
+        let (s, c) = (time.seconds_since_startup() as f32 * std::f32::consts::TAU / 10.0).sin_cos();
+        light.set_direction(Vec3::new(2.0 * s, -1.0, c));
+    }
 }
 
 fn movement(
