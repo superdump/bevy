@@ -55,7 +55,7 @@ fn setup(
                 reflectance: 1.0,
                 ..Default::default()
             }),
-            transform: Transform::from_xyz(0.0, 1.0, 0.0),
+            transform: Transform::from_xyz(0.0, 0.5, 0.0),
             ..Default::default()
         })
         .insert(Movable);
