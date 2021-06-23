@@ -354,7 +354,7 @@ pub fn prepare_lights(
 
             // NOTE: A directional light seems to have to have an eye position on the line along the direction of the light
             //       through the world origin. I (Rob Swain) do not yet understand why it cannot be translated away from this.
-            let view = Mat4::look_at_rh(-40.0 * light.direction, Vec3::ZERO, Vec3::Y);
+            let view = Mat4::look_at_rh(Vec3::ZERO, light.direction, Vec3::Y);
             // NOTE: This orthographic projection defines the volume within which shadows from a directional light can be cast
             let projection = light.projection;
 
