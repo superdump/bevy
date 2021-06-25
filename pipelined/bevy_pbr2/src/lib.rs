@@ -12,7 +12,6 @@ use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_render2::{
     core_pipeline,
-    render_command::RenderCommandQueue,
     render_graph::RenderGraph,
     render_phase::{sort_phase_system, DrawFunctions},
     RenderStage,
@@ -48,9 +47,8 @@ impl Plugin for PbrPlugin {
                 RenderStage::PhaseSort,
                 sort_phase_system::<ShadowPhase>.system(),
             )
-            .add_system_to_stage(RenderStage::Cleanup, render::cleanup_view_lights.system())
             // FIXME: Hack to ensure RenderCommandQueue is initialized when PbrShaders is being initialized
-            .init_resource::<RenderCommandQueue>()
+            // .init_resource::<RenderCommandQueue>()
             .init_resource::<PbrShaders>()
             .init_resource::<ShadowShaders>()
             .init_resource::<MaterialMeta>()
