@@ -5,18 +5,17 @@ use bevy_math::Vec4;
 use bevy_reflect::TypeUuid;
 use bevy_render2::{
     color::Color,
-    render_command::RenderCommandQueue,
-    render_resource::{BufferId, BufferInfo, BufferUsage},
-    renderer::{RenderResourceContext, RenderResources},
-    texture::Texture,
+    render_resource::{Buffer, BufferInitDescriptor, BufferUsage},
+    renderer::{RenderDevice, RenderQueue},
+    texture::Image,
 };
 use bevy_utils::HashSet;
 use crevice::std140::{AsStd140, Std140};
 
 // TODO: this shouldn't live in the StandardMaterial type
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct StandardMaterialGpuData {
-    pub buffer: BufferId,
+    pub buffer: Buffer,
 }
 
 // NOTE: These must match the bit flags in bevy_pbr2/src/render/pbr.frag!
@@ -43,11 +42,11 @@ pub struct StandardMaterial {
     /// in between If used together with a base_color_texture, this is factored into the final
     /// base color as `base_color * base_color_texture_value`
     pub base_color: Color,
-    pub base_color_texture: Option<Handle<Texture>>,
+    pub base_color_texture: Option<Handle<Image>>,
     // Use a color for user friendliness even though we technically don't use the alpha channel
     // Might be used in the future for exposure correction in HDR
     pub emissive: Color,
-    pub emissive_texture: Option<Handle<Texture>>,
+    pub emissive_texture: Option<Handle<Image>>,
     /// Linear perceptual roughness, clamped to [0.089, 1.0] in the shader
     /// Defaults to minimum of 0.089
     /// If used together with a roughness/metallic texture, this is factored into the final base
@@ -57,11 +56,11 @@ pub struct StandardMaterial {
     /// If used together with a roughness/metallic texture, this is factored into the final base
     /// color as `metallic * metallic_texture_value`
     pub metallic: f32,
-    pub metallic_roughness_texture: Option<Handle<Texture>>,
+    pub metallic_roughness_texture: Option<Handle<Image>>,
     /// Specular intensity for non-metals on a linear scale of [0.0, 1.0]
     /// defaults to 0.5 which is mapped to 4% reflectance in the shader
     pub reflectance: f32,
-    pub occlusion_texture: Option<Handle<Texture>>,
+    pub occlusion_texture: Option<Handle<Image>>,
     pub double_sided: bool,
     pub unlit: bool,
     pub gpu_data: Option<StandardMaterialGpuData>,
@@ -110,8 +109,8 @@ impl From<Color> for StandardMaterial {
     }
 }
 
-impl From<Handle<Texture>> for StandardMaterial {
-    fn from(texture: Handle<Texture>) -> Self {
+impl From<Handle<Image>> for StandardMaterial {
+    fn from(texture: Handle<Image>) -> Self {
         StandardMaterial {
             base_color_texture: Some(texture),
             ..Default::default()
@@ -150,13 +149,12 @@ impl Plugin for StandardMaterialPlugin {
 }
 
 pub fn standard_material_resource_system(
-    render_resource_context: Res<RenderResources>,
-    mut render_command_queue: ResMut<RenderCommandQueue>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut material_events: EventReader<AssetEvent<StandardMaterial>>,
 ) {
     let mut changed_materials = HashSet::default();
-    let render_resource_context = &**render_resource_context;
     for event in material_events.iter() {
         match event {
             AssetEvent::Created { ref handle } => {
@@ -168,7 +166,6 @@ pub fn standard_material_resource_system(
                 // remove_current_material_resources(render_resource_context, handle, &mut materials);
             }
             AssetEvent::Removed { ref handle } => {
-                remove_current_material_resources(render_resource_context, handle, &mut materials);
                 // if material was modified and removed in the same update, ignore the modification
                 // events are ordered so future modification events are ok
                 changed_materials.remove(handle);
@@ -216,35 +213,13 @@ pub fn standard_material_resource_system(
 
             let size = StandardMaterialUniformData::std140_size_static();
 
-            let staging_buffer = render_resource_context.create_buffer_with_data(
-                BufferInfo {
-                    size,
-                    buffer_usage: BufferUsage::COPY_SRC | BufferUsage::MAP_WRITE,
-                    mapped_at_creation: true,
-                },
-                value_std140.as_bytes(),
-            );
-
-            let buffer = render_resource_context.create_buffer(BufferInfo {
-                size,
-                buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
-                mapped_at_creation: false,
+            let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
+                label: None,
+                usage: BufferUsage::UNIFORM | BufferUsage::COPY_DST,
+                contents: value_std140.as_bytes(),
             });
-
-            render_command_queue.copy_buffer_to_buffer(staging_buffer, 0, buffer, 0, size as u64);
-            render_command_queue.free_buffer(staging_buffer);
 
             material.gpu_data = Some(StandardMaterialGpuData { buffer });
         }
-    }
-}
-
-fn remove_current_material_resources(
-    render_resource_context: &dyn RenderResourceContext,
-    handle: &Handle<StandardMaterial>,
-    materials: &mut Assets<StandardMaterial>,
-) {
-    if let Some(gpu_data) = materials.get_mut(handle).and_then(|t| t.gpu_data.take()) {
-        render_resource_context.remove_buffer(gpu_data.buffer);
     }
 }

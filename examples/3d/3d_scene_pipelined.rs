@@ -4,14 +4,13 @@ use bevy::{
     ecs::prelude::*,
     input::Input,
     math::Vec3,
-    pbr2::{PbrBundle, OmniLightBundle, StandardMaterial},
+    pbr2::{OmniLightBundle, PbrBundle, StandardMaterial},
     prelude::{App, Assets, KeyCode, Transform},
     render2::{
         camera::PerspectiveCameraBundle,
         color::Color,
         mesh::{shape, Mesh},
     },
-    wgpu2::diagnostic::WgpuResourceDiagnosticsPlugin,
     PipelinedDefaultPlugins,
 };
 
@@ -20,7 +19,6 @@ fn main() {
         .add_plugins(PipelinedDefaultPlugins)
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(LogDiagnosticsPlugin::default())
-        .add_plugin(WgpuResourceDiagnosticsPlugin::default())
         .add_startup_system(setup.system())
         .add_system(movement.system())
         .run();
