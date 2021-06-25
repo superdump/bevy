@@ -12,10 +12,7 @@ use bevy_render2::{
     },
     color::Color,
     mesh::{Indices, Mesh, VertexAttributeValues},
-    pipeline::PrimitiveTopology,
-    texture::{
-        AddressMode, FilterMode, ImageType, SamplerDescriptor, Texture, TextureError, TextureFormat,
-    },
+    texture::{Image, ImageType, TextureError},
 };
 use bevy_scene::Scene;
 use bevy_transform::{
@@ -32,6 +29,7 @@ use std::{
     path::Path,
 };
 use thiserror::Error;
+use wgpu::{AddressMode, FilterMode, PrimitiveTopology, SamplerDescriptor, TextureFormat};
 
 use crate::{Gltf, GltfNode};
 
@@ -320,13 +318,13 @@ async fn load_texture<'a>(
     buffer_data: &[Vec<u8>],
     linear_textures: &HashSet<usize>,
     load_context: &LoadContext<'a>,
-) -> Result<(Texture, String), GltfError> {
+) -> Result<(Image, String), GltfError> {
     let mut texture = match gltf_texture.source().source() {
         gltf::image::Source::View { view, mime_type } => {
             let start = view.offset() as usize;
             let end = (view.offset() + view.length()) as usize;
             let buffer = &buffer_data[view.buffer().index()][start..end];
-            Texture::from_buffer(buffer, ImageType::MimeType(mime_type))?
+            Image::from_buffer(buffer, ImageType::MimeType(mime_type))?
         }
         gltf::image::Source::Uri { uri, mime_type } => {
             let uri = percent_encoding::percent_decode_str(uri)
@@ -347,7 +345,7 @@ async fn load_texture<'a>(
                 }
             };
 
-            Texture::from_buffer(
+            Image::from_buffer(
                 &bytes,
                 mime_type
                     .map(|mt| ImageType::MimeType(mt))
@@ -355,9 +353,9 @@ async fn load_texture<'a>(
             )?
         }
     };
-    texture.sampler = texture_sampler(&gltf_texture);
+    texture.sampler_descriptor = texture_sampler(&gltf_texture);
     if (linear_textures).contains(&gltf_texture.index()) {
-        texture.format = TextureFormat::Rgba8Unorm;
+        texture.texture_descriptor.format = TextureFormat::Rgba8Unorm;
     }
 
     Ok((texture, texture_label(&gltf_texture)))
@@ -574,7 +572,7 @@ fn scene_label(scene: &gltf::Scene) -> String {
     format!("Scene{}", scene.index())
 }
 
-fn texture_sampler(texture: &gltf::Texture) -> SamplerDescriptor {
+fn texture_sampler<'a>(texture: &gltf::Texture) -> SamplerDescriptor<'a> {
     let gltf_sampler = texture.sampler();
 
     SamplerDescriptor {
