@@ -1,22 +1,15 @@
-use bevy_app::{App, CoreStage, EventReader, Plugin};
-use bevy_asset::{AddAsset, AssetEvent, Assets, Handle};
-use bevy_ecs::prelude::*;
+use bevy_app::{App, Plugin};
+use bevy_asset::{AddAsset, Handle};
 use bevy_math::Vec4;
 use bevy_reflect::TypeUuid;
 use bevy_render2::{
     color::Color,
+    render_asset::{RenderAsset, RenderAssetPlugin},
     render_resource::{Buffer, BufferInitDescriptor, BufferUsage},
     renderer::{RenderDevice, RenderQueue},
     texture::Image,
 };
-use bevy_utils::HashSet;
 use crevice::std140::{AsStd140, Std140};
-
-// TODO: this shouldn't live in the StandardMaterial type
-#[derive(Debug, Clone)]
-pub struct StandardMaterialGpuData {
-    pub buffer: Buffer,
-}
 
 // NOTE: These must match the bit flags in bevy_pbr2/src/render/pbr.frag!
 bitflags::bitflags! {
@@ -63,13 +56,6 @@ pub struct StandardMaterial {
     pub occlusion_texture: Option<Handle<Image>>,
     pub double_sided: bool,
     pub unlit: bool,
-    pub gpu_data: Option<StandardMaterialGpuData>,
-}
-
-impl StandardMaterial {
-    pub fn gpu_data(&self) -> Option<&StandardMaterialGpuData> {
-        self.gpu_data.as_ref()
-    }
 }
 
 impl Default for StandardMaterial {
@@ -95,7 +81,6 @@ impl Default for StandardMaterial {
             occlusion_texture: None,
             double_sided: false,
             unlit: false,
-            gpu_data: None,
         }
     }
 }
@@ -141,85 +126,74 @@ pub struct StandardMaterialPlugin;
 
 impl Plugin for StandardMaterialPlugin {
     fn build(&self, app: &mut App) {
-        app.add_asset::<StandardMaterial>().add_system_to_stage(
-            CoreStage::PostUpdate,
-            standard_material_resource_system.system(),
-        );
+        app.add_plugin(RenderAssetPlugin::<StandardMaterial>::default())
+            .add_asset::<StandardMaterial>();
     }
 }
 
-pub fn standard_material_resource_system(
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut material_events: EventReader<AssetEvent<StandardMaterial>>,
-) {
-    let mut changed_materials = HashSet::default();
-    for event in material_events.iter() {
-        match event {
-            AssetEvent::Created { ref handle } => {
-                changed_materials.insert(handle.clone_weak());
-            }
-            AssetEvent::Modified { ref handle } => {
-                changed_materials.insert(handle.clone_weak());
-                // TODO: uncomment this to support mutated materials
-                // remove_current_material_resources(render_resource_context, handle, &mut materials);
-            }
-            AssetEvent::Removed { ref handle } => {
-                // if material was modified and removed in the same update, ignore the modification
-                // events are ordered so future modification events are ok
-                changed_materials.remove(handle);
-            }
-        }
+#[derive(Debug, Clone)]
+pub struct GpuStandardMaterial {
+    pub buffer: Buffer,
+    // FIXME: image handles feel unnecessary here but the extracted asset is discarded
+    pub base_color_texture: Option<Handle<Image>>,
+    pub emissive_texture: Option<Handle<Image>>,
+    pub metallic_roughness_texture: Option<Handle<Image>>,
+    pub occlusion_texture: Option<Handle<Image>>,
+}
+
+impl RenderAsset for StandardMaterial {
+    type ExtractedAsset = StandardMaterial;
+    type PreparedAsset = GpuStandardMaterial;
+
+    fn extract_asset(&self) -> Self::ExtractedAsset {
+        self.clone()
     }
 
-    // update changed material data
-    for changed_material_handle in changed_materials.iter() {
-        if let Some(material) = materials.get_mut(changed_material_handle) {
-            // TODO: this avoids creating new materials each frame because storing gpu data in the material flags it as
-            // modified. this prevents hot reloading and therefore can't be used in an actual impl.
-            if material.gpu_data.is_some() {
-                continue;
-            }
+    fn prepare_asset(
+        material: Self::ExtractedAsset,
+        render_device: &RenderDevice,
+        _render_queue: &RenderQueue,
+    ) -> Self::PreparedAsset {
+        let mut flags = StandardMaterialFlags::NONE;
+        if material.base_color_texture.is_some() {
+            flags |= StandardMaterialFlags::BASE_COLOR_TEXTURE;
+        }
+        if material.emissive_texture.is_some() {
+            flags |= StandardMaterialFlags::EMISSIVE_TEXTURE;
+        }
+        if material.metallic_roughness_texture.is_some() {
+            flags |= StandardMaterialFlags::METALLIC_ROUGHNESS_TEXTURE;
+        }
+        if material.occlusion_texture.is_some() {
+            flags |= StandardMaterialFlags::OCCLUSION_TEXTURE;
+        }
+        if material.double_sided {
+            flags |= StandardMaterialFlags::DOUBLE_SIDED;
+        }
+        if material.unlit {
+            flags |= StandardMaterialFlags::UNLIT;
+        }
+        let value = StandardMaterialUniformData {
+            base_color: material.base_color.as_rgba_linear().into(),
+            emissive: material.emissive.into(),
+            roughness: material.perceptual_roughness,
+            metallic: material.metallic,
+            reflectance: material.reflectance,
+            flags: flags.bits,
+        };
+        let value_std140 = value.as_std140();
 
-            let mut flags = StandardMaterialFlags::NONE;
-            if material.base_color_texture.is_some() {
-                flags |= StandardMaterialFlags::BASE_COLOR_TEXTURE;
-            }
-            if material.emissive_texture.is_some() {
-                flags |= StandardMaterialFlags::EMISSIVE_TEXTURE;
-            }
-            if material.metallic_roughness_texture.is_some() {
-                flags |= StandardMaterialFlags::METALLIC_ROUGHNESS_TEXTURE;
-            }
-            if material.occlusion_texture.is_some() {
-                flags |= StandardMaterialFlags::OCCLUSION_TEXTURE;
-            }
-            if material.double_sided {
-                flags |= StandardMaterialFlags::DOUBLE_SIDED;
-            }
-            if material.unlit {
-                flags |= StandardMaterialFlags::UNLIT;
-            }
-            let value = StandardMaterialUniformData {
-                base_color: material.base_color.as_rgba_linear().into(),
-                emissive: material.emissive.into(),
-                roughness: material.perceptual_roughness,
-                metallic: material.metallic,
-                reflectance: material.reflectance,
-                flags: flags.bits,
-            };
-            let value_std140 = value.as_std140();
-
-            let size = StandardMaterialUniformData::std140_size_static();
-
-            let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
-                label: None,
-                usage: BufferUsage::UNIFORM | BufferUsage::COPY_DST,
-                contents: value_std140.as_bytes(),
-            });
-
-            material.gpu_data = Some(StandardMaterialGpuData { buffer });
+        let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
+            label: None,
+            usage: BufferUsage::UNIFORM | BufferUsage::COPY_DST,
+            contents: value_std140.as_bytes(),
+        });
+        GpuStandardMaterial {
+            buffer,
+            base_color_texture: material.base_color_texture,
+            emissive_texture: material.emissive_texture,
+            metallic_roughness_texture: material.metallic_roughness_texture,
+            occlusion_texture: material.occlusion_texture,
         }
     }
 }

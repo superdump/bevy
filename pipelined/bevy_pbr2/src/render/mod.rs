@@ -365,20 +365,12 @@ impl FromWorld for PbrShaders {
     }
 }
 
-struct ExtractedStandardMaterialTextures {
-    base_color_texture: Option<Handle<Image>>,
-    emissive_texture: Option<Handle<Image>>,
-    metallic_roughness_texture: Option<Handle<Image>>,
-    occlusion_texture: Option<Handle<Image>>,
-}
-
 struct ExtractedMesh {
     transform: Mat4,
     vertex_buffer: Buffer,
     index_info: Option<IndexInfo>,
     transform_binding_offset: u32,
-    material_buffer: Buffer,
-    material_textures: ExtractedStandardMaterialTextures,
+    material_handle: Handle<StandardMaterial>,
 }
 
 struct IndexInfo {
@@ -393,35 +385,22 @@ pub struct ExtractedMeshes {
 pub fn extract_meshes(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
-    materials: Res<Assets<StandardMaterial>>,
     query: Query<(&GlobalTransform, &Handle<Mesh>, &Handle<StandardMaterial>)>,
 ) {
     let mut extracted_meshes = Vec::new();
     for (transform, mesh_handle, material_handle) in query.iter() {
         if let Some(mesh) = meshes.get(mesh_handle) {
             if let Some(mesh_gpu_data) = &mesh.gpu_data() {
-                if let Some(material) = materials.get(material_handle) {
-                    if let Some(material_gpu_data) = &material.gpu_data() {
-                        extracted_meshes.push(ExtractedMesh {
-                            transform: transform.compute_matrix(),
-                            vertex_buffer: mesh_gpu_data.vertex_buffer.clone(),
-                            index_info: mesh_gpu_data.index_buffer.as_ref().map(|i| IndexInfo {
-                                buffer: i.clone(),
-                                count: mesh.indices().unwrap().len() as u32,
-                            }),
-                            transform_binding_offset: 0,
-                            material_buffer: material_gpu_data.buffer.clone(),
-                            material_textures: ExtractedStandardMaterialTextures {
-                                base_color_texture: material.base_color_texture.clone(),
-                                emissive_texture: material.emissive_texture.clone(),
-                                metallic_roughness_texture: material
-                                    .metallic_roughness_texture
-                                    .clone(),
-                                occlusion_texture: material.occlusion_texture.clone(),
-                            },
-                        });
-                    }
-                }
+                extracted_meshes.push(ExtractedMesh {
+                    transform: transform.compute_matrix(),
+                    vertex_buffer: mesh_gpu_data.vertex_buffer.clone(),
+                    index_info: mesh_gpu_data.index_buffer.as_ref().map(|i| IndexInfo {
+                        buffer: i.clone(),
+                        count: mesh.indices().unwrap().len() as u32,
+                    }),
+                    transform_binding_offset: 0,
+                    material_handle: material_handle.clone(),
+                });
             }
         }
     }
@@ -498,6 +477,7 @@ pub fn queue_meshes(
     view_meta: Res<ViewMeta>,
     mut extracted_meshes: ResMut<ExtractedMeshes>,
     gpu_images: Res<RenderAssets<Image>>,
+    render_materials: Res<RenderAssets<StandardMaterial>>,
     mut views: Query<(
         Entity,
         &ExtractedView,
@@ -570,33 +550,36 @@ pub fn queue_meshes(
         let view_row_2 = view_matrix.row(2);
         let material_bind_groups = &mut material_meta.material_bind_groups;
         for (i, mesh) in extracted_meshes.meshes.iter_mut().enumerate() {
+            let gpu_material = &render_materials
+                .get(&mesh.material_handle)
+                .expect("Failed to get StandardMaterial PreparedAsset");
             let material_bind_group_index = *material_meta
                 .material_bind_group_indices
-                .entry(mesh.material_buffer.id())
+                .entry(gpu_material.buffer.id())
                 .or_insert_with(|| {
                     let (base_color_texture_view, base_color_sampler) =
                         image_handle_to_view_sampler(
                             &*pbr_shaders,
                             &*gpu_images,
-                            &mesh.material_textures.base_color_texture,
+                            &gpu_material.base_color_texture,
                         );
 
                     let (emissive_texture_view, emissive_sampler) = image_handle_to_view_sampler(
                         &*pbr_shaders,
                         &*gpu_images,
-                        &mesh.material_textures.emissive_texture,
+                        &gpu_material.emissive_texture,
                     );
 
                     let (metallic_roughness_texture_view, metallic_roughness_sampler) =
                         image_handle_to_view_sampler(
                             &*pbr_shaders,
                             &*gpu_images,
-                            &mesh.material_textures.metallic_roughness_texture,
+                            &gpu_material.metallic_roughness_texture,
                         );
                     let (occlusion_texture_view, occlusion_sampler) = image_handle_to_view_sampler(
                         &*pbr_shaders,
                         &*gpu_images,
-                        &mesh.material_textures.occlusion_texture,
+                        &gpu_material.occlusion_texture,
                     );
                     let index = material_bind_groups.len();
                     let material_bind_group =
@@ -604,7 +587,7 @@ pub fn queue_meshes(
                             entries: &[
                                 BindGroupEntry {
                                     binding: 0,
-                                    resource: mesh.material_buffer.as_entire_binding(),
+                                    resource: gpu_material.buffer.as_entire_binding(),
                                 },
                                 BindGroupEntry {
                                     binding: 1,
