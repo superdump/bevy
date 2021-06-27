@@ -51,7 +51,6 @@ impl Plugin for PbrPlugin {
             // .init_resource::<RenderCommandQueue>()
             .init_resource::<PbrShaders>()
             .init_resource::<ShadowShaders>()
-            .init_resource::<MaterialMeta>()
             .init_resource::<MeshMeta>()
             .init_resource::<LightMeta>();
 
