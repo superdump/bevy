@@ -80,7 +80,9 @@ const uint FLAGS_DOUBLE_SIDED_BIT               = (1 << 4);
 const uint FLAGS_UNLIT_BIT                      = (1 << 5);
 
 // View bindings - set 0
-layout(set = 0, binding = 0) uniform View {
+layout(set = 0, binding = 0) uniform ViewTransform {
+    mat4 View;
+    mat4 ViewInv;
     mat4 ViewProj;
     vec3 ViewWorldPosition;
 };

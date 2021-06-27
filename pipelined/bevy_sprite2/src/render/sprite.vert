@@ -5,7 +5,10 @@ layout(location = 1) in vec2 Vertex_Uv;
 
 layout(location = 0) out vec2 v_Uv;
 
-layout(set = 0, binding = 0) uniform View {
+// View bindings - set 0
+layout(set = 0, binding = 0) uniform ViewTransform {
+    mat4 View;
+    mat4 ViewInv;
     mat4 ViewProj;
     vec3 ViewWorldPosition;
 };
