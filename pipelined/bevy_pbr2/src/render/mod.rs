@@ -1,4 +1,4 @@
-mod light;
+pub mod light;
 pub use light::*;
 
 use bevy_asset::{Assets, Handle};
@@ -463,9 +463,9 @@ pub fn queue_meshes(
     pbr_shaders: Res<PbrShaders>,
     shadow_shaders: Res<ShadowShaders>,
     mesh_meta: ResMut<MeshMeta>,
-    mut light_meta: ResMut<LightMeta>,
+    light_meta: Res<LightMeta>,
     view_meta: Res<ViewMeta>,
-    mut extracted_meshes: ResMut<ExtractedMeshes>,
+    extracted_meshes: Res<ExtractedMeshes>,
     gpu_images: Res<RenderAssets<Image>>,
     render_materials: Res<RenderAssets<StandardMaterial>>,
     mut views: Query<(
@@ -474,20 +474,8 @@ pub fn queue_meshes(
         &ViewLights,
         &mut RenderPhase<Transparent3dPhase>,
     )>,
-    mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
 ) {
     let mesh_meta = mesh_meta.into_inner();
-
-    light_meta.shadow_view_bind_group.get_or_insert_with(|| {
-        render_device.create_bind_group(&BindGroupDescriptor {
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: view_meta.uniforms.binding(),
-            }],
-            label: None,
-            layout: &shadow_shaders.view_layout,
-        })
-    });
     if extracted_meshes.meshes.is_empty() {
         return;
     }
@@ -538,7 +526,7 @@ pub fn queue_meshes(
 
         let view_matrix = view.transform.compute_matrix();
         let view_row_2 = view_matrix.row(2);
-        for (i, mesh) in extracted_meshes.meshes.iter_mut().enumerate() {
+        for (i, mesh) in extracted_meshes.meshes.iter().enumerate() {
             let gpu_material = &render_materials
                 .get(&mesh.material_handle)
                 .expect("Failed to get StandardMaterial PreparedAsset");
@@ -638,20 +626,6 @@ pub fn queue_meshes(
                 draw_key: i,
                 sort_key,
             });
-        }
-
-        // ultimately lights should check meshes for relevancy (ex: light views can "see" different meshes than the main view can)
-        let draw_shadow_mesh = draw_functions.read().get_id::<DrawShadowMesh>().unwrap();
-        for view_light_entity in view_lights.lights.iter().copied() {
-            let mut shadow_phase = view_light_shadow_phases.get_mut(view_light_entity).unwrap();
-            // TODO: this should only queue up meshes that are actually visible by each "light view"
-            for i in 0..extracted_meshes.meshes.len() {
-                shadow_phase.add(Drawable {
-                    draw_function: draw_shadow_mesh,
-                    draw_key: i,
-                    sort_key: 0, // TODO: sort back-to-front
-                })
-            }
         }
     }
 }

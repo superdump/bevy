@@ -8,11 +8,11 @@ use bevy_render2::{
     mesh::Mesh,
     render_asset::RenderAssets,
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
-    render_phase::{Draw, DrawFunctions, RenderPhase, TrackedRenderPass},
+    render_phase::{Draw, DrawFunctions, Drawable, RenderPhase, TrackedRenderPass},
     render_resource::*,
     renderer::{RenderContext, RenderDevice},
     texture::*,
-    view::{ExtractedView, ViewUniform, ViewUniformOffset},
+    view::{ExtractedView, ViewMeta, ViewUniform, ViewUniformOffset},
 };
 use bevy_transform::components::GlobalTransform;
 use crevice::std140::AsStd140;
@@ -420,6 +420,46 @@ pub fn prepare_lights(
     light_meta
         .view_gpu_lights
         .write_to_staging_buffer(&render_device);
+}
+
+pub fn queue_meshes(
+    draw_functions: Res<DrawFunctions>,
+    render_device: Res<RenderDevice>,
+    shadow_shaders: Res<ShadowShaders>,
+    mut light_meta: ResMut<LightMeta>,
+    view_meta: Res<ViewMeta>,
+    extracted_meshes: Res<ExtractedMeshes>,
+    mut views: Query<&ViewLights, With<RenderPhase<Transparent3dPhase>>>,
+    mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
+) {
+    light_meta.shadow_view_bind_group.get_or_insert_with(|| {
+        render_device.create_bind_group(&BindGroupDescriptor {
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: view_meta.uniforms.binding(),
+            }],
+            label: None,
+            layout: &shadow_shaders.view_layout,
+        })
+    });
+    if extracted_meshes.meshes.is_empty() {
+        return;
+    }
+    for view_lights in views.iter_mut() {
+        // ultimately lights should check meshes for relevancy (ex: light views can "see" different meshes than the main view can)
+        let draw_shadow_mesh = draw_functions.read().get_id::<DrawShadowMesh>().unwrap();
+        for view_light_entity in view_lights.lights.iter().copied() {
+            let mut shadow_phase = view_light_shadow_phases.get_mut(view_light_entity).unwrap();
+            // TODO: this should only queue up meshes that are actually visible by each "light view"
+            for i in 0..extracted_meshes.meshes.len() {
+                shadow_phase.add(Drawable {
+                    draw_function: draw_shadow_mesh,
+                    draw_key: i,
+                    sort_key: 0, // TODO: sort back-to-front
+                })
+            }
+        }
+    }
 }
 
 pub struct ShadowPhase;

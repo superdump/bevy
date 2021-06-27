@@ -43,6 +43,7 @@ impl Plugin for PbrPlugin {
                 render::prepare_lights.exclusive_system(),
             )
             .add_system_to_stage(RenderStage::Queue, render::queue_meshes.system())
+            .add_system_to_stage(RenderStage::Queue, render::light::queue_meshes.system())
             .add_system_to_stage(
                 RenderStage::PhaseSort,
                 sort_phase_system::<ShadowPhase>.system(),
