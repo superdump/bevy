@@ -20,6 +20,7 @@ use bevy_render2::{
 pub mod draw_3d_graph {
     pub mod node {
         pub const SHADOW_PASS: &'static str = "shadow_pass";
+        pub const DEPTH_NORMAL_PASS: &'static str = "depth_normal_pass";
     }
 }
 
@@ -34,8 +35,16 @@ impl Plugin for PbrPlugin {
         let render_app = app.sub_app_mut(0);
         render_app
             .add_system_to_stage(RenderStage::Extract, render::extract_meshes.system())
+            .add_system_to_stage(
+                RenderStage::Extract,
+                render::depth_normal_prepass::extract_depth_normal_prepass_camera_phase.system(),
+            )
             .add_system_to_stage(RenderStage::Extract, render::extract_lights.system())
             .add_system_to_stage(RenderStage::Prepare, render::prepare_meshes.system())
+            .add_system_to_stage(
+                RenderStage::Prepare,
+                render::depth_normal_prepass::prepare_view_depth_normals.system(),
+            )
             .add_system_to_stage(
                 RenderStage::Prepare,
                 // this is added as an exclusive system because it contributes new views. it must run (and have Commands applied)
@@ -43,6 +52,10 @@ impl Plugin for PbrPlugin {
                 render::prepare_lights.exclusive_system(),
             )
             .add_system_to_stage(RenderStage::Queue, render::queue_meshes.system())
+            .add_system_to_stage(
+                RenderStage::Queue,
+                render::depth_normal_prepass::queue_meshes.system(),
+            )
             .add_system_to_stage(RenderStage::Queue, render::light::queue_meshes.system())
             .add_system_to_stage(
                 RenderStage::PhaseSort,
@@ -51,16 +64,20 @@ impl Plugin for PbrPlugin {
             // FIXME: Hack to ensure RenderCommandQueue is initialized when PbrShaders is being initialized
             // .init_resource::<RenderCommandQueue>()
             .init_resource::<PbrShaders>()
+            .init_resource::<DepthNormalShaders>()
             .init_resource::<ShadowShaders>()
             .init_resource::<MeshMeta>()
             .init_resource::<LightMeta>();
 
         let draw_pbr = DrawPbr::new(&mut render_app.world);
+        let draw_depth_normal_mesh = DrawDepthNormalMesh::new(&mut render_app.world);
+        let depth_normal_pass_node = DepthNormalPassNode::new(&mut render_app.world);
         let draw_shadow_mesh = DrawShadowMesh::new(&mut render_app.world);
         let shadow_pass_node = ShadowPassNode::new(&mut render_app.world);
         let render_world = render_app.world.cell();
         let draw_functions = render_world.get_resource::<DrawFunctions>().unwrap();
         draw_functions.write().add(draw_pbr);
+        draw_functions.write().add(draw_depth_normal_mesh);
         draw_functions.write().add(draw_shadow_mesh);
         let mut graph = render_world.get_resource_mut::<RenderGraph>().unwrap();
         graph.add_node("pbr", PbrNode);
@@ -71,6 +88,28 @@ impl Plugin for PbrPlugin {
         let draw_3d_graph = graph
             .get_sub_graph_mut(core_pipeline::draw_3d_graph::NAME)
             .unwrap();
+
+        // Depth and view normal pre-pass
+        draw_3d_graph.add_node(
+            draw_3d_graph::node::DEPTH_NORMAL_PASS,
+            depth_normal_pass_node,
+        );
+        draw_3d_graph
+            .add_node_edge(
+                draw_3d_graph::node::DEPTH_NORMAL_PASS,
+                core_pipeline::draw_3d_graph::node::MAIN_PASS,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_slot_edge(
+                draw_3d_graph.input_node().unwrap().id,
+                core_pipeline::draw_3d_graph::input::VIEW_ENTITY,
+                draw_3d_graph::node::DEPTH_NORMAL_PASS,
+                ShadowPassNode::IN_VIEW,
+            )
+            .unwrap();
+
+        // Shadows
         draw_3d_graph.add_node(draw_3d_graph::node::SHADOW_PASS, shadow_pass_node);
         draw_3d_graph
             .add_node_edge(

@@ -1,4 +1,6 @@
+pub mod depth_normal_prepass;
 pub mod light;
+pub use depth_normal_prepass::*;
 pub use light::*;
 
 use bevy_asset::{Assets, Handle};
