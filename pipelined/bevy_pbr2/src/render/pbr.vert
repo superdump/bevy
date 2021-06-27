@@ -15,14 +15,19 @@ layout(set = 0, binding = 0) uniform View {
 
 layout(set = 1, binding = 0) uniform MeshTransform {
     mat4 Model;
+    mat4 ModelInvTrans;
 };
 
 void main() {
     v_Uv = Vertex_Uv;
     vec4 world_position = Model * vec4(Vertex_Position, 1.0);
     v_WorldPosition = world_position;
-    // FIXME: The inverse transpose of the model matrix should be used to correctly handle scaling
-    // of normals
-    v_WorldNormal = mat3(Model) * Vertex_Normal;
+    // For non-uniform scaling, the Model matrix must be inverse-transposed which has the effect of
+    // applying inverse scaling while retaining the correct rotation
+    // The normals must be re-normalised after applying the inverse-transpose because this can affect
+    // the length of the normal
+    // The normals need to rotate inverse to the view rotation
+    // Using mat3 is important else the translation in the Model matrix can have other unintended effects
+    v_WorldNormal = mat3(ModelInvTrans) * Vertex_Normal;
     gl_Position = ViewProj * world_position;
 }

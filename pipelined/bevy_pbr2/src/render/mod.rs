@@ -120,7 +120,7 @@ impl FromWorld for PbrShaders {
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
                     has_dynamic_offset: true,
-                    min_binding_size: BufferSize::new(Mat4::std140_size_static() as u64),
+                    min_binding_size: BufferSize::new(MeshUniform::std140_size_static() as u64),
                 },
                 count: None,
             }],
@@ -404,9 +404,15 @@ struct MeshDrawInfo {
     material_bind_group_key: FrameSlabMapKey<BufferId, BindGroup>,
 }
 
+#[derive(Clone, AsStd140)]
+pub struct MeshUniform {
+    model: Mat4,
+    inv_trans_model: Mat4, // For transforming normals
+}
+
 #[derive(Default)]
 pub struct MeshMeta {
-    transform_uniforms: DynamicUniformVec<Mat4>,
+    transform_uniforms: DynamicUniformVec<MeshUniform>,
     material_bind_groups: FrameSlabMap<BufferId, BindGroup>,
     mesh_transform_bind_group: Option<BindGroup>,
     mesh_draw_info: Vec<MeshDrawInfo>,
@@ -421,8 +427,12 @@ pub fn prepare_meshes(
         .transform_uniforms
         .reserve_and_clear(extracted_meshes.meshes.len(), &render_device);
     for extracted_mesh in extracted_meshes.meshes.iter_mut() {
-        extracted_mesh.transform_binding_offset =
-            mesh_meta.transform_uniforms.push(extracted_mesh.transform);
+        let model = extracted_mesh.transform;
+        let inv_trans_model = model.inverse().transpose();
+        extracted_mesh.transform_binding_offset = mesh_meta.transform_uniforms.push(MeshUniform {
+            model,
+            inv_trans_model,
+        });
     }
 
     mesh_meta
