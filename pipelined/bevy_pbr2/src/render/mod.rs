@@ -17,7 +17,7 @@ use bevy_render2::{
     view::{ExtractedView, ViewMeta, ViewUniform, ViewUniformOffset},
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::HashMap;
+use bevy_utils::slab::{FrameSlabMap, FrameSlabMapKey};
 use crevice::std140::AsStd140;
 use std::borrow::Cow;
 use wgpu::{
@@ -367,15 +367,9 @@ impl FromWorld for PbrShaders {
 
 struct ExtractedMesh {
     transform: Mat4,
-    vertex_buffer: Buffer,
-    index_info: Option<IndexInfo>,
+    mesh: Handle<Mesh>,
     transform_binding_offset: u32,
     material_handle: Handle<StandardMaterial>,
-}
-
-struct IndexInfo {
-    buffer: Buffer,
-    count: u32,
 }
 
 pub struct ExtractedMeshes {
@@ -389,20 +383,15 @@ pub fn extract_meshes(
 ) {
     let mut extracted_meshes = Vec::new();
     for (transform, mesh_handle, material_handle) in query.iter() {
-        if let Some(mesh) = meshes.get(mesh_handle) {
-            if let Some(mesh_gpu_data) = &mesh.gpu_data() {
-                extracted_meshes.push(ExtractedMesh {
-                    transform: transform.compute_matrix(),
-                    vertex_buffer: mesh_gpu_data.vertex_buffer.clone(),
-                    index_info: mesh_gpu_data.index_buffer.as_ref().map(|i| IndexInfo {
-                        buffer: i.clone(),
-                        count: mesh.indices().unwrap().len() as u32,
-                    }),
-                    transform_binding_offset: 0,
-                    material_handle: material_handle.clone(),
-                });
-            }
+        if !meshes.contains(mesh_handle) {
+            continue;
         }
+        extracted_meshes.push(ExtractedMesh {
+            transform: transform.compute_matrix(),
+            mesh: mesh_handle.clone_weak(),
+            transform_binding_offset: 0,
+            material_handle: material_handle.clone_weak(),
+        });
     }
 
     commands.insert_resource(ExtractedMeshes {
@@ -410,10 +399,17 @@ pub fn extract_meshes(
     });
 }
 
+struct MeshDrawInfo {
+    // TODO: compare cost of doing this vs cloning the BindGroup?
+    material_bind_group_key: FrameSlabMapKey<BufferId, BindGroup>,
+}
+
 #[derive(Default)]
 pub struct MeshMeta {
     transform_uniforms: DynamicUniformVec<Mat4>,
+    material_bind_groups: FrameSlabMap<BufferId, BindGroup>,
     mesh_transform_bind_group: Option<BindGroup>,
+    mesh_draw_info: Vec<MeshDrawInfo>,
 }
 
 pub fn prepare_meshes(
@@ -432,11 +428,6 @@ pub fn prepare_meshes(
     mesh_meta
         .transform_uniforms
         .write_to_staging_buffer(&render_device);
-}
-#[derive(Default)]
-pub struct MaterialMeta {
-    material_bind_groups: Vec<BindGroup>,
-    material_bind_group_indices: HashMap<BufferId, usize>,
 }
 
 pub struct MeshViewBindGroups {
@@ -472,7 +463,6 @@ pub fn queue_meshes(
     pbr_shaders: Res<PbrShaders>,
     shadow_shaders: Res<ShadowShaders>,
     mesh_meta: ResMut<MeshMeta>,
-    material_meta: ResMut<MaterialMeta>,
     mut light_meta: ResMut<LightMeta>,
     view_meta: Res<ViewMeta>,
     mut extracted_meshes: ResMut<ExtractedMeshes>,
@@ -487,7 +477,6 @@ pub fn queue_meshes(
     mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
 ) {
     let mesh_meta = mesh_meta.into_inner();
-    let material_meta = material_meta.into_inner();
 
     light_meta.shadow_view_bind_group.get_or_insert_with(|| {
         render_device.create_bind_group(&BindGroupDescriptor {
@@ -543,46 +532,46 @@ pub fn queue_meshes(
             view: view_bind_group,
         });
 
-        // TODO: free old bind groups after a few frames without use?
-
         let draw_pbr = draw_functions.read().get_id::<DrawPbr>().unwrap();
+        mesh_meta.mesh_draw_info.clear();
+        mesh_meta.material_bind_groups.next_frame();
+
         let view_matrix = view.transform.compute_matrix();
         let view_row_2 = view_matrix.row(2);
-        let material_bind_groups = &mut material_meta.material_bind_groups;
         for (i, mesh) in extracted_meshes.meshes.iter_mut().enumerate() {
             let gpu_material = &render_materials
                 .get(&mesh.material_handle)
                 .expect("Failed to get StandardMaterial PreparedAsset");
-            let material_bind_group_index = *material_meta
-                .material_bind_group_indices
-                .entry(gpu_material.buffer.id())
-                .or_insert_with(|| {
-                    let (base_color_texture_view, base_color_sampler) =
-                        image_handle_to_view_sampler(
-                            &*pbr_shaders,
-                            &*gpu_images,
-                            &gpu_material.base_color_texture,
-                        );
+            let material_bind_group_key =
+                mesh_meta
+                    .material_bind_groups
+                    .get_or_insert_with(gpu_material.buffer.id(), || {
+                        let (base_color_texture_view, base_color_sampler) =
+                            image_handle_to_view_sampler(
+                                &*pbr_shaders,
+                                &*gpu_images,
+                                &gpu_material.base_color_texture,
+                            );
 
-                    let (emissive_texture_view, emissive_sampler) = image_handle_to_view_sampler(
-                        &*pbr_shaders,
-                        &*gpu_images,
-                        &gpu_material.emissive_texture,
-                    );
+                        let (emissive_texture_view, emissive_sampler) =
+                            image_handle_to_view_sampler(
+                                &*pbr_shaders,
+                                &*gpu_images,
+                                &gpu_material.emissive_texture,
+                            );
 
-                    let (metallic_roughness_texture_view, metallic_roughness_sampler) =
-                        image_handle_to_view_sampler(
-                            &*pbr_shaders,
-                            &*gpu_images,
-                            &gpu_material.metallic_roughness_texture,
-                        );
-                    let (occlusion_texture_view, occlusion_sampler) = image_handle_to_view_sampler(
-                        &*pbr_shaders,
-                        &*gpu_images,
-                        &gpu_material.occlusion_texture,
-                    );
-                    let index = material_bind_groups.len();
-                    let material_bind_group =
+                        let (metallic_roughness_texture_view, metallic_roughness_sampler) =
+                            image_handle_to_view_sampler(
+                                &*pbr_shaders,
+                                &*gpu_images,
+                                &gpu_material.metallic_roughness_texture,
+                            );
+                        let (occlusion_texture_view, occlusion_sampler) =
+                            image_handle_to_view_sampler(
+                                &*pbr_shaders,
+                                &*gpu_images,
+                                &gpu_material.occlusion_texture,
+                            );
                         render_device.create_bind_group(&BindGroupDescriptor {
                             entries: &[
                                 BindGroupEntry {
@@ -628,10 +617,12 @@ pub fn queue_meshes(
                             ],
                             label: None,
                             layout: &pbr_shaders.material_layout,
-                        });
-                    material_bind_groups.push(material_bind_group);
-                    index
-                });
+                        })
+                    });
+
+            mesh_meta.mesh_draw_info.push(MeshDrawInfo {
+                material_bind_group_key,
+            });
 
             // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
             //       gives the z component of translation of the mesh in view space
@@ -640,7 +631,7 @@ pub fn queue_meshes(
             //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
             // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
             let sort_key = (((mesh_z * 1000.0) as usize) << 10)
-                | (material_bind_group_index & ((1 << 10) - 1));
+                | (material_bind_group_key.index() & ((1 << 10) - 1));
             // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
             transparent_phase.add(Drawable {
                 draw_function: draw_pbr,
@@ -689,9 +680,9 @@ impl Node for PbrNode {
 
 type DrawPbrParams<'s, 'w> = (
     Res<'w, PbrShaders>,
-    Res<'w, MaterialMeta>,
     Res<'w, MeshMeta>,
     Res<'w, ExtractedMeshes>,
+    Res<'w, RenderAssets<Mesh>>,
     Query<
         'w,
         's,
@@ -722,12 +713,12 @@ impl Draw for DrawPbr {
         pass: &mut TrackedRenderPass<'w>,
         view: Entity,
         draw_key: usize,
-        sort_key: usize,
+        _sort_key: usize,
     ) {
-        let (pbr_shaders, material_meta, mesh_meta, extracted_meshes, views) =
-            self.params.get(world);
+        let (pbr_shaders, mesh_meta, extracted_meshes, meshes, views) = self.params.get(world);
         let (view_uniforms, view_lights, mesh_view_bind_groups) = views.get(view).unwrap();
         let extracted_mesh = &extracted_meshes.into_inner().meshes[draw_key];
+        let mesh_meta = mesh_meta.into_inner();
         pass.set_render_pipeline(&pbr_shaders.into_inner().pipeline);
         pass.set_bind_group(
             0,
@@ -736,20 +727,20 @@ impl Draw for DrawPbr {
         );
         pass.set_bind_group(
             1,
-            mesh_meta
-                .into_inner()
-                .mesh_transform_bind_group
-                .as_ref()
-                .unwrap(),
+            mesh_meta.mesh_transform_bind_group.as_ref().unwrap(),
             &[extracted_mesh.transform_binding_offset],
         );
+        let mesh_draw_info = &mesh_meta.mesh_draw_info[draw_key];
         pass.set_bind_group(
             2,
-            &material_meta.into_inner().material_bind_groups[sort_key & ((1 << 10) - 1)],
+            // &mesh_meta.material_bind_groups[sort_key & ((1 << 10) - 1)],
+            &mesh_meta.material_bind_groups[mesh_draw_info.material_bind_group_key],
             &[],
         );
-        pass.set_vertex_buffer(0, extracted_mesh.vertex_buffer.slice(..));
-        if let Some(index_info) = &extracted_mesh.index_info {
+
+        let gpu_mesh = meshes.into_inner().get(&extracted_mesh.mesh).unwrap();
+        pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+        if let Some(index_info) = &gpu_mesh.index_info {
             pass.set_index_buffer(index_info.buffer.slice(..), 0, IndexFormat::Uint32);
             pass.draw_indexed(0..index_info.count, 0, 0..1);
         } else {
