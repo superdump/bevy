@@ -473,13 +473,8 @@ fn image_handle_to_view_sampler<'a>(
             &pbr_shaders.dummy_white_gpu_image.sampler,
         ),
         |image_handle| {
-            gpu_images.get(image_handle).map_or(
-                (
-                    &pbr_shaders.dummy_white_gpu_image.texture_view,
-                    &pbr_shaders.dummy_white_gpu_image.sampler,
-                ),
-                |gpu_image| (&gpu_image.texture_view, &gpu_image.sampler),
-            )
+        let gpu_image = gpu_images.get(image_handle).expect("only materials with valid textures should be drawn");
+            (&gpu_image.texture_view, &gpu_image.sampler)
         },
     )
 }
