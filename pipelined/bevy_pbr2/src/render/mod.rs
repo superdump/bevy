@@ -379,6 +379,8 @@ pub struct ExtractedMeshes {
 pub fn extract_meshes(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
+    materials: Res<Assets<StandardMaterial>>,
+    images: Res<Assets<Image>>,
     query: Query<(&GlobalTransform, &Handle<Mesh>, &Handle<StandardMaterial>)>,
 ) {
     let mut extracted_meshes = Vec::new();
@@ -386,12 +388,38 @@ pub fn extract_meshes(
         if !meshes.contains(mesh_handle) {
             continue;
         }
-        extracted_meshes.push(ExtractedMesh {
-            transform: transform.compute_matrix(),
-            mesh: mesh_handle.clone_weak(),
-            transform_binding_offset: 0,
-            material_handle: material_handle.clone_weak(),
-        });
+
+        if let Some(material) = materials.get(material_handle) {
+            if let Some(ref image) = material.base_color_texture {
+                if !images.contains(image) {
+                    continue;
+                }
+            }
+
+            if let Some(ref image) = material.emissive_texture {
+                if !images.contains(image) {
+                    continue;
+                }
+            }
+            if let Some(ref image) = material.metallic_roughness_texture {
+                if !images.contains(image) {
+                    continue;
+                }
+            }
+            if let Some(ref image) = material.occlusion_texture {
+                if !images.contains(image) {
+                    continue;
+                }
+            }
+            extracted_meshes.push(ExtractedMesh {
+                transform: transform.compute_matrix(),
+                mesh: mesh_handle.clone_weak(),
+                transform_binding_offset: 0,
+                material_handle: material_handle.clone_weak(),
+            });
+        } else {
+            continue;
+        }
     }
 
     commands.insert_resource(ExtractedMeshes {
