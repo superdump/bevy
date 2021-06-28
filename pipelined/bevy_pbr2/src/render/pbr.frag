@@ -78,6 +78,7 @@ const uint FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT = (1 << 2);
 const uint FLAGS_OCCLUSION_TEXTURE_BIT          = (1 << 3);
 const uint FLAGS_DOUBLE_SIDED_BIT               = (1 << 4);
 const uint FLAGS_UNLIT_BIT                      = (1 << 5);
+const uint FLAGS_AMBIENT_OCCLUSION_TEXTURE_BIT  = (1 << 6);
 
 // View bindings - set 0
 layout(set = 0, binding = 0) uniform ViewTransform {
@@ -96,6 +97,8 @@ layout(std140, set = 0, binding = 1) uniform Lights {
 };
 layout(set = 0, binding = 2) uniform texture2DArray shadow_texture;
 layout(set = 0, binding = 3) uniform samplerShadow shadow_sampler;
+layout(set = 0, binding = 4) uniform texture2D ambient_occlusion_texture;
+layout(set = 0, binding = 5) uniform sampler ambient_occlusion_sampler;
 
 // Material bindings - set 2
 layout(set = 2, binding = 0) uniform StandardMaterial {
@@ -380,6 +383,10 @@ void main() {
         if ((Material.flags & FLAGS_OCCLUSION_TEXTURE_BIT) != 0) {
             occlusion = texture(sampler2D(occlusion_texture, occlusion_sampler), v_Uv).r;
         }
+        float ambient_occlusion = 1.0;
+        if ((Material.flags & FLAGS_OCCLUSION_TEXTURE_BIT) != 0) {
+            ambient_occlusion = texture(sampler2D(ambient_occlusion_texture, ambient_occlusion_sampler), v_Uv).r;
+        }
 
         vec3 N = normalize(v_WorldNormal);
 
@@ -455,7 +462,7 @@ void main() {
         vec3 specular_ambient = EnvBRDFApprox(F0, perceptual_roughness, NdotV);
 
         output_color.rgb = light_accum;
-        output_color.rgb += (diffuse_ambient + specular_ambient) * AmbientColor.rgb * occlusion;
+        output_color.rgb += (diffuse_ambient + specular_ambient) * AmbientColor.rgb * occlusion * ambient_occlusion;
         output_color.rgb += emissive.rgb * output_color.a;
 
         // tone_mapping

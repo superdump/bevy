@@ -21,6 +21,7 @@ bitflags::bitflags! {
         const OCCLUSION_TEXTURE          = (1 << 3);
         const DOUBLE_SIDED               = (1 << 4);
         const UNLIT                      = (1 << 5);
+        const AMBIENT_OCCLUSION_TEXTURE  = (1 << 6);
         const NONE                       = 0;
         const UNINITIALIZED              = 0xFFFF;
     }
@@ -154,7 +155,7 @@ impl RenderAsset for StandardMaterial {
         render_device: &RenderDevice,
         _render_queue: &RenderQueue,
     ) -> Self::PreparedAsset {
-        let mut flags = StandardMaterialFlags::NONE;
+        let mut flags = StandardMaterialFlags::AMBIENT_OCCLUSION_TEXTURE;
         if material.base_color_texture.is_some() {
             flags |= StandardMaterialFlags::BASE_COLOR_TEXTURE;
         }

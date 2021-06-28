@@ -113,6 +113,27 @@ impl FromWorld for PbrShaders {
                     },
                     count: None,
                 },
+                // Ambient Occlusion Texture
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // Ambient Occlusion Texture Sampler
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Sampler {
+                        comparison: false,
+                        filtering: true,
+                    },
+                    count: None,
+                },
             ],
             label: None,
         });
@@ -500,6 +521,7 @@ pub fn queue_meshes(
     draw_functions: Res<DrawFunctions>,
     render_device: Res<RenderDevice>,
     pbr_shaders: Res<PbrShaders>,
+    ssao_shaders: Res<SsaoShaders>,
     shadow_shaders: Res<ShadowShaders>,
     mesh_meta: ResMut<MeshMeta>,
     light_meta: Res<LightMeta>,
@@ -511,6 +533,7 @@ pub fn queue_meshes(
         Entity,
         &ExtractedView,
         &ViewLights,
+        &ViewSsao,
         &mut RenderPhase<Transparent3dPhase>,
     )>,
 ) {
@@ -530,7 +553,7 @@ pub fn queue_meshes(
             layout: &pbr_shaders.mesh_layout,
         })
     });
-    for (entity, view, view_lights, mut transparent_phase) in views.iter_mut() {
+    for (entity, view, view_lights, view_ssao, mut transparent_phase) in views.iter_mut() {
         // TODO: cache this?
         let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             entries: &[
@@ -549,6 +572,14 @@ pub fn queue_meshes(
                 BindGroupEntry {
                     binding: 3,
                     resource: BindingResource::Sampler(&shadow_shaders.light_sampler),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::TextureView(&view_ssao.view_ssao_texture_view),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::Sampler(&ssao_shaders.ssao_sampler),
                 },
             ],
             label: None,
