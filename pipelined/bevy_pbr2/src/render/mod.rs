@@ -566,7 +566,7 @@ pub fn queue_meshes(
         let view_matrix = view.transform.compute_matrix();
         let view_row_2 = view_matrix.row(2);
         for (i, mesh) in extracted_meshes.meshes.iter().enumerate() {
-            let gpu_material = &render_materials
+            let gpu_material = render_materials
                 .get(&mesh.material_handle)
                 .expect("Failed to get StandardMaterial PreparedAsset");
             let material_bind_group_key =
@@ -579,14 +579,12 @@ pub fn queue_meshes(
                                 &gpu_images,
                                 &gpu_material.base_color_texture,
                             );
-
                         let (emissive_texture_view, emissive_sampler) =
                             image_handle_to_view_sampler(
                                 &pbr_shaders,
                                 &gpu_images,
                                 &gpu_material.emissive_texture,
                             );
-
                         let (metallic_roughness_texture_view, metallic_roughness_sampler) =
                             image_handle_to_view_sampler(
                                 &pbr_shaders,
