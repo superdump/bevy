@@ -59,6 +59,10 @@ impl Plugin for PbrPlugin {
             .add_system_to_stage(RenderStage::Queue, render::light::queue_meshes.system())
             .add_system_to_stage(
                 RenderStage::PhaseSort,
+                sort_phase_system::<DepthNormalPhase>.system(),
+            )
+            .add_system_to_stage(
+                RenderStage::PhaseSort,
                 sort_phase_system::<ShadowPhase>.system(),
             )
             // FIXME: Hack to ensure RenderCommandQueue is initialized when PbrShaders is being initialized
