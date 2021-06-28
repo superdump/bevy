@@ -87,6 +87,7 @@ pub struct SsaoConfigUniform {
 pub struct SsaoShaders {
     pub pipeline: RenderPipeline,
     pub view_layout: BindGroupLayout,
+    pub blue_noise_sampler: Sampler,
     pub ssao_layout: BindGroupLayout,
     pub ssao_sampler: Sampler,
 }
@@ -266,6 +267,12 @@ impl FromWorld for SsaoShaders {
         SsaoShaders {
             pipeline,
             view_layout,
+            blue_noise_sampler: render_device.create_sampler(&SamplerDescriptor {
+                address_mode_u: AddressMode::Repeat,
+                address_mode_v: AddressMode::Repeat,
+                address_mode_w: AddressMode::Repeat,
+                ..Default::default()
+            }),
             ssao_layout,
             ssao_sampler: render_device.create_sampler(&SamplerDescriptor::default()),
         }
@@ -401,7 +408,7 @@ pub fn queue_meshes(
         return;
     }
 
-    let (blue_noise_texture_view, blue_noise_sampler) = image_handle_to_view_sampler(
+    let (blue_noise_texture_view, _default_sampler) = image_handle_to_view_sampler(
         &pbr_shaders,
         &gpu_images,
         &extracted_ssao_config.blue_noise_image,
@@ -419,7 +426,7 @@ pub fn queue_meshes(
             },
             BindGroupEntry {
                 binding: 2,
-                resource: BindingResource::Sampler(blue_noise_sampler),
+                resource: BindingResource::Sampler(&ssao_shaders.blue_noise_sampler),
             },
         ],
         label: None,

@@ -31,10 +31,6 @@ layout(set = 1, binding = 0) uniform SsaoConfig {
 layout(set = 1, binding = 1) uniform texture2D blue_noise_texture;
 layout(set = 1, binding = 2) uniform sampler blue_noise_sampler;
 
-float rand(vec2 co) {
-    return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
-}
-
 void main() {
     // tile noise texture over screen, based on screen dimensions divided by noise size
     const ivec2 frame_size = textureSize(sampler2D(normal_texture, normal_sampler), 0);
@@ -52,9 +48,11 @@ void main() {
     vec4 frag_view = ProjInv * vec4(v_Uv.x * 2.0 - 1.0, 1.0 - 2.0 * v_Uv.y, frag_depth_ndc, 1.0);
     frag_view.xyz /= frag_view.w;
     vec3 normal_view = (texture(sampler2D(normal_texture, normal_sampler), v_Uv).xyz - 0.5) * 2.0;
-    // TODO: Bind a 4x4 noise texture
-    vec3 randomVec = texture(sampler2D(blue_noise_texture, blue_noise_sampler), v_Uv * noiseScale).xyz;
-    // vec3 randomVec = normalize(vec3(rand(v_Uv) * 2.0 - 1.0, rand(v_Uv + 1.0) * 2.0 - 1.0, 0.0));
+    vec2 blue_noise = texture(sampler2D(blue_noise_texture, blue_noise_sampler), v_Uv * noiseScale).xy;
+    vec3 randomVec = normalize(vec3(
+        blue_noise * 2.0 - 1.0,
+        0.0
+    ));
 
     vec3 tangent = normalize(randomVec - normal_view * dot(randomVec, normal_view));
     vec3 bitangent = cross(normal_view, tangent);
