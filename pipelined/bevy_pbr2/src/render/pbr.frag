@@ -385,7 +385,8 @@ void main() {
         }
         float ambient_occlusion = 1.0;
         if ((Material.flags & FLAGS_OCCLUSION_TEXTURE_BIT) != 0) {
-            ambient_occlusion = texture(sampler2D(ambient_occlusion_texture, ambient_occlusion_sampler), v_Uv).r;
+            const vec2 uv = gl_FragCoord.xy / vec2(textureSize(sampler2D(ambient_occlusion_texture, ambient_occlusion_sampler), 0));
+            ambient_occlusion = texture(sampler2D(ambient_occlusion_texture, ambient_occlusion_sampler), uv).r;
         }
 
         vec3 N = normalize(v_WorldNormal);
