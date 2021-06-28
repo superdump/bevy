@@ -7,13 +7,17 @@ layout(location = 2) in vec2 Vertex_Uv;
 layout(location = 0) out vec3 v_ViewNormal;
 layout(location = 1) out vec2 v_Uv;
 
+// View
 layout(set = 0, binding = 0) uniform ViewTransform {
     mat4 View;
     mat4 ViewInv;
+    mat4 Proj;
+    mat4 ProjInv;
     mat4 ViewProj;
     vec3 ViewWorldPosition;
 };
 
+// Object
 layout(set = 1, binding = 0) uniform MeshTransform {
     mat4 Model;
     mat4 ModelInvTrans;

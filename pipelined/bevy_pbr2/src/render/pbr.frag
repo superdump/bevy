@@ -83,6 +83,8 @@ const uint FLAGS_UNLIT_BIT                      = (1 << 5);
 layout(set = 0, binding = 0) uniform ViewTransform {
     mat4 View;
     mat4 ViewInv;
+    mat4 Proj;
+    mat4 ProjInv;
     mat4 ViewProj;
     vec3 ViewWorldPosition;
 };
