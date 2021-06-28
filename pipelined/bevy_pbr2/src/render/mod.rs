@@ -379,6 +379,8 @@ pub struct ExtractedMeshes {
 pub fn extract_meshes(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
+    materials: Res<Assets<StandardMaterial>>,
+    images: Res<Assets<Image>>,
     query: Query<(&GlobalTransform, &Handle<Mesh>, &Handle<StandardMaterial>)>,
 ) {
     let mut extracted_meshes = Vec::new();
@@ -386,12 +388,38 @@ pub fn extract_meshes(
         if !meshes.contains(mesh_handle) {
             continue;
         }
-        extracted_meshes.push(ExtractedMesh {
-            transform: transform.compute_matrix(),
-            mesh: mesh_handle.clone_weak(),
-            transform_binding_offset: 0,
-            material_handle: material_handle.clone_weak(),
-        });
+
+        if let Some(material) = materials.get(material_handle) {
+            if let Some(ref image) = material.base_color_texture {
+                if !images.contains(image) {
+                    continue;
+                }
+            }
+
+            if let Some(ref image) = material.emissive_texture {
+                if !images.contains(image) {
+                    continue;
+                }
+            }
+            if let Some(ref image) = material.metallic_roughness_texture {
+                if !images.contains(image) {
+                    continue;
+                }
+            }
+            if let Some(ref image) = material.occlusion_texture {
+                if !images.contains(image) {
+                    continue;
+                }
+            }
+            extracted_meshes.push(ExtractedMesh {
+                transform: transform.compute_matrix(),
+                mesh: mesh_handle.clone_weak(),
+                transform_binding_offset: 0,
+                material_handle: material_handle.clone_weak(),
+            });
+        } else {
+            continue;
+        }
     }
 
     commands.insert_resource(ExtractedMeshes {
@@ -434,24 +462,21 @@ pub struct MeshViewBindGroups {
     view: BindGroup,
 }
 
-fn image_handle_to_view_sampler(
-    pbr_shaders: &PbrShaders,
-    gpu_images: &RenderAssets<Image>,
+fn image_handle_to_view_sampler<'a>(
+    pbr_shaders: &'a PbrShaders,
+    gpu_images: &'a RenderAssets<Image>,
     image_option: &Option<Handle<Image>>,
-) -> (TextureView, Sampler) {
+) -> (&'a TextureView, &'a Sampler) {
     image_option.as_ref().map_or(
         (
-            pbr_shaders.dummy_white_gpu_image.texture_view.clone(),
-            pbr_shaders.dummy_white_gpu_image.sampler.clone(),
+            &pbr_shaders.dummy_white_gpu_image.texture_view,
+            &pbr_shaders.dummy_white_gpu_image.sampler,
         ),
         |image_handle| {
-            gpu_images.get(image_handle).map_or(
-                (
-                    pbr_shaders.dummy_white_gpu_image.texture_view.clone(),
-                    pbr_shaders.dummy_white_gpu_image.sampler.clone(),
-                ),
-                |gpu_image| (gpu_image.texture_view.clone(), gpu_image.sampler.clone()),
-            )
+            let gpu_image = gpu_images
+                .get(image_handle)
+                .expect("only materials with valid textures should be drawn");
+            (&gpu_image.texture_view, &gpu_image.sampler)
         },
     )
 }
@@ -548,28 +573,28 @@ pub fn queue_meshes(
                     .get_or_insert_with(gpu_material.buffer.id(), || {
                         let (base_color_texture_view, base_color_sampler) =
                             image_handle_to_view_sampler(
-                                &*pbr_shaders,
-                                &*gpu_images,
+                                &pbr_shaders,
+                                &gpu_images,
                                 &gpu_material.base_color_texture,
                             );
 
                         let (emissive_texture_view, emissive_sampler) =
                             image_handle_to_view_sampler(
-                                &*pbr_shaders,
-                                &*gpu_images,
+                                &pbr_shaders,
+                                &gpu_images,
                                 &gpu_material.emissive_texture,
                             );
 
                         let (metallic_roughness_texture_view, metallic_roughness_sampler) =
                             image_handle_to_view_sampler(
-                                &*pbr_shaders,
-                                &*gpu_images,
+                                &pbr_shaders,
+                                &gpu_images,
                                 &gpu_material.metallic_roughness_texture,
                             );
                         let (occlusion_texture_view, occlusion_sampler) =
                             image_handle_to_view_sampler(
-                                &*pbr_shaders,
-                                &*gpu_images,
+                                &pbr_shaders,
+                                &gpu_images,
                                 &gpu_material.occlusion_texture,
                             );
                         render_device.create_bind_group(&BindGroupDescriptor {

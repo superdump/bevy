@@ -32,7 +32,7 @@ bitflags::bitflags! {
 #[uuid = "7494888b-c082-457b-aacf-517228cc0c22"]
 pub struct StandardMaterial {
     /// Doubles as diffuse albedo for non-metallic, specular for metallic and a mix for everything
-    /// in between If used together with a base_color_texture, this is factored into the final
+    /// in between. If used together with a base_color_texture, this is factored into the final
     /// base color as `base_color * base_color_texture_value`
     pub base_color: Color,
     pub base_color_texture: Option<Handle<Image>>,
