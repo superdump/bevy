@@ -21,6 +21,7 @@ pub mod draw_3d_graph {
     pub mod node {
         pub const SHADOW_PASS: &'static str = "shadow_pass";
         pub const DEPTH_NORMAL_PASS: &'static str = "depth_normal_pass";
+        pub const SSAO_PASS: &'static str = "ssao_pass";
     }
 }
 
@@ -30,7 +31,9 @@ pub struct PbrPlugin;
 impl Plugin for PbrPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(StandardMaterialPlugin)
-            .init_resource::<AmbientLight>();
+            .init_resource::<AmbientLight>()
+            .init_resource::<SsaoConfig>()
+            .add_startup_system(render::ssao_pass::load_blue_noise.system());
 
         let render_app = app.sub_app_mut(0);
         render_app
@@ -39,11 +42,19 @@ impl Plugin for PbrPlugin {
                 RenderStage::Extract,
                 render::depth_normal_prepass::extract_depth_normal_prepass_camera_phase.system(),
             )
+            .add_system_to_stage(
+                RenderStage::Extract,
+                render::ssao_pass::extract_ssao.system(),
+            )
             .add_system_to_stage(RenderStage::Extract, render::extract_lights.system())
             .add_system_to_stage(RenderStage::Prepare, render::prepare_meshes.system())
             .add_system_to_stage(
                 RenderStage::Prepare,
                 render::depth_normal_prepass::prepare_view_depth_normals.system(),
+            )
+            .add_system_to_stage(
+                RenderStage::Prepare,
+                render::ssao_pass::prepare_ssao.system(),
             )
             .add_system_to_stage(
                 RenderStage::Prepare,
@@ -56,10 +67,15 @@ impl Plugin for PbrPlugin {
                 RenderStage::Queue,
                 render::depth_normal_prepass::queue_meshes.system(),
             )
+            .add_system_to_stage(RenderStage::Queue, render::ssao_pass::queue_meshes.system())
             .add_system_to_stage(RenderStage::Queue, render::light::queue_meshes.system())
             .add_system_to_stage(
                 RenderStage::PhaseSort,
                 sort_phase_system::<DepthNormalPhase>.system(),
+            )
+            .add_system_to_stage(
+                RenderStage::PhaseSort,
+                sort_phase_system::<SsaoPhase>.system(),
             )
             .add_system_to_stage(
                 RenderStage::PhaseSort,
@@ -69,19 +85,24 @@ impl Plugin for PbrPlugin {
             // .init_resource::<RenderCommandQueue>()
             .init_resource::<PbrShaders>()
             .init_resource::<DepthNormalShaders>()
+            .init_resource::<SsaoShaders>()
             .init_resource::<ShadowShaders>()
             .init_resource::<MeshMeta>()
-            .init_resource::<LightMeta>();
+            .init_resource::<LightMeta>()
+            .init_resource::<SsaoMeta>();
 
         let draw_pbr = DrawPbr::new(&mut render_app.world);
         let draw_depth_normal_mesh = DrawDepthNormalMesh::new(&mut render_app.world);
         let depth_normal_pass_node = DepthNormalPassNode::new(&mut render_app.world);
+        let draw_ssao = DrawSsao::new(&mut render_app.world);
+        let ssao_pass_node = SsaoPassNode::new(&mut render_app.world);
         let draw_shadow_mesh = DrawShadowMesh::new(&mut render_app.world);
         let shadow_pass_node = ShadowPassNode::new(&mut render_app.world);
         let render_world = render_app.world.cell();
         let draw_functions = render_world.get_resource::<DrawFunctions>().unwrap();
         draw_functions.write().add(draw_pbr);
         draw_functions.write().add(draw_depth_normal_mesh);
+        draw_functions.write().add(draw_ssao);
         draw_functions.write().add(draw_shadow_mesh);
         let mut graph = render_world.get_resource_mut::<RenderGraph>().unwrap();
         graph.add_node("pbr", PbrNode);
@@ -109,7 +130,30 @@ impl Plugin for PbrPlugin {
                 draw_3d_graph.input_node().unwrap().id,
                 core_pipeline::draw_3d_graph::input::VIEW_ENTITY,
                 draw_3d_graph::node::DEPTH_NORMAL_PASS,
-                ShadowPassNode::IN_VIEW,
+                DepthNormalPassNode::IN_VIEW,
+            )
+            .unwrap();
+
+        // Ssao pass
+        draw_3d_graph.add_node(draw_3d_graph::node::SSAO_PASS, ssao_pass_node);
+        draw_3d_graph
+            .add_node_edge(
+                draw_3d_graph::node::DEPTH_NORMAL_PASS,
+                draw_3d_graph::node::SSAO_PASS,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_node_edge(
+                draw_3d_graph::node::SSAO_PASS,
+                core_pipeline::draw_3d_graph::node::MAIN_PASS,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_slot_edge(
+                draw_3d_graph.input_node().unwrap().id,
+                core_pipeline::draw_3d_graph::input::VIEW_ENTITY,
+                draw_3d_graph::node::SSAO_PASS,
+                SsaoPassNode::IN_VIEW,
             )
             .unwrap();
 

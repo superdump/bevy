@@ -1,7 +1,9 @@
 pub mod depth_normal_prepass;
 pub mod light;
+pub mod ssao_pass;
 pub use depth_normal_prepass::*;
 pub use light::*;
+pub use ssao_pass::*;
 
 use bevy_asset::{Assets, Handle};
 use bevy_ecs::{prelude::*, system::SystemState};
