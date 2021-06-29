@@ -19,7 +19,10 @@ impl Plugin for WindowRenderPlugin {
         render_app
             .init_resource::<WindowSurfaces>()
             .add_system_to_stage(RenderStage::Extract, extract_windows.system())
-            .add_system_to_stage(RenderStage::Prepare, prepare_windows.system());
+            // NOTE: prepare_windows calls the create_surface API which on some OSes (e.g. macOS)
+            //       must be called from the main thread. Executing as an exclusive system runs it
+            //       from the main thread.
+            .add_system_to_stage(RenderStage::Prepare, prepare_windows.exclusive_system());
     }
 }
 
@@ -88,6 +91,7 @@ pub fn prepare_windows(
             .surfaces
             .entry(window.id)
             .or_insert_with(|| unsafe {
+                // NOTE: On some OSes this MUST be called from the main thread.
                 render_instance.create_surface(&window.handle.get_handle())
             });
 
