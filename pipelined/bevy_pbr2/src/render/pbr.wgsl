@@ -86,20 +86,20 @@ struct StandardMaterial {
 };
 
 struct OmniLight {
+    view_projection: mat4x4<f32>;
     color: vec4<f32>;
+    position: vec3<f32>;
     range: f32;
     radius: f32;
-    position: vec3<f32>;
-    view_projection: mat4x4<f32>;
 };
 
 [[block]]
 struct Lights {
-    ambient_color: vec4<f32>;
-    num_lights: u32;
     // NOTE: this array size must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
     // TODO: this can be removed if we move to storage buffers for light arrays
     omni_lights: array<OmniLight, 10>;
+    ambient_color: vec4<f32>;
+    num_lights: u32;
 };
 
 let FLAGS_BASE_COLOR_TEXTURE_BIT: u32         = 1u;

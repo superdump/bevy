@@ -33,19 +33,19 @@ pub struct ExtractedPointLight {
 #[repr(C)]
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuLight {
+    view_proj: Mat4,
     color: Vec4,
+    position: Vec3,
     range: f32,
     radius: f32,
-    position: Vec3,
-    view_proj: Mat4,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, AsStd140)]
 pub struct GpuLights {
+    lights: [GpuLight; MAX_OMNI_LIGHTS],
     ambient_color: Vec4,
     len: u32,
-    lights: [GpuLight; MAX_OMNI_LIGHTS],
 }
 
 // NOTE: this must be kept in sync MAX_OMNI_LIGHTS in pbr.frag
