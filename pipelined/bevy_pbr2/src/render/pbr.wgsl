@@ -88,11 +88,11 @@ struct StandardMaterial {
 };
 
 struct OmniLight {
-    view_projection: mat4x4<f32>;
     color: vec4<f32>;
-    position: vec3<f32>;
     range: f32;
     radius: f32;
+    position: vec3<f32>;
+    view_projection: mat4x4<f32>;
 };
 
 [[block]]
@@ -361,7 +361,6 @@ fn fetch_shadow(light_id: i32, homogeneous_coords: vec4<f32>) -> f32 {
 
 struct FragmentInput {
     [[builtin(front_facing)]] is_front: bool;
-    [[builtin(position)]] clip_position: vec4<f32>;
     [[location(0)]] world_position: vec4<f32>;
     [[location(1)]] world_normal: vec3<f32>;
     [[location(2)]] uv: vec2<f32>;
