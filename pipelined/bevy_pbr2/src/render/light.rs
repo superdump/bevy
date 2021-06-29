@@ -43,12 +43,12 @@ pub struct ExtractedDirectionalLight {
 #[repr(C)]
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuOmniLight {
+    view_proj: Mat4,
     color: Vec4,
-    range: f32,
-    radius: f32,
     position: Vec3,
     shadow_bias_min_max: Vec2,
-    view_proj: Mat4,
+    range: f32,
+    radius: f32,
 }
 
 #[repr(C)]
@@ -63,10 +63,10 @@ pub struct GpuDirectionalLight {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, AsStd140)]
 pub struct GpuLights {
-    ambient_color: Vec4,
-    len: UVec4,
     omni_lights: [GpuOmniLight; MAX_OMNI_LIGHTS],
     directional_lights: [GpuDirectionalLight; MAX_DIRECTIONAL_LIGHTS],
+    len: UVec4,
+    ambient_color: Vec4,
 }
 
 // NOTE: this must be kept in sync with the same constants in pbr.frag
