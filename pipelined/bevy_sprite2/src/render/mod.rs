@@ -287,6 +287,10 @@ pub fn queue_sprites(
     gpu_images: Res<RenderAssets<Image>>,
     mut views: Query<&mut RenderPhase<Transparent2dPhase>>,
 ) {
+    if view_meta.uniforms.len() == 0 {
+        return;
+    }
+
     // TODO: define this without needing to check every frame
     sprite_meta.view_bind_group.get_or_insert_with(|| {
         render_device.create_bind_group(&BindGroupDescriptor {
