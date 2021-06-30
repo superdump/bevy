@@ -129,7 +129,7 @@ impl FromWorld for ShadowShaders {
             depth_stencil: Some(DepthStencilState {
                 format: SHADOW_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: CompareFunction::LessEqual,
+                depth_compare: CompareFunction::GreaterEqual,
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -165,7 +165,7 @@ impl FromWorld for ShadowShaders {
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
-                compare: Some(CompareFunction::LessEqual),
+                compare: Some(CompareFunction::GreaterEqual),
                 ..Default::default()
             }),
         }
@@ -267,7 +267,7 @@ pub fn prepare_lights(
                 .looking_at(Vec3::default(), Vec3::Y);
             // TODO: configure light projection based on light configuration
             let projection =
-                Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, light.range);
+                Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1);
 
             gpu_lights.lights[i] = GpuLight {
                 // premultiply color by intensity
@@ -358,7 +358,7 @@ impl Node for ShadowPassNode {
                     depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                         view: &view_light.depth_texture,
                         depth_ops: Some(Operations {
-                            load: LoadOp::Clear(1.0),
+                            load: LoadOp::Clear(0.0),
                             store: true,
                         }),
                         stencil_ops: None,

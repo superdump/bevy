@@ -356,7 +356,9 @@ fn fetch_shadow(light_id: i32, homogeneous_coords: vec4<f32>) -> f32 {
     // compute texture coordinates for shadow lookup
     let light_local = homogeneous_coords.xy * flip_correction * proj_correction + vec2<f32>(0.5, 0.5);
     // do the lookup, using HW PCF and comparison
-    return textureSampleCompare(shadow_textures, shadow_textures_sampler, light_local, i32(light_id), homogeneous_coords.z * proj_correction);
+    // NOTE: with reverse projections, the shadow bias must be added to the fragment depth, not subtracted
+    // FIXME: make the shadow bias configurable
+    return textureSampleCompare(shadow_textures, shadow_textures_sampler, light_local, i32(light_id), homogeneous_coords.z * proj_correction + 0.001);
 }
 
 struct FragmentInput {
