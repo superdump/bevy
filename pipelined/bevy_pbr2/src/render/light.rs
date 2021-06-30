@@ -22,7 +22,7 @@ pub struct ExtractedAmbientLight {
     brightness: f32,
 }
 
-pub struct ExtractedPointLight {
+pub struct ExtractedOmniLight {
     color: Color,
     intensity: f32,
     range: f32,
@@ -183,7 +183,7 @@ pub fn extract_lights(
         brightness: ambient_light.brightness,
     });
     for (entity, light, transform) in lights.iter() {
-        commands.get_or_spawn(entity).insert(ExtractedPointLight {
+        commands.get_or_spawn(entity).insert(ExtractedOmniLight {
             color: light.color,
             intensity: light.intensity,
             range: light.range,
@@ -217,7 +217,7 @@ pub fn prepare_lights(
     mut light_meta: ResMut<LightMeta>,
     views: Query<Entity, With<RenderPhase<Transparent3dPhase>>>,
     ambient_light: Res<ExtractedAmbientLight>,
-    lights: Query<&ExtractedPointLight>,
+    lights: Query<&ExtractedOmniLight>,
 ) {
     // PERF: view.iter().count() could be views.iter().len() if we implemented ExactSizeIterator for archetype-only filters
     light_meta
