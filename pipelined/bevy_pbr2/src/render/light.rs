@@ -46,18 +46,20 @@ pub struct GpuOmniLight {
     view_proj: Mat4,
     color: Vec4,
     position: Vec3,
-    shadow_bias_min_max: Vec2,
     range: f32,
     radius: f32,
+    shadow_bias_min: f32,
+    shadow_bias_max: f32,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuDirectionalLight {
+    view_projection: Mat4,
     color: Vec4,
     dir_to_light: Vec3,
-    shadow_bias_min_max: Vec2,
-    view_projection: Mat4,
+    shadow_bias_min: f32,
+    shadow_bias_max: f32,
 }
 
 #[repr(C)]
@@ -65,8 +67,9 @@ pub struct GpuDirectionalLight {
 pub struct GpuLights {
     omni_lights: [GpuOmniLight; MAX_OMNI_LIGHTS],
     directional_lights: [GpuDirectionalLight; MAX_DIRECTIONAL_LIGHTS],
-    len: UVec4,
     ambient_color: Vec4,
+    n_omni_lights: u32,
+    n_directional_lights: u32,
 }
 
 // NOTE: this must be kept in sync with the same constants in pbr.frag
@@ -280,12 +283,8 @@ pub fn prepare_lights(
 
         let mut gpu_lights = GpuLights {
             ambient_color: ambient_color.into(),
-            len: UVec4::new(
-                omni_lights.iter().len() as u32,
-                directional_lights.iter().len() as u32,
-                0,
-                0,
-            ),
+            n_omni_lights: omni_lights.iter().len() as u32,
+            n_directional_lights: directional_lights.iter().len() as u32,
             omni_lights: [GpuOmniLight::default(); MAX_OMNI_LIGHTS],
             directional_lights: [GpuDirectionalLight::default(); MAX_DIRECTIONAL_LIGHTS],
         };
@@ -316,12 +315,13 @@ pub fn prepare_lights(
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: (light.color.as_rgba_linear() * light.intensity).into(),
-                radius: light.radius.into(),
-                position: light.transform.translation.into(),
+                radius: light.radius,
+                position: light.transform.translation,
                 range: 1.0 / (light.range * light.range),
                 // this could technically be copied to the gpu from the light's ViewUniforms
                 view_proj: projection * view_transform.compute_matrix().inverse(),
-                shadow_bias_min_max: light.shadow_bias_min_max,
+                shadow_bias_min: light.shadow_bias_min_max.x,
+                shadow_bias_max: light.shadow_bias_min_max.y,
             };
 
             let view_light_entity = commands
@@ -374,10 +374,11 @@ pub fn prepare_lights(
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: (light.color.as_rgba_linear() * intensity).into(),
-                dir_to_light: dir_to_light.into(),
+                dir_to_light,
                 // NOTE: * view is correct, it should not be view.inverse() here
                 view_projection: projection * view,
-                shadow_bias_min_max: light.shadow_bias_min_max,
+                shadow_bias_min: light.shadow_bias_min_max.x,
+                shadow_bias_max: light.shadow_bias_min_max.y,
             };
 
             let depth_texture_view =
