@@ -188,12 +188,6 @@ fn setup(
             });
         });
 
-    // camera
-    commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(-2.0, 5.0, 7.5)
-            .looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
-        ..Default::default()
-    });
     const HALF_SIZE: f32 = 10.0;
     let mut directional_light = DirectionalLight::default();
     directional_light.color = Color::WHITE;
