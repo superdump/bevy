@@ -1,27 +1,29 @@
-use bevy_math::{Vec2, Vec3};
+use bevy_math::Vec3;
 use bevy_render2::{camera::OrthographicProjection, color::Color};
 
 pub const DEFAULT_SHADOW_BIAS_MIN: f32 = 0.00005;
 pub const DEFAULT_SHADOW_BIAS_MAX: f32 = 0.002;
 
-/// An omnidirectional light
+/// A light that emits light in all directions from a central point.
 #[derive(Debug, Clone, Copy)]
-pub struct OmniLight {
+pub struct PointLight {
     pub color: Color,
     pub intensity: f32,
     pub range: f32,
     pub radius: f32,
-    pub shadow_bias_min_max: Vec2,
+    pub shadow_bias_min: f32,
+    pub shadow_bias_max: f32,
 }
 
-impl Default for OmniLight {
+impl Default for PointLight {
     fn default() -> Self {
-        OmniLight {
+        PointLight {
             color: Color::rgb(1.0, 1.0, 1.0),
             intensity: 200.0,
             range: 20.0,
             radius: 0.0,
-            shadow_bias_min_max: Vec2::new(DEFAULT_SHADOW_BIAS_MIN, DEFAULT_SHADOW_BIAS_MAX),
+            shadow_bias_min: DEFAULT_SHADOW_BIAS_MIN,
+            shadow_bias_max: DEFAULT_SHADOW_BIAS_MAX,
         }
     }
 }
@@ -58,7 +60,8 @@ pub struct DirectionalLight {
     pub illuminance: f32,
     direction: Vec3,
     pub shadow_projection: OrthographicProjection,
-    pub shadow_bias_min_max: Vec2,
+    pub shadow_bias_min: f32,
+    pub shadow_bias_max: f32,
 }
 
 impl DirectionalLight {
@@ -68,14 +71,16 @@ impl DirectionalLight {
         illuminance: f32,
         direction: Vec3,
         shadow_projection: OrthographicProjection,
-        shadow_bias_min_max: Vec2,
+        shadow_bias_min: f32,
+        shadow_bias_max: f32,
     ) -> Self {
         DirectionalLight {
             color,
             illuminance,
             direction: direction.normalize(),
             shadow_projection,
-            shadow_bias_min_max,
+            shadow_bias_min,
+            shadow_bias_max,
         }
     }
 
@@ -105,7 +110,8 @@ impl Default for DirectionalLight {
                 far: size,
                 ..Default::default()
             },
-            shadow_bias_min_max: Vec2::new(DEFAULT_SHADOW_BIAS_MIN, DEFAULT_SHADOW_BIAS_MAX),
+            shadow_bias_min: DEFAULT_SHADOW_BIAS_MIN,
+            shadow_bias_max: DEFAULT_SHADOW_BIAS_MAX,
         }
     }
 }

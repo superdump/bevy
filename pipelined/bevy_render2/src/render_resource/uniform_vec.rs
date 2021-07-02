@@ -1,5 +1,5 @@
 use crate::{render_resource::Buffer, renderer::RenderDevice};
-use crevice::std140::{self, AsStd140, DynamicUniform, Std140};
+use crevice::std140::{self, AsStd140, DynamicUniform};
 use std::{num::NonZeroU64, ops::DerefMut};
 use wgpu::{BindingResource, BufferBinding, BufferDescriptor, BufferUsage, CommandEncoder};
 
@@ -18,8 +18,7 @@ impl<T: AsStd140> Default for UniformVec<T> {
             staging_buffer: None,
             uniform_buffer: None,
             capacity: 0,
-            item_size: (T::std140_size_static() + <T as AsStd140>::Std140Type::ALIGNMENT - 1)
-                & !(<T as AsStd140>::Std140Type::ALIGNMENT - 1),
+            item_size: T::std140_padded_size_static(),
         }
     }
 }
@@ -42,6 +41,16 @@ impl<T: AsStd140> UniformVec<T> {
             offset: 0,
             size: Some(NonZeroU64::new(self.item_size as u64).unwrap()),
         })
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
     }
 
     #[inline]
@@ -143,6 +152,16 @@ impl<T: AsStd140> DynamicUniformVec<T> {
     #[inline]
     pub fn binding(&self) -> BindingResource {
         self.uniform_vec.binding()
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.uniform_vec.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.uniform_vec.is_empty()
     }
 
     #[inline]

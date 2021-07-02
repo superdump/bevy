@@ -3,12 +3,12 @@ use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     ecs::prelude::*,
     input::Input,
-    math::Vec3,
+    math::{Quat, Vec3},
     pbr2::{
-        AmbientLight, DirectionalLight, DirectionalLightBundle, OmniLight, OmniLightBundle,
-        PbrBundle, StandardMaterial,
+        AmbientLight, DirectionalLight, DirectionalLightBundle, PbrBundle, PointLight,
+        PointLightBundle, StandardMaterial,
     },
-    prelude::{App, Assets, KeyCode, Transform},
+    prelude::{App, Assets, BuildChildren, KeyCode, Transform},
     render2::{
         camera::{OrthographicProjection, PerspectiveCameraBundle},
         color::Color,
@@ -50,6 +50,32 @@ fn setup(
         }),
         ..Default::default()
     });
+
+    let mut transform = Transform::from_xyz(2.5, 2.5, 0.0);
+    transform.rotate(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
+        transform,
+        material: materials.add(StandardMaterial {
+            base_color: Color::INDIGO,
+            perceptual_roughness: 1.0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let mut transform = Transform::from_xyz(0.0, 2.5, -2.5);
+    transform.rotate(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
+        transform,
+        material: materials.add(StandardMaterial {
+            base_color: Color::INDIGO,
+            perceptual_roughness: 1.0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
     // cube
     commands
         .spawn_bundle(PbrBundle {
@@ -77,26 +103,94 @@ fn setup(
             ..Default::default()
         })
         .insert(Movable);
+
     // light
-    commands.spawn_bundle(OmniLightBundle {
-        omni_light: OmniLight {
-            color: Color::RED,
+    commands
+        .spawn_bundle(PointLightBundle {
+            // transform: Transform::from_xyz(5.0, 8.0, 2.0),
+            transform: Transform::from_xyz(1.0, 2.0, 0.0),
+            point_light: PointLight {
+                color: Color::RED,
+                shadow_bias_min: 0.00001,
+                shadow_bias_max: 0.0001,
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        transform: Transform::from_xyz(5.0, 8.0, 2.0),
-        ..Default::default()
-    });
-    commands.spawn_bundle(OmniLightBundle {
-        omni_light: OmniLight {
-            color: Color::GREEN,
+        })
+        .with_children(|builder| {
+            builder.spawn_bundle(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere {
+                    radius: 0.1,
+                    ..Default::default()
+                })),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::RED,
+                    emissive: Color::rgba_linear(100.0, 0.0, 0.0, 0.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        });
+
+    // light
+    commands
+        .spawn_bundle(PointLightBundle {
+            // transform: Transform::from_xyz(5.0, 8.0, 2.0),
+            transform: Transform::from_xyz(-1.0, 2.0, 0.0),
+            point_light: PointLight {
+                color: Color::GREEN,
+                shadow_bias_min: 0.00001,
+                shadow_bias_max: 0.0001,
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        transform: Transform::from_xyz(5.0, 8.0, -2.0),
-        ..Default::default()
-    });
-    const HALF_SIZE: f32 = 5.0;
+        })
+        .with_children(|builder| {
+            builder.spawn_bundle(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere {
+                    radius: 0.1,
+                    ..Default::default()
+                })),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::GREEN,
+                    emissive: Color::rgba_linear(0.0, 100.0, 0.0, 0.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        });
+
+    // light
+    commands
+        .spawn_bundle(PointLightBundle {
+            // transform: Transform::from_xyz(5.0, 8.0, 2.0),
+            transform: Transform::from_xyz(0.0, 4.0, 0.0),
+            point_light: PointLight {
+                color: Color::BLUE,
+                shadow_bias_min: 0.00001,
+                shadow_bias_max: 0.0001,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .with_children(|builder| {
+            builder.spawn_bundle(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere {
+                    radius: 0.1,
+                    ..Default::default()
+                })),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::BLUE,
+                    emissive: Color::rgba_linear(0.0, 0.0, 100.0, 0.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        });
+
+    const HALF_SIZE: f32 = 10.0;
     let mut directional_light = DirectionalLight::default();
-    directional_light.color = Color::BLUE;
+    directional_light.color = Color::WHITE;
     directional_light.shadow_projection = OrthographicProjection {
         left: -HALF_SIZE,
         right: HALF_SIZE,
@@ -106,6 +200,8 @@ fn setup(
         far: 10.0 * HALF_SIZE,
         ..Default::default()
     };
+    directional_light.shadow_bias_min = 0.00001;
+    directional_light.shadow_bias_max = 0.0001;
     commands
         .spawn_bundle(DirectionalLightBundle {
             directional_light,

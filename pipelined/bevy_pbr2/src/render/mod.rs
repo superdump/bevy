@@ -19,7 +19,6 @@ use bevy_render2::{
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::slab::{FrameSlabMap, FrameSlabMapKey};
 use crevice::std140::AsStd140;
-use std::borrow::Cow;
 use wgpu::{
     Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, TextureDimension, TextureFormat,
     TextureViewDescriptor,
@@ -29,7 +28,7 @@ use crate::{StandardMaterial, StandardMaterialUniformData};
 
 pub struct PbrShaders {
     pipeline: RenderPipeline,
-    vertex_shader_module: ShaderModule,
+    shader_module: ShaderModule,
     view_layout: BindGroupLayout,
     material_layout: BindGroupLayout,
     mesh_layout: BindGroupLayout,
@@ -41,26 +40,8 @@ pub struct PbrShaders {
 impl FromWorld for PbrShaders {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
-        let vertex_shader = Shader::from_glsl(ShaderStage::VERTEX, include_str!("pbr.vert"))
-            .get_spirv_shader(None)
-            .unwrap();
-        let fragment_shader = Shader::from_glsl(ShaderStage::FRAGMENT, include_str!("pbr.frag"))
-            .get_spirv_shader(None)
-            .unwrap();
-
-        let vertex_spirv = vertex_shader.get_spirv(None).unwrap();
-        let fragment_spirv = fragment_shader.get_spirv(None).unwrap();
-
-        let vertex_shader_module = render_device.create_shader_module(&ShaderModuleDescriptor {
-            flags: ShaderFlags::default(),
-            label: None,
-            source: ShaderSource::SpirV(Cow::Borrowed(&vertex_spirv)),
-        });
-        let fragment_shader_module = render_device.create_shader_module(&ShaderModuleDescriptor {
-            flags: ShaderFlags::default(),
-            label: None,
-            source: ShaderSource::SpirV(Cow::Borrowed(&fragment_spirv)),
-        });
+        let shader = Shader::from_wgsl(include_str!("pbr.wgsl"));
+        let shader_module = render_device.create_shader_module(&shader);
 
         // TODO: move this into ViewMeta?
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -72,8 +53,11 @@ impl FromWorld for PbrShaders {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
-                        // TODO: verify this is correct
-                        min_binding_size: BufferSize::new(ViewUniform::std140_size_static() as u64),
+                        // TODO: change this to ViewUniform::std140_padded_size_static once crevice fixes this!
+                        // Context: https://github.com/LPGhatguy/crevice/issues/29
+                        min_binding_size: BufferSize::new(
+                            ViewUniform::std140_padded_size_static() as u64
+                        ),
                     },
                     count: None,
                 },
@@ -84,13 +68,38 @@ impl FromWorld for PbrShaders {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
-                        min_binding_size: BufferSize::new(GpuLights::std140_size_static() as u64),
+                        // TODO: change this to GpuLights::std140_padded_size_static once crevice fixes this!
+                        // Context: https://github.com/LPGhatguy/crevice/issues/29
+                        min_binding_size: BufferSize::new(
+                            GpuLights::std140_padded_size_static() as u64
+                        ),
                     },
                     count: None,
                 },
-                // Shadow Texture Array
+                // Point Shadow Texture Cube Array
                 BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        sample_type: TextureSampleType::Depth,
+                        view_dimension: TextureViewDimension::CubeArray,
+                    },
+                    count: None,
+                },
+                // Point Shadow Texture Array Sampler
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Sampler {
+                        comparison: true,
+                        filtering: true,
+                    },
+                    count: None,
+                },
+                // Directional Shadow Texture Array
+                BindGroupLayoutEntry {
+                    binding: 4,
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Texture {
                         multisampled: false,
@@ -99,9 +108,9 @@ impl FromWorld for PbrShaders {
                     },
                     count: None,
                 },
-                // Shadow Texture Array Sampler
+                // Directional Shadow Texture Array Sampler
                 BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 5,
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Sampler {
                         comparison: true,
@@ -120,7 +129,7 @@ impl FromWorld for PbrShaders {
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
                     has_dynamic_offset: true,
-                    min_binding_size: BufferSize::new(Mat4::std140_size_static() as u64),
+                    min_binding_size: BufferSize::new(Mat4::std140_padded_size_static() as u64),
                 },
                 count: None,
             }],
@@ -136,7 +145,7 @@ impl FromWorld for PbrShaders {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: BufferSize::new(
-                            StandardMaterialUniformData::std140_size_static() as u64,
+                            StandardMaterialUniformData::std140_padded_size_static() as u64,
                         ),
                     },
                     count: None,
@@ -262,12 +271,12 @@ impl FromWorld for PbrShaders {
                         },
                     ],
                 }],
-                module: &&vertex_shader_module,
-                entry_point: "main",
+                module: &shader_module,
+                entry_point: "vertex",
             },
             fragment: Some(FragmentState {
-                module: &&fragment_shader_module,
-                entry_point: "main",
+                module: &shader_module,
+                entry_point: "fragment",
                 targets: &[ColorTargetState {
                     format: TextureFormat::bevy_default(),
                     blend: Some(BlendState {
@@ -356,10 +365,10 @@ impl FromWorld for PbrShaders {
         };
         PbrShaders {
             pipeline,
+            shader_module,
             view_layout,
             material_layout,
             mesh_layout,
-            vertex_shader_module,
             dummy_white_gpu_image,
         }
     }
@@ -395,7 +404,6 @@ pub fn extract_meshes(
                     continue;
                 }
             }
-
             if let Some(ref image) = material.emissive_texture {
                 if !images.contains(image) {
                     continue;
@@ -436,7 +444,8 @@ struct MeshDrawInfo {
 pub struct MeshMeta {
     transform_uniforms: DynamicUniformVec<Mat4>,
     material_bind_groups: FrameSlabMap<BufferId, BindGroup>,
-    mesh_transform_bind_group: Option<BindGroup>,
+    mesh_transform_bind_group: FrameSlabMap<BufferId, BindGroup>,
+    mesh_transform_bind_group_key: Option<FrameSlabMapKey<BufferId, BindGroup>>,
     mesh_draw_info: Vec<MeshDrawInfo>,
 }
 
@@ -481,6 +490,7 @@ fn image_handle_to_view_sampler<'a>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn queue_meshes(
     mut commands: Commands,
     draw_functions: Res<DrawFunctions>,
@@ -503,6 +513,10 @@ pub fn queue_meshes(
 ) {
     let mesh_meta = mesh_meta.into_inner();
 
+    if view_meta.uniforms.is_empty() {
+        return;
+    }
+
     light_meta.shadow_view_bind_group.get_or_insert_with(|| {
         render_device.create_bind_group(&BindGroupDescriptor {
             entries: &[BindGroupEntry {
@@ -518,16 +532,21 @@ pub fn queue_meshes(
     }
 
     let transform_uniforms = &mesh_meta.transform_uniforms;
-    mesh_meta.mesh_transform_bind_group.get_or_insert_with(|| {
-        render_device.create_bind_group(&BindGroupDescriptor {
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: transform_uniforms.binding(),
-            }],
-            label: None,
-            layout: &pbr_shaders.mesh_layout,
-        })
-    });
+    mesh_meta.mesh_transform_bind_group.next_frame();
+    mesh_meta.mesh_transform_bind_group_key =
+        Some(mesh_meta.mesh_transform_bind_group.get_or_insert_with(
+            transform_uniforms.uniform_buffer().unwrap().id(),
+            || {
+                render_device.create_bind_group(&BindGroupDescriptor {
+                    entries: &[BindGroupEntry {
+                        binding: 0,
+                        resource: transform_uniforms.binding(),
+                    }],
+                    label: None,
+                    layout: &pbr_shaders.mesh_layout,
+                })
+            },
+        ));
     for (entity, view, view_lights, mut transparent_phase) in views.iter_mut() {
         // TODO: cache this?
         let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
@@ -542,11 +561,23 @@ pub fn queue_meshes(
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: BindingResource::TextureView(&view_lights.light_depth_texture_view),
+                    resource: BindingResource::TextureView(
+                        &view_lights.point_light_depth_texture_view,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(&shadow_shaders.light_sampler),
+                    resource: BindingResource::Sampler(&shadow_shaders.point_light_sampler),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::TextureView(
+                        &view_lights.directional_light_depth_texture_view,
+                    ),
+                },
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::Sampler(&shadow_shaders.directional_light_sampler),
                 },
             ],
             label: None,
@@ -752,7 +783,10 @@ impl Draw for DrawPbr {
         );
         pass.set_bind_group(
             1,
-            mesh_meta.mesh_transform_bind_group.as_ref().unwrap(),
+            mesh_meta
+                .mesh_transform_bind_group
+                .get_value(mesh_meta.mesh_transform_bind_group_key.unwrap())
+                .unwrap(),
             &[extracted_mesh.transform_binding_offset],
         );
         let mesh_draw_info = &mesh_meta.mesh_draw_info[draw_key];
