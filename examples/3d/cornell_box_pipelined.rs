@@ -123,7 +123,7 @@ fn setup(
             transform: Transform::from_matrix(Mat4::from_scale_rotation_translation(
                 Vec3::ONE,
                 Quat::from_rotation_x(std::f32::consts::PI),
-                Vec3::new(0.0, box_size, 0.0),
+                Vec3::new(0.0, box_size + 0.5 * box_thickness, 0.0),
             )),
             material: materials.add(StandardMaterial {
                 base_color: Color::WHITE,
@@ -141,6 +141,7 @@ fn setup(
                     intensity: 25.0,
                     ..Default::default()
                 },
+                transform: Transform::from_translation((box_thickness + 0.05) * Vec3::Y),
                 ..Default::default()
             });
         });
