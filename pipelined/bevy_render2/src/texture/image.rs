@@ -7,8 +7,8 @@ use crate::{
 use bevy_reflect::TypeUuid;
 use thiserror::Error;
 use wgpu::{
-    Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, TextureDimension, TextureFormat,
-    TextureViewDescriptor,
+    Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, TextureAspect, TextureDimension,
+    TextureFormat, TextureViewDescriptor,
 };
 
 pub const TEXTURE_ASSET_INDEX: u64 = 0;
@@ -38,7 +38,7 @@ impl Default for Image {
                 label: None,
                 mip_level_count: 1,
                 sample_count: 1,
-                usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+                usage: wgpu::TextureUsages::SAMPLED | wgpu::TextureUsages::COPY_DST,
             },
             sampler_descriptor: wgpu::SamplerDescriptor::default(),
         }
@@ -365,6 +365,7 @@ impl RenderAsset for Image {
                 texture: &texture,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
             },
             &image.data,
             ImageDataLayout {

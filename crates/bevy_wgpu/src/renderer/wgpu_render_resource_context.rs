@@ -23,6 +23,7 @@ use std::{
     sync::Arc,
 };
 use wgpu::util::DeviceExt;
+use wgpu::TextureAspect;
 
 #[derive(Clone, Debug)]
 pub struct WgpuRenderResourceContext {
@@ -94,6 +95,7 @@ impl WgpuRenderResourceContext {
                     y: source_origin[1],
                     z: source_origin[2],
                 },
+                aspect: TextureAspect::All,
             },
             wgpu::ImageCopyTexture {
                 texture: destination,
@@ -103,6 +105,7 @@ impl WgpuRenderResourceContext {
                     y: destination_origin[1],
                     z: destination_origin[2],
                 },
+                aspect: TextureAspect::All,
             },
             size.wgpu_into(),
         )
@@ -134,6 +137,7 @@ impl WgpuRenderResourceContext {
                     y: source_origin[1],
                     z: source_origin[2],
                 },
+                aspect: TextureAspect::All,
             },
             wgpu::ImageCopyBuffer {
                 buffer: destination,
@@ -181,6 +185,7 @@ impl WgpuRenderResourceContext {
                     y: destination_origin[1],
                     z: destination_origin[2],
                 },
+                aspect: TextureAspect::All,
             },
             size.wgpu_into(),
         );
@@ -206,11 +211,11 @@ impl WgpuRenderResourceContext {
                 let shader_stage = if binding.shader_stage
                     == BindingShaderStage::VERTEX | BindingShaderStage::FRAGMENT
                 {
-                    wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT
+                    wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT
                 } else if binding.shader_stage == BindingShaderStage::VERTEX {
-                    wgpu::ShaderStage::VERTEX
+                    wgpu::ShaderStages::VERTEX
                 } else if binding.shader_stage == BindingShaderStage::FRAGMENT {
-                    wgpu::ShaderStage::FRAGMENT
+                    wgpu::ShaderStages::FRAGMENT
                 } else {
                     panic!("Invalid binding shader stage.")
                 };
@@ -339,7 +344,6 @@ impl RenderResourceContext for WgpuRenderResourceContext {
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::SpirV(spirv),
-                flags: Default::default(),
             });
         shader_modules.insert(shader_handle.clone_weak(), shader_module);
     }

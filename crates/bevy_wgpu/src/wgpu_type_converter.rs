@@ -137,9 +137,9 @@ impl WgpuFrom<Color> for wgpu::Color {
     }
 }
 
-impl WgpuFrom<BufferUsage> for wgpu::BufferUsage {
+impl WgpuFrom<BufferUsage> for wgpu::BufferUsages {
     fn from(val: BufferUsage) -> Self {
-        wgpu::BufferUsage::from_bits(val.bits()).unwrap()
+        wgpu::BufferUsages::from_bits(val.bits()).unwrap()
     }
 }
 
@@ -346,9 +346,9 @@ impl WgpuFrom<TextureFormat> for wgpu::TextureFormat {
     }
 }
 
-impl WgpuFrom<TextureUsage> for wgpu::TextureUsage {
+impl WgpuFrom<TextureUsage> for wgpu::TextureUsages {
     fn from(val: TextureUsage) -> Self {
-        wgpu::TextureUsage::from_bits(val.bits()).unwrap()
+        wgpu::TextureUsages::from_bits(val.bits()).unwrap()
     }
 }
 
@@ -526,9 +526,9 @@ impl WgpuFrom<PrimitiveState> for wgpu::PrimitiveState {
     }
 }
 
-impl WgpuFrom<ColorWrite> for wgpu::ColorWrite {
+impl WgpuFrom<ColorWrite> for wgpu::ColorWrites {
     fn from(val: ColorWrite) -> Self {
-        wgpu::ColorWrite::from_bits(val.bits()).unwrap()
+        wgpu::ColorWrites::from_bits(val.bits()).unwrap()
     }
 }
 
@@ -643,7 +643,7 @@ impl WgpuFrom<SamplerBorderColor> for wgpu::SamplerBorderColor {
 impl WgpuFrom<&Window> for wgpu::SwapChainDescriptor {
     fn from(window: &Window) -> Self {
         wgpu::SwapChainDescriptor {
-            usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: TextureFormat::default().wgpu_into(),
             width: window.physical_width(),
             height: window.physical_height(),
@@ -664,14 +664,12 @@ impl WgpuFrom<WgpuFeature> for wgpu::Features {
             WgpuFeature::TimestampQuery => wgpu::Features::TIMESTAMP_QUERY,
             WgpuFeature::PipelineStatisticsQuery => wgpu::Features::PIPELINE_STATISTICS_QUERY,
             WgpuFeature::MappablePrimaryBuffers => wgpu::Features::MAPPABLE_PRIMARY_BUFFERS,
-            WgpuFeature::SampledTextureBindingArray => {
-                wgpu::Features::SAMPLED_TEXTURE_BINDING_ARRAY
-            }
+            WgpuFeature::SampledTextureBindingArray => wgpu::Features::TEXTURE_BINDING_ARRAY,
             WgpuFeature::SampledTextureArrayDynamicIndexing => {
-                wgpu::Features::SAMPLED_TEXTURE_ARRAY_DYNAMIC_INDEXING
+                wgpu::Features::TEXTURE_BINDING_ARRAY
             }
             WgpuFeature::SampledTextureArrayNonUniformIndexing => {
-                wgpu::Features::SAMPLED_TEXTURE_ARRAY_NON_UNIFORM_INDEXING
+                wgpu::Features::RESOURCE_BINDING_ARRAY_NON_UNIFORM_INDEXING
             }
             WgpuFeature::UnsizedBindingArray => wgpu::Features::UNSIZED_BINDING_ARRAY,
             WgpuFeature::MultiDrawIndirect => wgpu::Features::MULTI_DRAW_INDIRECT,

@@ -77,7 +77,7 @@ impl FromWorld for ShadowShaders {
                 // View
                 BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStage::VERTEX | ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
@@ -281,7 +281,7 @@ pub fn prepare_lights(
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: SHADOW_FORMAT,
-                usage: TextureUsage::RENDER_ATTACHMENT | TextureUsage::SAMPLED,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::SAMPLED,
                 label: None,
             },
         );
