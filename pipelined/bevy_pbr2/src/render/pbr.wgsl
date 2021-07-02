@@ -386,7 +386,7 @@ fn fetch_shadow(light_id: i32, frag_position: vec4<f32>) -> f32 {
     //       from LOD 0.
     // NOTE: with reverse projections, the shadow bias must be added to the fragment depth, not subtracted
     // FIXME: make the shadow bias configurable
-    let bias = 0.001;
+    let bias = 0.02;
     return textureSampleCompareLevel(shadow_textures, shadow_textures_sampler, frag_ls, i32(light_id), depth + bias);
 }
 
