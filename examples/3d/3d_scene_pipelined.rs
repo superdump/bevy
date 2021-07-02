@@ -54,7 +54,7 @@ fn setup(
     let mut transform = Transform::from_xyz(2.5, 2.5, 0.0);
     transform.rotate(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
+        mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
         transform,
         material: materials.add(StandardMaterial {
             base_color: Color::INDIGO,
@@ -67,7 +67,7 @@ fn setup(
     let mut transform = Transform::from_xyz(0.0, 2.5, -2.5);
     transform.rotate(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
+        mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
         transform,
         material: materials.add(StandardMaterial {
             base_color: Color::INDIGO,
