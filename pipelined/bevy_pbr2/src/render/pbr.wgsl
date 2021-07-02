@@ -357,14 +357,17 @@ fn fetch_shadow(light_id: i32, frag_position: vec4<f32>) -> f32 {
     let abs_position_ls = abs(frag_ls);
     let major_axis_magnitude = max(abs_position_ls.x, max(abs_position_ls.y, abs_position_ls.z));
 
-    // do a full projection
-    // vec4 clip = light.projection * vec4(0.0, 0.0, -major_axis_magnitude, 1.0);
-    // float depth = (clip.z / clip.w);
-
-    // alternatively do only the necessary multiplications using near/far
-    let proj_r = light.far / (light.near - light.far);
-    let z = -major_axis_magnitude * proj_r + light.near * proj_r;
+    // NOTE: This simplification comes from multiplying:
+    //       projection * vec4(0, 0, -major_axis_magnitude, 1.0)
+    //       and keeping only the terms that have any effect.
+    // For perspective_rh:
+    // let proj_r = light.far / (light.near - light.far);
+    // let z = -major_axis_magnitude * proj_r + light.near * proj_r;
+    // let w = major_axis_magnitude;
+    // For perspective_infinite_reverse_rh:
+    let z = light.near;
     let w = major_axis_magnitude;
+
     let depth = z / w;
 
     // let shadow = texture(samplerCubeArrayShadow(t_Shadow, s_Shadow), vec4(frag_ls, i), depth - bias);
@@ -383,7 +386,7 @@ fn fetch_shadow(light_id: i32, frag_position: vec4<f32>) -> f32 {
     //       from LOD 0.
     // NOTE: with reverse projections, the shadow bias must be added to the fragment depth, not subtracted
     // FIXME: make the shadow bias configurable
-    let bias = 0.0001;
+    let bias = 0.001;
     return textureSampleCompareLevel(shadow_textures, shadow_textures_sampler, frag_ls, i32(light_id), depth + bias);
 }
 
