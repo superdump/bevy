@@ -458,7 +458,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             V = normalize(view.world_position.xyz - in.world_position.xyz);
         } else {
             // Ortho view vec
-            V = normalize(vec3<f32>(-view.view_proj.x.z, -view.view_proj.y.z, -view.view_proj.z.z));
+            V = normalize(vec3<f32>(view.view_proj.x.z, view.view_proj.y.z, view.view_proj.z.z));
         }
 
         // Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"

@@ -90,8 +90,8 @@ impl CameraProjection for OrthographicProjection {
             self.top * self.scale,
             // NOTE: near and far are swapped to invert the depth range from [0,1] to [1,0]
             // This is for interoperability with pipelines using infinite reverse perspective projections.
-            self.near,
             self.far,
+            self.near,
         )
     }
 
