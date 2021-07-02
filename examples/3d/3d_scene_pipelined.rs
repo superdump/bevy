@@ -111,6 +111,8 @@ fn setup(
             transform: Transform::from_xyz(1.0, 2.0, 0.0),
             point_light: PointLight {
                 color: Color::RED,
+                shadow_bias_min: 0.00001,
+                shadow_bias_max: 0.0001,
                 ..Default::default()
             },
             ..Default::default()
@@ -137,6 +139,8 @@ fn setup(
             transform: Transform::from_xyz(-1.0, 2.0, 0.0),
             point_light: PointLight {
                 color: Color::GREEN,
+                shadow_bias_min: 0.00001,
+                shadow_bias_max: 0.0001,
                 ..Default::default()
             },
             ..Default::default()
@@ -163,6 +167,8 @@ fn setup(
             transform: Transform::from_xyz(0.0, 4.0, 0.0),
             point_light: PointLight {
                 color: Color::BLUE,
+                shadow_bias_min: 0.00001,
+                shadow_bias_max: 0.0001,
                 ..Default::default()
             },
             ..Default::default()
@@ -200,6 +206,8 @@ fn setup(
         far: 10.0 * HALF_SIZE,
         ..Default::default()
     };
+    directional_light.shadow_bias_min = 0.00001;
+    directional_light.shadow_bias_max = 0.0001;
     commands
         .spawn_bundle(DirectionalLightBundle {
             directional_light,
