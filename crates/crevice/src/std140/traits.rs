@@ -124,8 +124,7 @@ pub trait AsStd140 {
     /// Returns the size of the `std140` version of this type, rounded up to the alignment.
     /// Useful for pre-sizing buffers.
     fn std140_padded_size_static() -> usize {
-        (Self::std140_size_static() + Self::Std140Type::ALIGNMENT - 1)
-            & !(Self::Std140Type::ALIGNMENT - 1)
+        size_of::<<<Self as AsStd140>::Std140Type as Std140>::Padded>()
     }
 
     /// Converts from `std140` version of self to self.
