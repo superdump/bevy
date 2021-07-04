@@ -17,7 +17,6 @@ use bevy_render2::{
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::slab::{FrameSlabMap, FrameSlabMapKey};
 use bytemuck::{Pod, Zeroable};
-use std::borrow::Cow;
 
 pub struct SpriteShaders {
     pipeline: RenderPipeline,
@@ -29,25 +28,8 @@ pub struct SpriteShaders {
 impl FromWorld for SpriteShaders {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
-        let vertex_shader = Shader::from_glsl(ShaderStage::VERTEX, include_str!("sprite.vert"))
-            .get_spirv_shader(None)
-            .unwrap();
-        let fragment_shader = Shader::from_glsl(ShaderStage::FRAGMENT, include_str!("sprite.frag"))
-            .get_spirv_shader(None)
-            .unwrap();
-        let vertex_spirv = vertex_shader.get_spirv(None).unwrap();
-        let fragment_spirv = fragment_shader.get_spirv(None).unwrap();
-
-        let vertex = render_device.create_shader_module(&ShaderModuleDescriptor {
-            flags: ShaderFlags::default(),
-            label: None,
-            source: ShaderSource::SpirV(Cow::Borrowed(&vertex_spirv)),
-        });
-        let fragment = render_device.create_shader_module(&ShaderModuleDescriptor {
-            flags: ShaderFlags::default(),
-            label: None,
-            source: ShaderSource::SpirV(Cow::Borrowed(&fragment_spirv)),
-        });
+        let shader = Shader::from_wgsl(include_str!("sprite.wgsl"));
+        let shader_module = render_device.create_shader_module(&shader);
 
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[BindGroupLayoutEntry {
@@ -114,12 +96,12 @@ impl FromWorld for SpriteShaders {
                         },
                     ],
                 }],
-                module: &vertex,
-                entry_point: "main",
+                module: &shader_module,
+                entry_point: "vertex",
             },
             fragment: Some(FragmentState {
-                module: &fragment,
-                entry_point: "main",
+                module: &shader_module,
+                entry_point: "fragment",
                 targets: &[ColorTargetState {
                     format: TextureFormat::bevy_default(),
                     blend: Some(BlendState {
@@ -230,7 +212,7 @@ pub fn prepare_sprites(
     extracted_sprites: Res<ExtractedSprites>,
 ) {
     // dont create buffers when there are no sprites
-    if extracted_sprites.sprites.len() == 0 {
+    if extracted_sprites.sprites.is_empty() {
         return;
     }
 
@@ -295,6 +277,7 @@ pub fn prepare_sprites(
     sprite_meta.indices.write_to_staging_buffer(&render_device);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn queue_sprites(
     draw_functions: Res<DrawFunctions>,
     render_device: Res<RenderDevice>,
@@ -305,6 +288,10 @@ pub fn queue_sprites(
     gpu_images: Res<RenderAssets<Image>>,
     mut views: Query<&mut RenderPhase<Transparent2dPhase>>,
 ) {
+    if view_meta.uniforms.is_empty() {
+        return;
+    }
+
     // TODO: define this without needing to check every frame
     sprite_meta.view_bind_group.get_or_insert_with(|| {
         render_device.create_bind_group(&BindGroupDescriptor {

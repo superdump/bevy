@@ -19,9 +19,9 @@ use bevy_render2::{
 
 pub mod draw_3d_graph {
     pub mod node {
-        pub const SHADOW_PASS: &'static str = "shadow_pass";
-        pub const DEPTH_NORMAL_PASS: &'static str = "depth_normal_pass";
-        pub const SSAO_PASS: &'static str = "ssao_pass";
+        pub const SHADOW_PASS: &str = "shadow_pass";
+        pub const DEPTH_NORMAL_PASS: &str = "depth_normal_pass";
+        pub const SSAO_PASS: &str = "ssao_pass";
     }
 }
 

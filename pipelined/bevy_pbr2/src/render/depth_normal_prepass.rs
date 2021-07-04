@@ -14,7 +14,7 @@ use bevy_render2::{
     view::{ExtractedView, ViewMeta, ViewUniform, ViewUniformOffset},
 };
 use crevice::std140::AsStd140;
-use std::{borrow::Cow, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
@@ -31,30 +31,8 @@ impl FromWorld for DepthNormalShaders {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
         let pbr_shaders = world.get_resource::<PbrShaders>().unwrap();
 
-        let vertex_shader = Shader::from_glsl(
-            ShaderStage::VERTEX,
-            include_str!("depth_normal_prepass.vert"),
-        )
-        .get_spirv_shader(None)
-        .unwrap();
-        let fragment_shader = Shader::from_glsl(
-            ShaderStage::FRAGMENT,
-            include_str!("depth_normal_prepass.frag"),
-        )
-        .get_spirv_shader(None)
-        .unwrap();
-        let vertex_spirv = vertex_shader.get_spirv(None).unwrap();
-        let fragment_spirv = fragment_shader.get_spirv(None).unwrap();
-        let vertex_shader_module = render_device.create_shader_module(&ShaderModuleDescriptor {
-            flags: ShaderFlags::default(),
-            label: None,
-            source: ShaderSource::SpirV(Cow::Borrowed(&vertex_spirv)),
-        });
-        let fragment_shader_module = render_device.create_shader_module(&ShaderModuleDescriptor {
-            flags: ShaderFlags::default(),
-            label: None,
-            source: ShaderSource::SpirV(Cow::Borrowed(&fragment_spirv)),
-        });
+        let shader = Shader::from_wgsl(include_str!("depth_normal_prepass.wgsl"));
+        let shader_module = render_device.create_shader_module(&shader);
 
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[
@@ -65,8 +43,9 @@ impl FromWorld for DepthNormalShaders {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
-                        // TODO: verify this is correct
-                        min_binding_size: BufferSize::new(ViewUniform::std140_size_static() as u64),
+                        min_binding_size: BufferSize::new(
+                            ViewUniform::std140_padded_size_static() as u64
+                        ),
                     },
                     count: None,
                 },
@@ -107,12 +86,12 @@ impl FromWorld for DepthNormalShaders {
                         },
                     ],
                 }],
-                module: &vertex_shader_module,
-                entry_point: "main",
+                module: &shader_module,
+                entry_point: "vertex",
             },
             fragment: Some(FragmentState {
-                module: &fragment_shader_module,
-                entry_point: "main",
+                module: &shader_module,
+                entry_point: "fragment",
                 targets: &[ColorTargetState {
                     format: TextureFormat::bevy_default(),
                     blend: Some(BlendState {
@@ -169,7 +148,7 @@ impl FromWorld for DepthNormalShaders {
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
-                compare: Some(CompareFunction::LessEqual),
+                compare: None,
                 ..Default::default()
             }),
             normal_sampler: render_device.create_sampler(&SamplerDescriptor::default()),
@@ -452,12 +431,13 @@ impl Draw for DrawDepthNormalMesh {
             &[view_uniform_offset.offset],
         );
 
+        let transform_bindgroup_key = mesh_meta.mesh_transform_bind_group_key.unwrap();
         pass.set_bind_group(
             1,
             mesh_meta
                 .into_inner()
                 .mesh_transform_bind_group
-                .as_ref()
+                .get_value(transform_bindgroup_key)
                 .unwrap(),
             &[extracted_mesh.transform_binding_offset],
         );

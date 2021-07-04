@@ -15,7 +15,7 @@ use bevy_render2::{
     view::{ExtractedView, ViewMeta, ViewUniform, ViewUniformOffset},
 };
 use crevice::std140::AsStd140;
-use std::{borrow::Cow, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 #[derive(Debug, Clone)]
 pub struct SsaoConfig {
@@ -97,24 +97,10 @@ impl FromWorld for SsaoShaders {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
 
-        let vertex_shader = Shader::from_glsl(ShaderStage::VERTEX, include_str!("fullscreen.vert"))
-            .get_spirv_shader(None)
-            .unwrap();
-        let fragment_shader = Shader::from_glsl(ShaderStage::FRAGMENT, include_str!("ssao.frag"))
-            .get_spirv_shader(None)
-            .unwrap();
-        let vertex_spirv = vertex_shader.get_spirv(None).unwrap();
-        let fragment_spirv = fragment_shader.get_spirv(None).unwrap();
-        let vertex_shader_module = render_device.create_shader_module(&ShaderModuleDescriptor {
-            flags: ShaderFlags::default(),
-            label: None,
-            source: ShaderSource::SpirV(Cow::Borrowed(&vertex_spirv)),
-        });
-        let fragment_shader_module = render_device.create_shader_module(&ShaderModuleDescriptor {
-            flags: ShaderFlags::default(),
-            label: None,
-            source: ShaderSource::SpirV(Cow::Borrowed(&fragment_spirv)),
-        });
+        let fullscreen_shader = Shader::from_wgsl(include_str!("fullscreen.wgsl"));
+        let fullscreen_shader_module = render_device.create_shader_module(&fullscreen_shader);
+        let ssao_shader = Shader::from_wgsl(include_str!("ssao.wgsl"));
+        let ssao_shader_module = render_device.create_shader_module(&ssao_shader);
 
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[
@@ -126,7 +112,9 @@ impl FromWorld for SsaoShaders {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
                         // TODO: verify this is correct
-                        min_binding_size: BufferSize::new(ViewUniform::std140_size_static() as u64),
+                        min_binding_size: BufferSize::new(
+                            ViewUniform::std140_padded_size_static() as u64
+                        ),
                     },
                     count: None,
                 },
@@ -136,7 +124,7 @@ impl FromWorld for SsaoShaders {
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Texture {
                         multisampled: false,
-                        sample_type: TextureSampleType::Float { filterable: true },
+                        sample_type: TextureSampleType::Depth,
                         view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
@@ -146,7 +134,7 @@ impl FromWorld for SsaoShaders {
                     binding: 2,
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Sampler {
-                        comparison: true,
+                        comparison: false,
                         filtering: true,
                     },
                     count: None,
@@ -187,7 +175,7 @@ impl FromWorld for SsaoShaders {
                         has_dynamic_offset: false,
                         // TODO: verify this is correct
                         min_binding_size: BufferSize::new(
-                            SsaoConfigUniform::std140_size_static() as u64
+                            SsaoConfigUniform::std140_padded_size_static() as u64,
                         ),
                     },
                     count: None,
@@ -227,12 +215,12 @@ impl FromWorld for SsaoShaders {
             label: None,
             vertex: VertexState {
                 buffers: &[],
-                module: &vertex_shader_module,
-                entry_point: "main",
+                module: &fullscreen_shader_module,
+                entry_point: "vertex",
             },
             fragment: Some(FragmentState {
-                module: &fragment_shader_module,
-                entry_point: "main",
+                module: &ssao_shader_module,
+                entry_point: "fragment",
                 targets: &[ColorTargetState {
                     format: TextureFormat::R8Unorm,
                     blend: Some(BlendState {
@@ -404,7 +392,10 @@ pub fn queue_meshes(
     extracted_meshes: Res<ExtractedMeshes>,
     mut views: Query<(Entity, &ViewDepthNormal, &mut RenderPhase<SsaoPhase>)>,
 ) {
-    if extracted_meshes.meshes.is_empty() || extracted_ssao_config.blue_noise_image.is_none() {
+    if extracted_meshes.meshes.is_empty()
+        || extracted_ssao_config.blue_noise_image.is_none()
+        || view_meta.uniforms.len() < 1
+    {
         return;
     }
 
