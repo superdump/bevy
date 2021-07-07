@@ -36,11 +36,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.insert_resource(AmbientLight {
-        color: Color::ORANGE_RED,
-        brightness: 0.02,
-    });
-    // plane
+    // ground plane
     commands.spawn_bundle(PbrBundle {
         mesh: meshes.add(Mesh::from(shape::Plane { size: 10.0 })),
         material: materials.add(StandardMaterial {
@@ -51,6 +47,7 @@ fn setup(
         ..Default::default()
     });
 
+    // left wall
     let mut transform = Transform::from_xyz(2.5, 2.5, 0.0);
     transform.rotate(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
     commands.spawn_bundle(PbrBundle {
@@ -63,7 +60,7 @@ fn setup(
         }),
         ..Default::default()
     });
-
+    // back (right) wall
     let mut transform = Transform::from_xyz(0.0, 2.5, -2.5);
     transform.rotate(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
     commands.spawn_bundle(PbrBundle {
@@ -76,6 +73,7 @@ fn setup(
         }),
         ..Default::default()
     });
+
     // cube
     commands
         .spawn_bundle(PbrBundle {
@@ -104,15 +102,19 @@ fn setup(
         })
         .insert(Movable);
 
-    // light
+    // ambient light
+    commands.insert_resource(AmbientLight {
+        color: Color::ORANGE_RED,
+        brightness: 0.02,
+    });
+
+    // red point light
     commands
         .spawn_bundle(PointLightBundle {
             // transform: Transform::from_xyz(5.0, 8.0, 2.0),
             transform: Transform::from_xyz(1.0, 2.0, 0.0),
             point_light: PointLight {
                 color: Color::RED,
-                shadow_bias_min: 0.00001,
-                shadow_bias_max: 0.0001,
                 ..Default::default()
             },
             ..Default::default()
@@ -132,15 +134,13 @@ fn setup(
             });
         });
 
-    // light
+    // green point light
     commands
         .spawn_bundle(PointLightBundle {
             // transform: Transform::from_xyz(5.0, 8.0, 2.0),
             transform: Transform::from_xyz(-1.0, 2.0, 0.0),
             point_light: PointLight {
                 color: Color::GREEN,
-                shadow_bias_min: 0.00001,
-                shadow_bias_max: 0.0001,
                 ..Default::default()
             },
             ..Default::default()
@@ -160,15 +160,13 @@ fn setup(
             });
         });
 
-    // light
+    // blue point light
     commands
         .spawn_bundle(PointLightBundle {
             // transform: Transform::from_xyz(5.0, 8.0, 2.0),
             transform: Transform::from_xyz(0.0, 4.0, 0.0),
             point_light: PointLight {
                 color: Color::BLUE,
-                shadow_bias_min: 0.00001,
-                shadow_bias_max: 0.0001,
                 ..Default::default()
             },
             ..Default::default()
@@ -188,6 +186,7 @@ fn setup(
             });
         });
 
+    // moving white directional light
     const HALF_SIZE: f32 = 10.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
@@ -207,12 +206,10 @@ fn setup(
     });
 
     // camera
-    commands
-        .spawn_bundle(PerspectiveCameraBundle {
-            transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ..Default::default()
-        })
-        .id();
+    commands.spawn_bundle(PerspectiveCameraBundle {
+        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..Default::default()
+    });
 }
 
 fn animate_light_direction(time: Res<Time>, mut query: Query<&mut DirectionalLight>) {

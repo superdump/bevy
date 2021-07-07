@@ -95,16 +95,18 @@ struct PointLight {
     radius: f32;
     near: f32;
     far: f32;
-    shadow_bias_min: f32;
-    shadow_bias_max: f32;
+    shadow_depth_bias_min: f32;
+    shadow_depth_bias_max: f32;
+    shadow_normal_bias: f32;
 };
 
 struct DirectionalLight {
     view_projection: mat4x4<f32>;
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
-    shadow_bias_min: f32;
-    shadow_bias_max: f32;
+    shadow_depth_bias_min: f32;
+    shadow_depth_bias_max: f32;
+    shadow_normal_bias: f32;
 };
 
 [[block]]
@@ -419,7 +421,9 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, shadow_bias: f32)
     return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth + shadow_bias);
 }
 
-fn fetch_directional_shadow(light_id: i32, homogeneous_coords: vec4<f32>, shadow_bias: f32) -> f32 {
+fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, shadow_bias: f32) -> f32 {
+    let light = lights.directional_lights[light_id];
+    let homogeneous_coords = light.view_projection * frag_position;
     if (homogeneous_coords.w <= 0.0) {
         return 1.0;
     }
@@ -528,20 +532,22 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             let light_contrib = point_light(in.world_position.xyz, light, roughness, NdotV, N, V, R, F0, diffuse_color);
             let dir_to_light = normalize(light.position.xyz - in.world_position.xyz);
             let shadow_bias = max(
-                light.shadow_bias_max * (1.0 - dot(in.world_normal, dir_to_light)),
-                light.shadow_bias_min
+                light.shadow_depth_bias_max * (1.0 - dot(in.world_normal, dir_to_light)),
+                light.shadow_depth_bias_min
             );
-            let shadow = fetch_point_shadow(i, in.world_position, shadow_bias);
+            let frag_position = vec4<f32>(in.world_position.xyz + in.world_normal.xyz * light.shadow_normal_bias, in.world_position.w);
+            let shadow = fetch_point_shadow(i, frag_position, shadow_bias);
             light_accum = light_accum + light_contrib * shadow;
         }
         for (var i: i32 = 0; i < n_directional_lights; i = i + 1) {
             let light = lights.directional_lights[i];
             let light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
             let shadow_bias = max(
-                light.shadow_bias_max * (1.0 - dot(in.world_normal, light.direction_to_light.xyz)),
-                light.shadow_bias_min
+                light.shadow_depth_bias_max * (1.0 - dot(in.world_normal, light.direction_to_light.xyz)),
+                light.shadow_depth_bias_min
             );
-            let shadow = fetch_directional_shadow(i, light.view_projection * in.world_position, shadow_bias);
+            let frag_position = vec4<f32>(in.world_position.xyz + in.world_normal.xyz * light.shadow_normal_bias, in.world_position.w);
+            let shadow = fetch_directional_shadow(i, frag_position, shadow_bias);
             light_accum = light_accum + light_contrib * shadow;
         }
 
