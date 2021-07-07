@@ -189,25 +189,23 @@ fn setup(
         });
 
     const HALF_SIZE: f32 = 10.0;
-    let mut directional_light = DirectionalLight::default();
-    directional_light.color = Color::WHITE;
-    directional_light.shadow_projection = OrthographicProjection {
-        left: -HALF_SIZE,
-        right: HALF_SIZE,
-        bottom: -HALF_SIZE,
-        top: HALF_SIZE,
-        near: -10.0 * HALF_SIZE,
-        far: 10.0 * HALF_SIZE,
-        ..Default::default()
-    };
-    directional_light.shadow_bias_min = 0.00001;
-    directional_light.shadow_bias_max = 0.0001;
-    commands
-        .spawn_bundle(DirectionalLightBundle {
-            directional_light,
+    commands.spawn_bundle(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            color: Color::WHITE,
+            shadow_projection: OrthographicProjection {
+                left: -HALF_SIZE,
+                right: HALF_SIZE,
+                bottom: -HALF_SIZE,
+                top: HALF_SIZE,
+                near: -10.0 * HALF_SIZE,
+                far: 10.0 * HALF_SIZE,
+                ..Default::default()
+            },
             ..Default::default()
-        })
-        .id();
+        },
+        ..Default::default()
+    });
+
     // camera
     commands
         .spawn_bundle(PerspectiveCameraBundle {

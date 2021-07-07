@@ -58,32 +58,14 @@ impl Default for PointLight {
 pub struct DirectionalLight {
     pub color: Color,
     pub illuminance: f32,
-    direction: Vec3,
+    /// NOTE: If setting this at construction-time, it MUST be normalized!
+    pub direction: Vec3,
     pub shadow_projection: OrthographicProjection,
     pub shadow_bias_min: f32,
     pub shadow_bias_max: f32,
 }
 
 impl DirectionalLight {
-    /// Create a new directional light component.
-    pub fn new(
-        color: Color,
-        illuminance: f32,
-        direction: Vec3,
-        shadow_projection: OrthographicProjection,
-        shadow_bias_min: f32,
-        shadow_bias_max: f32,
-    ) -> Self {
-        DirectionalLight {
-            color,
-            illuminance,
-            direction: direction.normalize(),
-            shadow_projection,
-            shadow_bias_min,
-            shadow_bias_max,
-        }
-    }
-
     /// Set direction of light.
     pub fn set_direction(&mut self, direction: Vec3) {
         self.direction = direction.normalize();
