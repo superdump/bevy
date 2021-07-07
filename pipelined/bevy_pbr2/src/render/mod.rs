@@ -66,9 +66,9 @@ impl FromWorld for PbrShaders {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
-                        // TODO: change this to ViewUniform::std140_size_static once crevice fixes this!
+                        // TODO: change this to GpuLights::std140_size_static once crevice fixes this!
                         // Context: https://github.com/LPGhatguy/crevice/issues/29
-                        min_binding_size: BufferSize::new(1264),
+                        min_binding_size: BufferSize::new(1024),
                     },
                     count: None,
                 },
