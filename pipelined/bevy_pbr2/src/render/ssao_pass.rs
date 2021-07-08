@@ -388,6 +388,9 @@ pub fn queue_meshes(
 ) {
     if extracted_meshes.meshes.is_empty()
         || extracted_ssao_config.blue_noise_image.is_none()
+        || gpu_images
+            .get(extracted_ssao_config.blue_noise_image.as_ref().unwrap())
+            .is_none()
         || view_meta.uniforms.len() < 1
     {
         return;
