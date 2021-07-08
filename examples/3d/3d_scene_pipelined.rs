@@ -189,38 +189,41 @@ fn setup(
         });
 
     const HALF_SIZE: f32 = 10.0;
-    let mut directional_light = DirectionalLight::default();
-    directional_light.color = Color::WHITE;
-    directional_light.shadow_projection = OrthographicProjection {
-        left: -HALF_SIZE,
-        right: HALF_SIZE,
-        bottom: -HALF_SIZE,
-        top: HALF_SIZE,
-        near: -10.0 * HALF_SIZE,
-        far: 10.0 * HALF_SIZE,
+    commands.spawn_bundle(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            // Configure the projection to better fit the scene
+            shadow_projection: OrthographicProjection {
+                left: -HALF_SIZE,
+                right: HALF_SIZE,
+                bottom: -HALF_SIZE,
+                top: HALF_SIZE,
+                near: -10.0 * HALF_SIZE,
+                far: 10.0 * HALF_SIZE,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        transform: Transform {
+            translation: Vec3::new(0.0, 2.0, 0.0),
+            rotation: Quat::from_rotation_x(-1.2),
+            ..Default::default()
+        },
         ..Default::default()
-    };
-    directional_light.shadow_bias_min = 0.00001;
-    directional_light.shadow_bias_max = 0.0001;
-    commands
-        .spawn_bundle(DirectionalLightBundle {
-            directional_light,
-            ..Default::default()
-        })
-        .id();
+    });
+
     // camera
-    commands
-        .spawn_bundle(PerspectiveCameraBundle {
-            transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ..Default::default()
-        })
-        .id();
+    commands.spawn_bundle(PerspectiveCameraBundle {
+        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..Default::default()
+    });
 }
 
-fn animate_light_direction(time: Res<Time>, mut query: Query<&mut DirectionalLight>) {
-    for mut light in query.iter_mut() {
-        let (s, c) = (time.seconds_since_startup() as f32 * std::f32::consts::TAU / 10.0).sin_cos();
-        light.set_direction(Vec3::new(2.0 * s, -1.0, c));
+fn animate_light_direction(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<DirectionalLight>>,
+) {
+    for mut transform in query.iter_mut() {
+        transform.rotate(Quat::from_rotation_y(time.delta_seconds() * 0.5));
     }
 }
 
