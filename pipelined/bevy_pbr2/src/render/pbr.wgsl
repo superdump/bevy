@@ -529,7 +529,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             let dir_to_light = normalize(light.position.xyz - in.world_position.xyz);
             let depth_bias = light.shadow_depth_bias * dir_to_light.xyz;
             let NdotL = dot(dir_to_light.xyz, in.world_normal.xyz);
-            let normal_bias = light.shadow_normal_bias * NdotL * (1.0 - NdotL) * in.world_normal.xyz;
+            let normal_bias = light.shadow_normal_bias * (1.0 - NdotL) * in.world_normal.xyz;
             let biased_position = vec4<f32>(in.world_position.xyz + depth_bias + normal_bias, in.world_position.w);
 
             let shadow = fetch_point_shadow(i, biased_position);
