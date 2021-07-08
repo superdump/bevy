@@ -7,8 +7,7 @@ pub struct PointLight {
     pub intensity: f32,
     pub range: f32,
     pub radius: f32,
-    pub shadow_depth_bias_min: f32,
-    pub shadow_depth_bias_max: f32,
+    pub shadow_depth_bias: f32,
     pub shadow_normal_bias: f32,
 }
 
@@ -19,16 +18,14 @@ impl Default for PointLight {
             intensity: 200.0,
             range: 20.0,
             radius: 0.0,
-            shadow_depth_bias_min: Self::DEFAULT_SHADOW_DEPTH_BIAS_MIN,
-            shadow_depth_bias_max: Self::DEFAULT_SHADOW_DEPTH_BIAS_MIN,
+            shadow_depth_bias: Self::DEFAULT_SHADOW_DEPTH_BIAS,
             shadow_normal_bias: Self::DEFAULT_SHADOW_NORMAL_BIAS,
         }
     }
 }
 
 impl PointLight {
-    pub const DEFAULT_SHADOW_DEPTH_BIAS_MIN: f32 = 0.00005;
-    pub const DEFAULT_SHADOW_DEPTH_BIAS_MAX: f32 = 0.002;
+    pub const DEFAULT_SHADOW_DEPTH_BIAS: f32 = 0.1;
     pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.1;
 }
 
@@ -63,8 +60,7 @@ pub struct DirectionalLight {
     pub color: Color,
     pub illuminance: f32,
     pub shadow_projection: OrthographicProjection,
-    pub shadow_depth_bias_min: f32,
-    pub shadow_depth_bias_max: f32,
+    pub shadow_depth_bias: f32,
     pub shadow_normal_bias: f32,
 }
 
@@ -83,16 +79,14 @@ impl Default for DirectionalLight {
                 far: size,
                 ..Default::default()
             },
-            shadow_depth_bias_min: Self::DEFAULT_SHADOW_DEPTH_BIAS_MIN,
-            shadow_depth_bias_max: Self::DEFAULT_SHADOW_DEPTH_BIAS_MIN,
+            shadow_depth_bias: Self::DEFAULT_SHADOW_DEPTH_BIAS,
             shadow_normal_bias: Self::DEFAULT_SHADOW_NORMAL_BIAS,
         }
     }
 }
 
 impl DirectionalLight {
-    pub const DEFAULT_SHADOW_DEPTH_BIAS_MIN: f32 = 0.00005;
-    pub const DEFAULT_SHADOW_DEPTH_BIAS_MAX: f32 = 0.002;
+    pub const DEFAULT_SHADOW_DEPTH_BIAS: f32 = 0.1;
     pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.1;
 }
 

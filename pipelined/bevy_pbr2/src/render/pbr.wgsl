@@ -95,8 +95,7 @@ struct PointLight {
     radius: f32;
     near: f32;
     far: f32;
-    shadow_depth_bias_min: f32;
-    shadow_depth_bias_max: f32;
+    shadow_depth_bias: f32;
     shadow_normal_bias: f32;
 };
 
@@ -104,8 +103,7 @@ struct DirectionalLight {
     view_projection: mat4x4<f32>;
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
-    shadow_depth_bias_min: f32;
-    shadow_depth_bias_max: f32;
+    shadow_depth_bias: f32;
     shadow_normal_bias: f32;
 };
 
@@ -381,7 +379,7 @@ fn directional_light(light: DirectionalLight, roughness: f32, NdotV: f32, normal
     return (specular_light + diffuse) * light.color.rgb * NoL;
 }
 
-fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, shadow_bias: f32) -> f32 {
+fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>) -> f32 {
     let light = lights.point_lights[light_id];
 
     // because the shadow maps align with the axes and the frustum planes are at 45 degrees
@@ -417,11 +415,10 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, shadow_bias: f32)
     //       a quad (2x2 fragments) being processed not being sampled, and this messing with
     //       mip-mapping functionality. The shadow maps have no mipmaps so Level just samples
     //       from LOD 0.
-    // NOTE: with reverse projections, the shadow bias must be added to the fragment depth, not subtracted
-    return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth + shadow_bias);
+    return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
 }
 
-fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, shadow_bias: f32) -> f32 {
+fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>) -> f32 {
     let light = lights.directional_lights[light_id];
     let homogeneous_coords = light.view_projection * frag_position;
     if (homogeneous_coords.w <= 0.0) {
@@ -435,8 +432,7 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, shadow_bias
     // do the lookup, using HW PCF and comparison
     // NOTE: Due to non-uniform control flow above, we must use the level variant of the texture
     //       sampler to avoid use of implicit derivatives causing possible undefined behavior.
-    // NOTE: with reverse projections, the shadow bias must be added to the fragment depth, not subtracted
-    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), homogeneous_coords.z * proj_correction + shadow_bias);
+    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), homogeneous_coords.z * proj_correction);
 }
 
 struct FragmentInput {
@@ -529,25 +525,27 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         let n_directional_lights = i32(lights.n_directional_lights);
         for (var i: i32 = 0; i < n_point_lights; i = i + 1) {
             let light = lights.point_lights[i];
-            let light_contrib = point_light(in.world_position.xyz, light, roughness, NdotV, N, V, R, F0, diffuse_color);
+
             let dir_to_light = normalize(light.position.xyz - in.world_position.xyz);
-            let shadow_bias = max(
-                light.shadow_depth_bias_max * (1.0 - dot(in.world_normal, dir_to_light)),
-                light.shadow_depth_bias_min
-            );
-            let frag_position = vec4<f32>(in.world_position.xyz + in.world_normal.xyz * light.shadow_normal_bias, in.world_position.w);
-            let shadow = fetch_point_shadow(i, frag_position, shadow_bias);
+            let depth_bias = light.shadow_depth_bias * dir_to_light.xyz;
+            let NdotL = dot(dir_to_light.xyz, in.world_normal.xyz);
+            let normal_bias = light.shadow_normal_bias * NdotL * (1.0 - NdotL) * in.world_normal.xyz;
+            let biased_position = vec4<f32>(in.world_position.xyz + depth_bias + normal_bias, in.world_position.w);
+
+            let shadow = fetch_point_shadow(i, biased_position);
+            let light_contrib = point_light(in.world_position.xyz, light, roughness, NdotV, N, V, R, F0, diffuse_color);
             light_accum = light_accum + light_contrib * shadow;
         }
         for (var i: i32 = 0; i < n_directional_lights; i = i + 1) {
             let light = lights.directional_lights[i];
+
+            let depth_bias = light.shadow_depth_bias * light.direction_to_light.xyz;
+            let NdotL = dot(light.direction_to_light.xyz, in.world_normal.xyz);
+            let normal_bias = light.shadow_normal_bias * (1.0 - NdotL) * in.world_normal.xyz;
+            let biased_position = vec4<f32>(in.world_position.xyz + depth_bias + normal_bias, in.world_position.w);
+
+            let shadow = fetch_directional_shadow(i, biased_position);
             let light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
-            let shadow_bias = max(
-                light.shadow_depth_bias_max * (1.0 - dot(in.world_normal, light.direction_to_light.xyz)),
-                light.shadow_depth_bias_min
-            );
-            let frag_position = vec4<f32>(in.world_position.xyz + in.world_normal.xyz * light.shadow_normal_bias, in.world_position.w);
-            let shadow = fetch_directional_shadow(i, frag_position, shadow_bias);
             light_accum = light_accum + light_contrib * shadow;
         }
 
