@@ -186,11 +186,10 @@ fn setup(
             });
         });
 
-    // moving white directional light
     const HALF_SIZE: f32 = 10.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            color: Color::WHITE,
+            // Configure the projection to better fit the scene
             shadow_projection: OrthographicProjection {
                 left: -HALF_SIZE,
                 right: HALF_SIZE,
@@ -200,6 +199,11 @@ fn setup(
                 far: 10.0 * HALF_SIZE,
                 ..Default::default()
             },
+            ..Default::default()
+        },
+        transform: Transform {
+            translation: Vec3::new(0.0, 2.0, 0.0),
+            rotation: Quat::from_rotation_x(-1.2),
             ..Default::default()
         },
         ..Default::default()
@@ -212,10 +216,12 @@ fn setup(
     });
 }
 
-fn animate_light_direction(time: Res<Time>, mut query: Query<&mut DirectionalLight>) {
-    for mut light in query.iter_mut() {
-        let (s, c) = (time.seconds_since_startup() as f32 * std::f32::consts::TAU / 10.0).sin_cos();
-        light.set_direction(Vec3::new(2.0 * s, -1.0, c));
+fn animate_light_direction(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<DirectionalLight>>,
+) {
+    for mut transform in query.iter_mut() {
+        transform.rotate(Quat::from_rotation_y(time.delta_seconds() * 0.5));
     }
 }
 

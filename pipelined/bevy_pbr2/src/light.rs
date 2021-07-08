@@ -1,4 +1,3 @@
-use bevy_math::Vec3;
 use bevy_render2::{camera::OrthographicProjection, color::Color};
 
 /// A light that emits light in all directions from a central point.
@@ -20,11 +19,17 @@ impl Default for PointLight {
             intensity: 200.0,
             range: 20.0,
             radius: 0.0,
-            shadow_depth_bias_min: 0.0005,
-            shadow_depth_bias_max: 0.005,
-            shadow_normal_bias: 0.01,
+            shadow_depth_bias_min: Self::DEFAULT_SHADOW_DEPTH_BIAS_MIN,
+            shadow_depth_bias_max: Self::DEFAULT_SHADOW_DEPTH_BIAS_MIN,
+            shadow_normal_bias: Self::DEFAULT_SHADOW_NORMAL_BIAS,
         }
     }
+}
+
+impl PointLight {
+    pub const DEFAULT_SHADOW_DEPTH_BIAS_MIN: f32 = 0.00005;
+    pub const DEFAULT_SHADOW_DEPTH_BIAS_MAX: f32 = 0.002;
+    pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.1;
 }
 
 /// A Directional light.
@@ -57,23 +62,10 @@ impl Default for PointLight {
 pub struct DirectionalLight {
     pub color: Color,
     pub illuminance: f32,
-    /// NOTE: If setting this at construction-time, it MUST be normalized!
-    pub direction: Vec3,
     pub shadow_projection: OrthographicProjection,
     pub shadow_depth_bias_min: f32,
     pub shadow_depth_bias_max: f32,
     pub shadow_normal_bias: f32,
-}
-
-impl DirectionalLight {
-    /// Set direction of light.
-    pub fn set_direction(&mut self, direction: Vec3) {
-        self.direction = direction.normalize();
-    }
-
-    pub fn get_direction(&self) -> Vec3 {
-        self.direction
-    }
 }
 
 impl Default for DirectionalLight {
@@ -82,7 +74,6 @@ impl Default for DirectionalLight {
         DirectionalLight {
             color: Color::rgb(1.0, 1.0, 1.0),
             illuminance: 100000.0,
-            direction: Vec3::new(0.0, -1.0, 0.0),
             shadow_projection: OrthographicProjection {
                 left: -size,
                 right: size,
@@ -92,11 +83,17 @@ impl Default for DirectionalLight {
                 far: size,
                 ..Default::default()
             },
-            shadow_depth_bias_min: 0.00001,
-            shadow_depth_bias_max: 0.0001,
-            shadow_normal_bias: 0.1,
+            shadow_depth_bias_min: Self::DEFAULT_SHADOW_DEPTH_BIAS_MIN,
+            shadow_depth_bias_max: Self::DEFAULT_SHADOW_DEPTH_BIAS_MIN,
+            shadow_normal_bias: Self::DEFAULT_SHADOW_NORMAL_BIAS,
         }
     }
+}
+
+impl DirectionalLight {
+    pub const DEFAULT_SHADOW_DEPTH_BIAS_MIN: f32 = 0.00005;
+    pub const DEFAULT_SHADOW_DEPTH_BIAS_MAX: f32 = 0.002;
+    pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.1;
 }
 
 // Ambient light color.

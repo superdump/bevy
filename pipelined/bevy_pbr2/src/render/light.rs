@@ -226,7 +226,7 @@ pub fn extract_lights(
     mut commands: Commands,
     ambient_light: Res<AmbientLight>,
     point_lights: Query<(Entity, &PointLight, &GlobalTransform)>,
-    directional_lights: Query<(Entity, &DirectionalLight)>,
+    directional_lights: Query<(Entity, &DirectionalLight, &GlobalTransform)>,
 ) {
     commands.insert_resource(ExtractedAmbientLight {
         color: ambient_light.color,
@@ -244,13 +244,13 @@ pub fn extract_lights(
             shadow_normal_bias: point_light.shadow_normal_bias,
         });
     }
-    for (entity, directional_light) in directional_lights.iter() {
+    for (entity, directional_light, transform) in directional_lights.iter() {
         commands
             .get_or_spawn(entity)
             .insert(ExtractedDirectionalLight {
                 color: directional_light.color,
                 illuminance: directional_light.illuminance,
-                direction: directional_light.get_direction(),
+                direction: transform.forward(),
                 projection: directional_light.shadow_projection.get_projection_matrix(),
                 shadow_depth_bias_min: directional_light.shadow_depth_bias_min,
                 shadow_depth_bias_max: directional_light.shadow_depth_bias_max,
@@ -335,6 +335,7 @@ pub struct LightMeta {
     pub shadow_view_bind_group: Option<BindGroup>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn prepare_lights(
     mut commands: Commands,
     mut texture_cache: ResMut<TextureCache>,

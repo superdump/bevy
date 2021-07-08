@@ -147,9 +147,7 @@ fn setup(
     const HALF_SIZE: f32 = 10.0;
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            color: Color::WHITE,
             illuminance: 10000.0,
-            direction: Vec3::new(-2.0, -1.0, -1.0).normalize(),
             shadow_projection: OrthographicProjection {
                 left: -HALF_SIZE,
                 right: HALF_SIZE,
@@ -161,15 +159,14 @@ fn setup(
             },
             ..Default::default()
         },
+        transform: Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::PI / 2.0)),
         ..Default::default()
     });
 
     // camera
-    commands
-        .spawn_bundle(PerspectiveCameraBundle {
-            transform: Transform::from_xyz(0.0, box_offset, 4.0)
-                .looking_at(Vec3::new(0.0, box_offset, 0.0), Vec3::Y),
-            ..Default::default()
-        })
-        .id();
+    commands.spawn_bundle(PerspectiveCameraBundle {
+        transform: Transform::from_xyz(0.0, box_offset, 4.0)
+            .looking_at(Vec3::new(0.0, box_offset, 0.0), Vec3::Y),
+        ..Default::default()
+    });
 }
