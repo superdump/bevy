@@ -12,7 +12,7 @@ use bevy_render2::{
     render_resource::*,
     renderer::{RenderContext, RenderDevice},
     texture::*,
-    view::{ExtractedView, ViewUniform, ViewUniformOffset},
+    view::{ExtractedView, ViewUniformOffset},
 };
 use bevy_transform::components::GlobalTransform;
 use crevice::std140::AsStd140;
