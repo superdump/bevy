@@ -147,27 +147,26 @@ fn setup(
         });
     // directional light
     const HALF_SIZE: f32 = 10.0;
-    let mut directional_light = DirectionalLight::default();
-    directional_light.color = Color::WHITE;
-    directional_light.illuminance = 10000.0;
-    directional_light.shadow_projection = OrthographicProjection {
-        left: -HALF_SIZE,
-        right: HALF_SIZE,
-        bottom: -HALF_SIZE,
-        top: HALF_SIZE,
-        near: -10.0 * HALF_SIZE,
-        far: 10.0 * HALF_SIZE,
-        ..Default::default()
-    };
-    directional_light.shadow_bias_min = 0.00001;
-    directional_light.shadow_bias_max = 0.0001;
-    directional_light.set_direction(Vec3::new(-2.0, -1.0, -1.0));
     commands
         .spawn_bundle(DirectionalLightBundle {
-            directional_light,
+            directional_light: DirectionalLight {
+                illuminance: 10000.0,
+                shadow_bias_min: 0.00001,
+                shadow_bias_max: 0.0001,
+                shadow_projection: OrthographicProjection {
+                    left: -HALF_SIZE,
+                    right: HALF_SIZE,
+                    bottom: -HALF_SIZE,
+                    top: HALF_SIZE,
+                    near: -10.0 * HALF_SIZE,
+                    far: 10.0 * HALF_SIZE,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            transform: Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::PI / 2.0)),
             ..Default::default()
-        })
-        .id();
+        });
 
     // camera
     commands
@@ -175,6 +174,5 @@ fn setup(
             transform: Transform::from_xyz(0.0, box_offset, 4.0)
                 .looking_at(Vec3::new(0.0, box_offset, 0.0), Vec3::Y),
             ..Default::default()
-        })
-        .id();
+        });
 }
