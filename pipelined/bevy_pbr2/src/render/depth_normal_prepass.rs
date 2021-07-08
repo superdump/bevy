@@ -112,7 +112,7 @@ impl FromWorld for DepthNormalShaders {
             depth_stencil: Some(DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: CompareFunction::LessEqual,
+                depth_compare: CompareFunction::GreaterEqual,
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -362,7 +362,7 @@ impl Node for DepthNormalPassNode {
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                     view: &view_depth_normal.view_depth_texture_view,
                     depth_ops: Some(Operations {
-                        load: LoadOp::Clear(1.0),
+                        load: LoadOp::Clear(0.0),
                         store: true,
                     }),
                     stencil_ops: None,

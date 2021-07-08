@@ -47,7 +47,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] f32 {
 
     // Calculate the fragment position from the depth texture
     let frag_depth_ndc = textureSampleLevel(depth_texture, depth_sampler, in.uv, 0.0);
-    if (frag_depth_ndc == 1.0) {
+    if (frag_depth_ndc == 0.0) {
         return 1.0;
     }
     // in.uv.x is [0,1] from left to right. * 2 - 1 remaps to [-1, 1] left to right which is NDC
