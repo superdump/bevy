@@ -12,7 +12,7 @@ use bevy_render2::{
     renderer::{RenderContext, RenderDevice},
     shader::Shader,
     texture::*,
-    view::{ExtractedView, ViewMeta, ViewUniform, ViewUniformOffset},
+    view::{ExtractedView, ViewMeta, ViewUniformOffset},
 };
 use crevice::std140::AsStd140;
 use std::num::NonZeroU32;
@@ -111,10 +111,7 @@ impl FromWorld for SsaoShaders {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
-                        // TODO: verify this is correct
-                        min_binding_size: BufferSize::new(
-                            ViewUniform::std140_padded_size_static() as u64
-                        ),
+                        min_binding_size: BufferSize::new(336),
                     },
                     count: None,
                 },
@@ -173,10 +170,7 @@ impl FromWorld for SsaoShaders {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        // TODO: verify this is correct
-                        min_binding_size: BufferSize::new(
-                            SsaoConfigUniform::std140_padded_size_static() as u64,
-                        ),
+                        min_binding_size: BufferSize::new(528),
                     },
                     count: None,
                 },
