@@ -24,6 +24,7 @@ fn main() {
         // .add_plugin(LogDiagnosticsPlugin::default())
         .add_startup_system(setup.system())
         .add_system(adjust_point_light_biases.system())
+        .add_system(adjust_directional_light_biases.system())
         .add_system(movement.system())
         .add_system(animate_light_direction.system())
         .run();
@@ -109,31 +110,31 @@ fn setup(
         brightness: 0.02,
     });
 
-    // // red point light
-    // commands
-    //     .spawn_bundle(PointLightBundle {
-    //         // transform: Transform::from_xyz(5.0, 8.0, 2.0),
-    //         transform: Transform::from_xyz(1.0, 2.0, 0.0),
-    //         point_light: PointLight {
-    //             color: Color::RED,
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     })
-    //     .with_children(|builder| {
-    //         builder.spawn_bundle(PbrBundle {
-    //             mesh: meshes.add(Mesh::from(shape::UVSphere {
-    //                 radius: 0.1,
-    //                 ..Default::default()
-    //             })),
-    //             material: materials.add(StandardMaterial {
-    //                 base_color: Color::RED,
-    //                 emissive: Color::rgba_linear(100.0, 0.0, 0.0, 0.0),
-    //                 ..Default::default()
-    //             }),
-    //             ..Default::default()
-    //         });
-    //     });
+    // red point light
+    commands
+        .spawn_bundle(PointLightBundle {
+            // transform: Transform::from_xyz(5.0, 8.0, 2.0),
+            transform: Transform::from_xyz(1.0, 2.0, 0.0),
+            point_light: PointLight {
+                color: Color::RED,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .with_children(|builder| {
+            builder.spawn_bundle(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere {
+                    radius: 0.1,
+                    ..Default::default()
+                })),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::RED,
+                    emissive: Color::rgba_linear(100.0, 0.0, 0.0, 0.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        });
 
     // green point light
     commands
@@ -142,9 +143,6 @@ fn setup(
             transform: Transform::from_xyz(-1.0, 2.0, 0.0),
             point_light: PointLight {
                 color: Color::GREEN,
-                shadow_depth_bias_min: 0.0,
-                shadow_depth_bias_max: 0.0,
-                shadow_normal_bias: 0.0,
                 ..Default::default()
             },
             ..Default::default()
@@ -164,54 +162,54 @@ fn setup(
             });
         });
 
-    // // blue point light
-    // commands
-    //     .spawn_bundle(PointLightBundle {
-    //         // transform: Transform::from_xyz(5.0, 8.0, 2.0),
-    //         transform: Transform::from_xyz(0.0, 4.0, 0.0),
-    //         point_light: PointLight {
-    //             color: Color::BLUE,
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     })
-    //     .with_children(|builder| {
-    //         builder.spawn_bundle(PbrBundle {
-    //             mesh: meshes.add(Mesh::from(shape::UVSphere {
-    //                 radius: 0.1,
-    //                 ..Default::default()
-    //             })),
-    //             material: materials.add(StandardMaterial {
-    //                 base_color: Color::BLUE,
-    //                 emissive: Color::rgba_linear(0.0, 0.0, 100.0, 0.0),
-    //                 ..Default::default()
-    //             }),
-    //             ..Default::default()
-    //         });
-    //     });
+    // blue point light
+    commands
+        .spawn_bundle(PointLightBundle {
+            // transform: Transform::from_xyz(5.0, 8.0, 2.0),
+            transform: Transform::from_xyz(0.0, 4.0, 0.0),
+            point_light: PointLight {
+                color: Color::BLUE,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .with_children(|builder| {
+            builder.spawn_bundle(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere {
+                    radius: 0.1,
+                    ..Default::default()
+                })),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::BLUE,
+                    emissive: Color::rgba_linear(0.0, 0.0, 100.0, 0.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        });
 
-    // const HALF_SIZE: f32 = 10.0;
-    // commands.spawn_bundle(DirectionalLightBundle {
-    //     directional_light: DirectionalLight {
-    //         // Configure the projection to better fit the scene
-    //         shadow_projection: OrthographicProjection {
-    //             left: -HALF_SIZE,
-    //             right: HALF_SIZE,
-    //             bottom: -HALF_SIZE,
-    //             top: HALF_SIZE,
-    //             near: -10.0 * HALF_SIZE,
-    //             far: 10.0 * HALF_SIZE,
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     },
-    //     transform: Transform {
-    //         translation: Vec3::new(0.0, 2.0, 0.0),
-    //         rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_4),
-    //         ..Default::default()
-    //     },
-    //     ..Default::default()
-    // });
+    const HALF_SIZE: f32 = 10.0;
+    commands.spawn_bundle(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            // Configure the projection to better fit the scene
+            shadow_projection: OrthographicProjection {
+                left: -HALF_SIZE,
+                right: HALF_SIZE,
+                bottom: -HALF_SIZE,
+                top: HALF_SIZE,
+                near: -10.0 * HALF_SIZE,
+                far: 10.0 * HALF_SIZE,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        transform: Transform {
+            translation: Vec3::new(0.0, 2.0, 0.0),
+            rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_4),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
 
     // camera
     commands.spawn_bundle(PerspectiveCameraBundle {
@@ -221,32 +219,68 @@ fn setup(
 }
 
 fn adjust_point_light_biases(input: Res<Input<KeyCode>>, mut query: Query<&mut PointLight>) {
-    let depth_bias_step_size = 0.001;
-    let normal_bias_step_size = 0.001;
+    let depth_bias_step_size = 0.01;
+    let normal_bias_step_size = 0.01;
     for mut light in query.iter_mut() {
         if input.just_pressed(KeyCode::Key1) {
-            light.shadow_depth_bias_min -= depth_bias_step_size;
-            dbg!(light.shadow_depth_bias_min);
+            light.shadow_depth_bias -= depth_bias_step_size;
+            println!("PointLight shadow_depth_bias: {}", light.shadow_depth_bias);
         }
         if input.just_pressed(KeyCode::Key2) {
-            light.shadow_depth_bias_min += depth_bias_step_size;
-            dbg!(light.shadow_depth_bias_min);
+            light.shadow_depth_bias += depth_bias_step_size;
+            println!("PointLight shadow_depth_bias: {}", light.shadow_depth_bias);
         }
         if input.just_pressed(KeyCode::Key3) {
-            light.shadow_depth_bias_max -= depth_bias_step_size;
-            dbg!(light.shadow_depth_bias_max);
+            light.shadow_normal_bias -= normal_bias_step_size;
+            println!(
+                "PointLight shadow_normal_bias: {}",
+                light.shadow_normal_bias
+            );
         }
         if input.just_pressed(KeyCode::Key4) {
-            light.shadow_depth_bias_max += depth_bias_step_size;
-            dbg!(light.shadow_depth_bias_max);
+            light.shadow_normal_bias += normal_bias_step_size;
+            println!(
+                "PointLight shadow_normal_bias: {}",
+                light.shadow_normal_bias
+            );
         }
+    }
+}
+
+fn adjust_directional_light_biases(
+    input: Res<Input<KeyCode>>,
+    mut query: Query<&mut DirectionalLight>,
+) {
+    let depth_bias_step_size = 0.01;
+    let normal_bias_step_size = 0.01;
+    for mut light in query.iter_mut() {
         if input.just_pressed(KeyCode::Key5) {
-            light.shadow_normal_bias -= normal_bias_step_size;
-            dbg!(light.shadow_normal_bias);
+            light.shadow_depth_bias -= depth_bias_step_size;
+            println!(
+                "DirectionalLight shadow_depth_bias: {}",
+                light.shadow_depth_bias
+            );
         }
         if input.just_pressed(KeyCode::Key6) {
+            light.shadow_depth_bias += depth_bias_step_size;
+            println!(
+                "DirectionalLight shadow_depth_bias: {}",
+                light.shadow_depth_bias
+            );
+        }
+        if input.just_pressed(KeyCode::Key7) {
+            light.shadow_normal_bias -= normal_bias_step_size;
+            println!(
+                "DirectionalLight shadow_normal_bias: {}",
+                light.shadow_normal_bias
+            );
+        }
+        if input.just_pressed(KeyCode::Key8) {
             light.shadow_normal_bias += normal_bias_step_size;
-            dbg!(light.shadow_normal_bias);
+            println!(
+                "DirectionalLight shadow_normal_bias: {}",
+                light.shadow_normal_bias
+            );
         }
     }
 }
