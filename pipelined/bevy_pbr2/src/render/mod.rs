@@ -14,7 +14,7 @@ use bevy_render2::{
     renderer::{RenderContext, RenderDevice, RenderQueue},
     shader::Shader,
     texture::{BevyDefault, GpuImage, Image, TextureFormatPixelInfo},
-    view::{ExtractedView, ViewMeta, ViewUniform, ViewUniformOffset},
+    view::{ExtractedView, ViewMeta, ViewUniformOffset},
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::slab::{FrameSlabMap, FrameSlabMapKey};
@@ -53,11 +53,9 @@ impl FromWorld for PbrShaders {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
-                        // TODO: change this to ViewUniform::std140_padded_size_static once crevice fixes this!
+                        // TODO: change this to ViewUniform::std140_size_static once crevice fixes this!
                         // Context: https://github.com/LPGhatguy/crevice/issues/29
-                        min_binding_size: BufferSize::new(
-                            ViewUniform::std140_padded_size_static() as u64
-                        ),
+                        min_binding_size: BufferSize::new(80),
                     },
                     count: None,
                 },
@@ -127,7 +125,7 @@ impl FromWorld for PbrShaders {
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
                     has_dynamic_offset: true,
-                    min_binding_size: BufferSize::new(Mat4::std140_padded_size_static() as u64),
+                    min_binding_size: BufferSize::new(Mat4::std140_size_static() as u64),
                 },
                 count: None,
             }],
@@ -143,7 +141,7 @@ impl FromWorld for PbrShaders {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: BufferSize::new(
-                            StandardMaterialUniformData::std140_padded_size_static() as u64,
+                            StandardMaterialUniformData::std140_size_static() as u64,
                         ),
                     },
                     count: None,
@@ -295,7 +293,7 @@ impl FromWorld for PbrShaders {
             depth_stencil: Some(DepthStencilState {
                 format: TextureFormat::Depth32Float,
                 depth_write_enabled: true,
-                depth_compare: CompareFunction::Less,
+                depth_compare: CompareFunction::Greater,
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
