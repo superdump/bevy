@@ -12,7 +12,7 @@ use bevy_render2::{
     render_resource::*,
     renderer::{RenderContext, RenderDevice},
     texture::*,
-    view::{ExtractedView, ViewUniform, ViewUniformOffset},
+    view::{ExtractedView, ViewUniformOffset},
 };
 use bevy_transform::components::GlobalTransform;
 use crevice::std140::AsStd140;
@@ -222,7 +222,7 @@ pub fn extract_lights(
     mut commands: Commands,
     ambient_light: Res<AmbientLight>,
     point_lights: Query<(Entity, &PointLight, &GlobalTransform)>,
-    directional_lights: Query<(Entity, &DirectionalLight)>,
+    directional_lights: Query<(Entity, &DirectionalLight, &GlobalTransform)>,
 ) {
     commands.insert_resource(ExtractedAmbientLight {
         color: ambient_light.color,
@@ -239,13 +239,13 @@ pub fn extract_lights(
             shadow_bias_max: point_light.shadow_bias_max,
         });
     }
-    for (entity, directional_light) in directional_lights.iter() {
+    for (entity, directional_light, transform) in directional_lights.iter() {
         commands
             .get_or_spawn(entity)
             .insert(ExtractedDirectionalLight {
                 color: directional_light.color,
                 illuminance: directional_light.illuminance,
-                direction: directional_light.get_direction(),
+                direction: transform.forward(),
                 projection: directional_light.shadow_projection.get_projection_matrix(),
                 shadow_bias_min: directional_light.shadow_bias_min,
                 shadow_bias_max: directional_light.shadow_bias_max,
