@@ -51,8 +51,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
             mesh.transform_inverse_transpose.y.xyz,
             mesh.transform_inverse_transpose.z.xyz
         )
-        * vertex.normal
-        * 0.5 + 0.5;
+        * vertex.normal;
 
     return out;
 }
@@ -63,5 +62,5 @@ struct FragmentInput {
 
 [[stage(fragment)]]
 fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
-    return vec4<f32>(normalize(in.view_normal), 1.0);
+    return vec4<f32>(normalize(in.view_normal) * 0.5 + 0.5, 1.0);
 }
