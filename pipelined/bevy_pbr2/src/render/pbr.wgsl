@@ -398,14 +398,6 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>) -> f32 {
     let w = major_axis_magnitude;
     let depth = z / w;
 
-    // let shadow = texture(samplerCubeArrayShadow(t_Shadow, s_Shadow), vec4(frag_ls, i), depth - bias);
-
-    // manual depth testing
-    // float shadow = texture(samplerCubeArray(t_Shadow, s_Shadow), vec4(-frag_ls, 6 * i)).r;
-    // shadow = depth > shadow ? 0.0 : 1.0;
-    // o_Target = vec4(vec3(shadow * 20 - 19, depth * 20 - 19, 0.0), 1.0);
-    // o_Target = vec4(vec3(shadow * 20 - 19), 1.0);
-
     // do the lookup, using HW PCF and comparison
     // NOTE: Due to the non-uniform control flow above, we must use the Level variant of
     //       textureSampleCompare to avoid undefined behaviour due to some of the fragments in
