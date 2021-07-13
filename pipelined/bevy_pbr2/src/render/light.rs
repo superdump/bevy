@@ -197,8 +197,8 @@ impl FromWorld for ShadowShaders {
                 address_mode_u: AddressMode::ClampToEdge,
                 address_mode_v: AddressMode::ClampToEdge,
                 address_mode_w: AddressMode::ClampToEdge,
-                mag_filter: FilterMode::Linear,
-                min_filter: FilterMode::Linear,
+                mag_filter: FilterMode::Nearest,
+                min_filter: FilterMode::Nearest,
                 mipmap_filter: FilterMode::Nearest,
                 compare: Some(CompareFunction::LessEqual),
                 ..Default::default()
@@ -207,8 +207,8 @@ impl FromWorld for ShadowShaders {
                 address_mode_u: AddressMode::ClampToEdge,
                 address_mode_v: AddressMode::ClampToEdge,
                 address_mode_w: AddressMode::ClampToEdge,
-                mag_filter: FilterMode::Linear,
-                min_filter: FilterMode::Linear,
+                mag_filter: FilterMode::Nearest,
+                min_filter: FilterMode::Nearest,
                 mipmap_filter: FilterMode::Nearest,
                 compare: Some(CompareFunction::LessEqual),
                 ..Default::default()

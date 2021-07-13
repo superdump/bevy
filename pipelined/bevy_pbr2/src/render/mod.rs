@@ -89,7 +89,7 @@ impl FromWorld for PbrShaders {
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Sampler {
                         comparison: true,
-                        filtering: true,
+                        filtering: false,
                     },
                     count: None,
                 },
@@ -110,7 +110,7 @@ impl FromWorld for PbrShaders {
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Sampler {
                         comparison: true,
-                        filtering: true,
+                        filtering: false,
                     },
                     count: None,
                 },
