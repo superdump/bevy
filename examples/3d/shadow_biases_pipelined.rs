@@ -1,25 +1,20 @@
 use bevy::{
     core::Time,
-    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     ecs::prelude::*,
-    input::{
-        mouse::{self, MouseMotion},
-        Input,
-    },
+    input::{mouse::MouseMotion, Input},
     math::{EulerRot, Mat4, Quat, Vec2, Vec3},
     pbr2::{
-        AmbientLight, DirectionalLight, DirectionalLightBundle, PbrBundle, PointLight,
-        PointLightBundle, StandardMaterial,
+        DirectionalLight, DirectionalLightBundle, PbrBundle, PointLight, PointLightBundle,
+        StandardMaterial,
     },
-    prelude::{App, Assets, BuildChildren, KeyCode, Transform},
+    prelude::{App, Assets, KeyCode, Transform},
     render2::{
-        camera::{camera_system, Camera, OrthographicProjection, PerspectiveCameraBundle},
+        camera::{Camera, OrthographicProjection, PerspectiveCameraBundle},
         color::Color,
         mesh::{shape, Mesh},
     },
     PipelinedDefaultPlugins,
 };
-use rand::Rng;
 
 fn main() {
     App::new()
@@ -38,16 +33,13 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let capsule_spawn_plane_width = 10.0f32;
-    let capsule_spawn_plane_depth = 500.0f32;
+    let spawn_plane_depth = 500.0f32;
 
     let white_handle = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         perceptual_roughness: 1.0,
         ..Default::default()
     });
-
-    let capsule_handle = meshes.add(Mesh::from(shape::Capsule::default()));
     let sphere_handle = meshes.add(Mesh::from(shape::Icosphere {
         radius: 0.25,
         ..Default::default()
@@ -59,7 +51,7 @@ fn setup(
         transform: Transform::from_xyz(5.0, 5.0, 0.0),
         point_light: PointLight {
             intensity: 0.0,
-            range: 500.0,
+            range: spawn_plane_depth,
             color: Color::WHITE,
             shadow_depth_bias: 0.0,
             shadow_normal_bias: 0.0,
@@ -77,7 +69,7 @@ fn setup(
     );
     let world_to_light = light_transform.inverse();
     let lbn = world_to_light * Vec3::new(-10.0, -0.1, 0.1).extend(1.0);
-    let rtf = world_to_light * Vec3::new(1.0, 3.0, -capsule_spawn_plane_depth - 0.1).extend(1.0);
+    let rtf = world_to_light * Vec3::new(1.0, 3.0, -spawn_plane_depth - 0.1).extend(1.0);
 
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
@@ -106,9 +98,7 @@ fn setup(
         })
         .insert(CameraController::default());
 
-    let mut rng = rand::thread_rng();
-    let half_width = 0.5 * capsule_spawn_plane_width;
-    for z_i32 in -capsule_spawn_plane_depth as i32..=0 {
+    for z_i32 in -spawn_plane_depth as i32..=0 {
         commands.spawn_bundle(PbrBundle {
             mesh: sphere_handle.clone(),
             material: white_handle.clone(),
@@ -119,7 +109,9 @@ fn setup(
 
     // ground plane
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 1000.0 })),
+        mesh: meshes.add(Mesh::from(shape::Plane {
+            size: 2.0 * spawn_plane_depth,
+        })),
         material: white_handle.clone(),
         ..Default::default()
     });
