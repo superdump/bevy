@@ -26,6 +26,7 @@ fn main() {
         .add_plugins(PipelinedDefaultPlugins)
         .add_startup_system(setup.system())
         .add_system(adjust_point_light_biases.system())
+        .add_system(toggle_light.system())
         .add_system(adjust_directional_light_biases.system())
         .add_system(camera_controller.system())
         .run();
@@ -52,11 +53,12 @@ fn setup(
         ..Default::default()
     }));
 
-    // light
+    println!("Using DirectionalLight");
+
     commands.spawn_bundle(PointLightBundle {
         transform: Transform::from_xyz(5.0, 5.0, 0.0),
         point_light: PointLight {
-            intensity: 1000000000.0,
+            intensity: 0.0,
             range: 500.0,
             color: Color::WHITE,
             shadow_depth_bias: 0.0,
@@ -66,33 +68,34 @@ fn setup(
         ..Default::default()
     });
 
-    // // FIXME: Try to fit the projection to the scene
-    // let light_transform = Mat4::from_euler(
-    //     EulerRot::XYZ,
-    //     -std::f32::consts::FRAC_PI_4,
-    //     std::f32::consts::FRAC_PI_4,
-    //     0.0,
-    // );
-    // let world_to_light = light_transform.inverse();
-    // let lbn = world_to_light * Vec3::new(-10.0, -0.1, 0.1).extend(1.0);
-    // let rtf = world_to_light * Vec3::new(1.0, 3.0, -capsule_spawn_plane_depth - 0.1).extend(1.0);
+    // FIXME: Try to fit the projection to the scene
+    let light_transform = Mat4::from_euler(
+        EulerRot::XYZ,
+        -std::f32::consts::FRAC_PI_4,
+        std::f32::consts::FRAC_PI_4,
+        0.0,
+    );
+    let world_to_light = light_transform.inverse();
+    let lbn = world_to_light * Vec3::new(-10.0, -0.1, 0.1).extend(1.0);
+    let rtf = world_to_light * Vec3::new(1.0, 3.0, -capsule_spawn_plane_depth - 0.1).extend(1.0);
 
-    // commands.spawn_bundle(DirectionalLightBundle {
-    //     directional_light: DirectionalLight {
-    //         shadow_projection: OrthographicProjection {
-    //             left: lbn.x,
-    //             right: rtf.x,
-    //             bottom: lbn.y,
-    //             top: rtf.y,
-    //             near: -lbn.z,
-    //             far: -rtf.z,
-    //             ..Default::default()
-    //         },
-    //         ..Default::default()
-    //     },
-    //     transform: Transform::from_matrix(light_transform),
-    //     ..Default::default()
-    // });
+    commands.spawn_bundle(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 100000.0,
+            shadow_projection: OrthographicProjection {
+                left: lbn.x,
+                right: rtf.x,
+                bottom: lbn.y,
+                top: rtf.y,
+                near: -lbn.z,
+                far: -rtf.z,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        transform: Transform::from_matrix(light_transform),
+        ..Default::default()
+    });
 
     // camera
     commands
@@ -120,6 +123,31 @@ fn setup(
         material: white_handle.clone(),
         ..Default::default()
     });
+}
+
+fn toggle_light(
+    input: Res<Input<KeyCode>>,
+    mut point_lights: Query<&mut PointLight>,
+    mut directional_lights: Query<&mut DirectionalLight>,
+) {
+    if input.just_pressed(KeyCode::L) {
+        for mut light in point_lights.iter_mut() {
+            light.intensity = if light.intensity == 0.0 {
+                println!("Using PointLight");
+                100000000.0
+            } else {
+                0.0
+            };
+        }
+        for mut light in directional_lights.iter_mut() {
+            light.illuminance = if light.illuminance == 0.0 {
+                println!("Using DirectionalLight");
+                100000.0
+            } else {
+                0.0
+            };
+        }
+    }
 }
 
 fn adjust_point_light_biases(input: Res<Input<KeyCode>>, mut query: Query<&mut PointLight>) {
