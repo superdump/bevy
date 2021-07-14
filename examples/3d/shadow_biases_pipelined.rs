@@ -34,6 +34,8 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let spawn_plane_depth = 500.0f32;
+    let spawn_height = 2.0;
+    let sphere_radius = 0.25;
 
     let white_handle = materials.add(StandardMaterial {
         base_color: Color::WHITE,
@@ -41,7 +43,7 @@ fn setup(
         ..Default::default()
     });
     let sphere_handle = meshes.add(Mesh::from(shape::Icosphere {
-        radius: 0.25,
+        radius: sphere_radius,
         ..Default::default()
     }));
 
@@ -60,29 +62,22 @@ fn setup(
         ..Default::default()
     });
 
-    // FIXME: Try to fit the projection to the scene
-    let light_transform = Mat4::from_euler(
-        EulerRot::XYZ,
-        -std::f32::consts::FRAC_PI_4,
-        std::f32::consts::FRAC_PI_4,
-        0.0,
-    );
-    let world_to_light = light_transform.inverse();
-    let lbn = world_to_light * Vec3::new(-10.0, -0.1, 0.1).extend(1.0);
-    let rtf = world_to_light * Vec3::new(1.0, 3.0, -spawn_plane_depth - 0.1).extend(1.0);
-
+    let theta = std::f32::consts::FRAC_PI_4;
+    let light_transform = Mat4::from_euler(EulerRot::ZYX, 0.0, std::f32::consts::FRAC_PI_2, -theta);
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 100000.0,
             shadow_projection: OrthographicProjection {
-                left: lbn.x,
-                right: rtf.x,
-                bottom: lbn.y,
-                top: rtf.y,
-                near: -lbn.z,
-                far: -rtf.z,
+                left: -0.35,
+                right: 500.35,
+                bottom: -0.1,
+                top: 5.0,
+                near: -5.0,
+                far: 5.0,
                 ..Default::default()
             },
+            shadow_depth_bias: 0.0,
+            shadow_normal_bias: 0.0,
             ..Default::default()
         },
         transform: Transform::from_matrix(light_transform),
@@ -102,7 +97,7 @@ fn setup(
         commands.spawn_bundle(PbrBundle {
             mesh: sphere_handle.clone(),
             material: white_handle.clone(),
-            transform: Transform::from_xyz(0.0, 2.0, z_i32 as f32),
+            transform: Transform::from_xyz(0.0, spawn_height, z_i32 as f32),
             ..Default::default()
         });
     }
