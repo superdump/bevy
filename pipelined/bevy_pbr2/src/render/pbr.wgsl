@@ -131,11 +131,11 @@ var lights: Lights;
 [[group(0), binding(2)]]
 var point_shadow_textures: texture_depth_cube_array;
 [[group(0), binding(3)]]
-var point_shadow_textures_sampler: sampler;
+var point_shadow_textures_sampler: sampler_comparison;
 [[group(0), binding(4)]]
 var directional_shadow_textures: texture_depth_2d_array;
 [[group(0), binding(5)]]
-var directional_shadow_textures_sampler: sampler;
+var directional_shadow_textures_sampler: sampler_comparison;
 
 [[group(2), binding(0)]]
 var material: StandardMaterial;
@@ -407,14 +407,13 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
     let w = major_axis_magnitude;
     let depth = z / w;
 
-    let shadow_map_depth = textureSampleLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), 0.0);
-    var shadow: f32;
-    if (depth < shadow_map_depth) {
-        shadow = 1.0;
-    } else {
-        shadow = 0.0;
-    }
-    return shadow;
+    // do the lookup, using HW PCF and comparison
+    // NOTE: Due to the non-uniform control flow above, we must use the Level variant of
+    //       textureSampleCompare to avoid undefined behaviour due to some of the fragments in
+    //       a quad (2x2 fragments) being processed not being sampled, and this messing with
+    //       mip-mapping functionality. The shadow maps have no mipmaps so Level just samples
+    //       from LOD 0.
+    return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
 }
 
 fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
@@ -441,14 +440,10 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
     let light_local = offset_position_ndc.xy * flip_correction + vec2<f32>(0.5, 0.5);
 
     let depth = offset_position_ndc.z;
-    let shadow_map_depth = textureSampleLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), 0.0);
-    var shadow: f32;
-    if (depth < shadow_map_depth) {
-        shadow = 1.0;
-    } else {
-        shadow = 0.0;
-    }
-    return shadow;
+    // do the lookup, using HW PCF and comparison
+    // NOTE: Due to non-uniform control flow above, we must use the level variant of the texture
+    //       sampler to avoid use of implicit derivatives causing possible undefined behavior.
+    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
 }
 
 struct FragmentInput {

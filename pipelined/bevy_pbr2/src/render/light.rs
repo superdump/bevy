@@ -200,7 +200,7 @@ impl FromWorld for ShadowShaders {
                 mag_filter: FilterMode::Nearest,
                 min_filter: FilterMode::Nearest,
                 mipmap_filter: FilterMode::Nearest,
-                compare: None,
+                compare: Some(CompareFunction::LessEqual),
                 ..Default::default()
             }),
             directional_light_sampler: render_device.create_sampler(&SamplerDescriptor {
@@ -210,7 +210,7 @@ impl FromWorld for ShadowShaders {
                 mag_filter: FilterMode::Nearest,
                 min_filter: FilterMode::Nearest,
                 mipmap_filter: FilterMode::Nearest,
-                compare: None,
+                compare: Some(CompareFunction::LessEqual),
                 ..Default::default()
             }),
         }
