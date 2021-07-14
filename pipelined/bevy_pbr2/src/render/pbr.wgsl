@@ -397,14 +397,17 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
     let abs_position_ls = abs(frag_ls);
     let major_axis_magnitude = max(abs_position_ls.x, max(abs_position_ls.y, abs_position_ls.z));
 
-    // do a full projection
-    // vec4 clip = light.projection * vec4(0.0, 0.0, -major_axis_magnitude, 1.0);
-    // float depth = (clip.z / clip.w);
-
-    // alternatively do only the necessary multiplications using near/far
-    let proj_r = light.far / (light.near - light.far);
-    let z = -major_axis_magnitude * proj_r + light.near * proj_r;
+    // NOTE: This simplification comes from multiplying:
+    //       projection * vec4(0, 0, -major_axis_magnitude, 1.0)
+    //       and keeping only the terms that have any effect.
+    // For perspective_rh:
+    // let proj_r = light.far / (light.near - light.far);
+    // let z = -major_axis_magnitude * proj_r + light.near * proj_r;
+    // let w = major_axis_magnitude;
+    // For perspective_infinite_reverse_rh:
+    let z = light.near;
     let w = major_axis_magnitude;
+
     let depth = z / w;
 
     // do the lookup, using HW PCF and comparison
@@ -514,7 +517,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             V = normalize(view.world_position.xyz - in.world_position.xyz);
         } else {
             // Ortho view vec
-            V = normalize(vec3<f32>(-view.view_proj.x.z, -view.view_proj.y.z, -view.view_proj.z.z));
+            V = normalize(vec3<f32>(view.view_proj.x.z, view.view_proj.y.z, view.view_proj.z.z));
         }
 
         // Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"
