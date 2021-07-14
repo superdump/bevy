@@ -171,7 +171,7 @@ fn adjust_directional_light_biases(
     mut query: Query<&mut DirectionalLight>,
 ) {
     let depth_bias_step_size = 0.01;
-    let normal_bias_step_size = 0.01;
+    let normal_bias_step_size = 0.1;
     for mut light in query.iter_mut() {
         if input.just_pressed(KeyCode::Key5) {
             light.shadow_depth_bias -= depth_bias_step_size;
