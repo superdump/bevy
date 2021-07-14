@@ -379,12 +379,21 @@ fn directional_light(light: DirectionalLight, roughness: f32, NdotV: f32, normal
     return (specular_light + diffuse) * light.color.rgb * NoL;
 }
 
-fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>) -> f32 {
+fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
     let light = lights.point_lights[light_id];
 
     // because the shadow maps align with the axes and the frustum planes are at 45 degrees
     // we can get the worldspace depth by taking the largest absolute axis
-    let frag_ls = light.position.xyz - frag_position.xyz;
+    let surface_to_light = light.position.xyz - frag_position.xyz;
+    let surface_to_light_abs = abs(surface_to_light);
+    let distance_to_light = max(surface_to_light_abs.x, max(surface_to_light_abs.y, surface_to_light_abs.z));
+
+    let normal_offset = light.shadow_normal_bias * distance_to_light * surface_normal.xyz;
+    let depth_offset = light.shadow_depth_bias * normalize(surface_to_light.xyz);
+    let offset_position = frag_position.xyz + normal_offset + depth_offset;
+
+    // similar largest-absolute-axis trick as above, but now with the offset fragment position
+    let frag_ls = light.position.xyz - offset_position.xyz;
     let abs_position_ls = abs(frag_ls);
     let major_axis_magnitude = max(abs_position_ls.x, max(abs_position_ls.y, abs_position_ls.z));
 
@@ -521,14 +530,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         let n_directional_lights = i32(lights.n_directional_lights);
         for (var i: i32 = 0; i < n_point_lights; i = i + 1) {
             let light = lights.point_lights[i];
-
-            let dir_to_light = normalize(light.position.xyz - in.world_position.xyz);
-            let depth_bias = light.shadow_depth_bias * dir_to_light.xyz;
-            let NdotL = dot(dir_to_light.xyz, in.world_normal.xyz);
-            let normal_bias = light.shadow_normal_bias * (1.0 - NdotL) * in.world_normal.xyz;
-            let biased_position = vec4<f32>(in.world_position.xyz + depth_bias + normal_bias, in.world_position.w);
-
-            let shadow = fetch_point_shadow(i, biased_position);
+            let shadow = fetch_point_shadow(i, in.world_position, in.world_normal);
             let light_contrib = point_light(in.world_position.xyz, light, roughness, NdotV, N, V, R, F0, diffuse_color);
             light_accum = light_accum + light_contrib * shadow;
         }
