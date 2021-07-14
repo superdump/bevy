@@ -417,9 +417,14 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
     return shadow;
 }
 
-fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>) -> f32 {
+fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
     let light = lights.directional_lights[light_id];
-    let homogeneous_coords = light.view_projection * frag_position;
+
+    let normal_offset = light.shadow_normal_bias * surface_normal.xyz;
+    let depth_offset = light.shadow_depth_bias * light.direction_to_light.xyz;
+    let offset_position = vec4<f32>(frag_position.xyz + normal_offset + depth_offset, frag_position.w);
+
+    let homogeneous_coords = light.view_projection * offset_position;
     if (homogeneous_coords.w <= 0.0) {
         return 1.0;
     }
@@ -536,13 +541,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         }
         for (var i: i32 = 0; i < n_directional_lights; i = i + 1) {
             let light = lights.directional_lights[i];
-
-            let depth_bias = light.shadow_depth_bias * light.direction_to_light.xyz;
-            let NdotL = dot(light.direction_to_light.xyz, in.world_normal.xyz);
-            let normal_bias = light.shadow_normal_bias * (1.0 - NdotL) * in.world_normal.xyz;
-            let biased_position = vec4<f32>(in.world_position.xyz + depth_bias + normal_bias, in.world_position.w);
-
-            let shadow = fetch_directional_shadow(i, biased_position);
+            let shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
             let light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
             light_accum = light_accum + light_contrib * shadow;
         }
