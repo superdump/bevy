@@ -424,17 +424,23 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
     let depth_offset = light.shadow_depth_bias * light.direction_to_light.xyz;
     let offset_position = vec4<f32>(frag_position.xyz + normal_offset + depth_offset, frag_position.w);
 
-    let homogeneous_coords = light.view_projection * offset_position;
-    if (homogeneous_coords.w <= 0.0) {
+    let offset_position_clip = light.view_projection * offset_position;
+    if (offset_position_clip.w <= 0.0) {
         return 1.0;
     }
-    // compensate for the Y-flip difference between the NDC and texture coordinates
-    let flip_correction = vec2<f32>(0.5, -0.5);
-    let proj_correction = 1.0 / homogeneous_coords.w;
-    // compute texture coordinates for shadow lookup
-    let light_local = homogeneous_coords.xy * flip_correction * proj_correction + vec2<f32>(0.5, 0.5);
-    let depth = homogeneous_coords.z * proj_correction;
+    let offset_position_ndc = offset_position_clip.xyz / offset_position_clip.w;
+    // No shadow outside the orthographic projection volume
+    if (any(offset_position_ndc.xy < vec2<f32>(-1.0)) || offset_position_ndc.z < 0.0
+            || any(offset_position_ndc > vec3<f32>(1.0))) {
+        return 1.0;
+    }
 
+    // compute texture coordinates for shadow lookup, compensating for the Y-flip difference
+    // between the NDC and texture coordinates
+    let flip_correction = vec2<f32>(0.5, -0.5);
+    let light_local = offset_position_ndc.xy * flip_correction + vec2<f32>(0.5, 0.5);
+
+    let depth = offset_position_ndc.z;
     let shadow_map_depth = textureSampleLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), 0.0);
     var shadow: f32;
     if (depth < shadow_map_depth) {
