@@ -90,7 +90,7 @@ impl Default for DirectionalLight {
 
 impl DirectionalLight {
     pub const DEFAULT_SHADOW_DEPTH_BIAS: f32 = 0.02;
-    pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.02;
+    pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.5;
 }
 
 // Ambient light color.
