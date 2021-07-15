@@ -88,8 +88,8 @@ struct StandardMaterial {
 };
 
 struct PointLight {
+    projection: mat4x4<f32>;
     color: vec4<f32>;
-    // projection: mat4x4<f32>;
     position: vec3<f32>;
     inverse_square_range: f32;
     radius: f32;
@@ -388,26 +388,25 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>) -> f32 {
     let abs_position_ls = abs(frag_ls);
     let major_axis_magnitude = max(abs_position_ls.x, max(abs_position_ls.y, abs_position_ls.z));
 
-    // NOTE: This simplification comes from multiplying:
+    // NOTE: These simplifications come from multiplying:
     //       projection * vec4(0, 0, -major_axis_magnitude, 1.0)
-    //       and keeping only the terms that have any effect.
+    //       and keeping only the terms that have any impact on the depth.
+    let projection_cols23_row2 = vec2<f32>(light.projection[2][2], light.projection[3][2]);
+    let projection_cols23_row3 = vec2<f32>(light.projection[2][3], light.projection[3][3]);
+    let frag_zw = vec2<f32>(-major_axis_magnitude, 1.0);
+    let z = dot(projection_cols23_row2, frag_zw);
+    let w = dot(projection_cols23_row3, frag_zw);
+
     // For perspective_rh:
     // let proj_r = light.far / (light.near - light.far);
     // let z = -major_axis_magnitude * proj_r + light.near * proj_r;
     // let w = major_axis_magnitude;
+
     // For perspective_infinite_reverse_rh:
-    let z = light.near;
-    let w = major_axis_magnitude;
+    // let z = light.near;
+    // let w = major_axis_magnitude;
 
     let depth = z / w;
-
-    // let shadow = texture(samplerCubeArrayShadow(t_Shadow, s_Shadow), vec4(frag_ls, i), depth - bias);
-
-    // manual depth testing
-    // float shadow = texture(samplerCubeArray(t_Shadow, s_Shadow), vec4(-frag_ls, 6 * i)).r;
-    // shadow = depth > shadow ? 0.0 : 1.0;
-    // o_Target = vec4(vec3(shadow * 20 - 19, depth * 20 - 19, 0.0), 1.0);
-    // o_Target = vec4(vec3(shadow * 20 - 19), 1.0);
 
     // do the lookup, using HW PCF and comparison
     // NOTE: Due to the non-uniform control flow above, we must use the Level variant of

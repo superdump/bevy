@@ -45,8 +45,8 @@ pub struct ExtractedDirectionalLight {
 #[repr(C)]
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuPointLight {
+    projection: Mat4,
     color: Vec4,
-    // proj: Mat4,
     position: Vec3,
     inverse_square_range: f32,
     radius: f32,
@@ -435,6 +435,7 @@ pub fn prepare_lights(
             }
 
             gpu_lights.point_lights[light_index] = GpuPointLight {
+                projection,
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: (light.color.as_rgba_linear() * light.intensity).into(),
@@ -443,7 +444,6 @@ pub fn prepare_lights(
                 inverse_square_range: 1.0 / (light.range * light.range),
                 near: 0.1,
                 far: light.range,
-                // proj: projection,
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
             };
