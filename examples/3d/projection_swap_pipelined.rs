@@ -1,0 +1,272 @@
+use bevy::{
+    core::Time,
+    ecs::prelude::*,
+    input::Input,
+    math::{Quat, Vec3},
+    pbr2::{
+        AmbientLight, DirectionalLight, DirectionalLightBundle, PbrBundle, PointLight,
+        PointLightBundle, StandardMaterial,
+    },
+    prelude::{App, Assets, BuildChildren, KeyCode, Transform},
+    render2::{
+        camera::{
+            Camera, DepthCalculation, OrthographicProjection, PerspectiveCameraBundle,
+            PerspectiveProjection, PerspectiveProjectionMethod, ScalingMode,
+        },
+        color::Color,
+        mesh::{shape, Mesh},
+    },
+    PipelinedDefaultPlugins,
+};
+
+fn main() {
+    App::new()
+        .add_plugins(PipelinedDefaultPlugins)
+        .add_startup_system(setup.system())
+        .add_system(cycle_projection.system())
+        .add_system(animate_light_direction.system())
+        .run();
+}
+
+struct Movable;
+
+/// set up a simple 3D scene
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // ground plane
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Plane { size: 10.0 })),
+        material: materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            perceptual_roughness: 1.0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    // left wall
+    let mut transform = Transform::from_xyz(2.5, 2.5, 0.0);
+    transform.rotate(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
+        transform,
+        material: materials.add(StandardMaterial {
+            base_color: Color::INDIGO,
+            perceptual_roughness: 1.0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    // back (right) wall
+    let mut transform = Transform::from_xyz(0.0, 2.5, -2.5);
+    transform.rotate(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
+        transform,
+        material: materials.add(StandardMaterial {
+            base_color: Color::INDIGO,
+            perceptual_roughness: 1.0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    // cube
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+            material: materials.add(StandardMaterial {
+                base_color: Color::PINK,
+                ..Default::default()
+            }),
+            transform: Transform::from_xyz(0.0, 0.5, 0.0),
+            ..Default::default()
+        })
+        .insert(Movable);
+    // sphere
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::UVSphere {
+                radius: 0.5,
+                ..Default::default()
+            })),
+            material: materials.add(StandardMaterial {
+                base_color: Color::LIME_GREEN,
+                ..Default::default()
+            }),
+            transform: Transform::from_xyz(1.5, 1.0, 1.5),
+            ..Default::default()
+        })
+        .insert(Movable);
+
+    // ambient light
+    commands.insert_resource(AmbientLight {
+        color: Color::ORANGE_RED,
+        brightness: 0.02,
+    });
+
+    // red point light
+    commands
+        .spawn_bundle(PointLightBundle {
+            // transform: Transform::from_xyz(5.0, 8.0, 2.0),
+            transform: Transform::from_xyz(1.0, 2.0, 0.0),
+            point_light: PointLight {
+                color: Color::RED,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .with_children(|builder| {
+            builder.spawn_bundle(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere {
+                    radius: 0.1,
+                    ..Default::default()
+                })),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::RED,
+                    emissive: Color::rgba_linear(100.0, 0.0, 0.0, 0.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        });
+
+    // green point light
+    commands
+        .spawn_bundle(PointLightBundle {
+            // transform: Transform::from_xyz(5.0, 8.0, 2.0),
+            transform: Transform::from_xyz(-1.0, 2.0, 0.0),
+            point_light: PointLight {
+                color: Color::GREEN,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .with_children(|builder| {
+            builder.spawn_bundle(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere {
+                    radius: 0.1,
+                    ..Default::default()
+                })),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::GREEN,
+                    emissive: Color::rgba_linear(0.0, 100.0, 0.0, 0.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        });
+
+    // blue point light
+    commands
+        .spawn_bundle(PointLightBundle {
+            // transform: Transform::from_xyz(5.0, 8.0, 2.0),
+            transform: Transform::from_xyz(0.0, 4.0, 0.0),
+            point_light: PointLight {
+                color: Color::BLUE,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .with_children(|builder| {
+            builder.spawn_bundle(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere {
+                    radius: 0.1,
+                    ..Default::default()
+                })),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::BLUE,
+                    emissive: Color::rgba_linear(0.0, 0.0, 100.0, 0.0),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        });
+
+    const HALF_SIZE: f32 = 10.0;
+    commands.spawn_bundle(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            // Configure the projection to better fit the scene
+            shadow_projection: OrthographicProjection {
+                left: -HALF_SIZE,
+                right: HALF_SIZE,
+                bottom: -HALF_SIZE,
+                top: HALF_SIZE,
+                near: -10.0 * HALF_SIZE,
+                far: 10.0 * HALF_SIZE,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        transform: Transform {
+            translation: Vec3::new(0.0, 2.0, 0.0),
+            rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_4),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    // camera
+    println!("Using {:?}", PerspectiveProjection::default().method);
+    commands.spawn_bundle(PerspectiveCameraBundle {
+        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..Default::default()
+    });
+}
+
+fn cycle_projection(
+    input: Res<Input<KeyCode>>,
+    mut commands: Commands,
+    mut perspective_cameras: Query<(Entity, &mut PerspectiveProjection), With<Camera>>,
+    orthographic_cameras: Query<Entity, (With<OrthographicProjection>, With<Camera>)>,
+) {
+    if input.just_pressed(KeyCode::P) {
+        for (entity, mut perspective) in perspective_cameras.iter_mut() {
+            // let mut swapped_to_orthographic = false;
+            match perspective.method {
+                PerspectiveProjectionMethod::Perspective => {
+                    println!("Using PerspectiveInfinite projection");
+                    perspective.method = PerspectiveProjectionMethod::PerspectiveInfinite;
+                }
+                PerspectiveProjectionMethod::PerspectiveInfinite => {
+                    println!("Using PerspectiveInfiniteReverse projection");
+                    perspective.method = PerspectiveProjectionMethod::PerspectiveInfiniteReverse;
+                }
+                PerspectiveProjectionMethod::PerspectiveInfiniteReverse => {
+                    println!("Using Orthographic projection");
+                    commands
+                        .entity(entity)
+                        .remove::<PerspectiveProjection>()
+                        .insert(OrthographicProjection {
+                            scale: 2.0,
+                            scaling_mode: ScalingMode::FixedVertical,
+                            depth_calculation: DepthCalculation::Distance,
+                            ..Default::default()
+                        });
+                }
+            };
+        }
+        for entity in orthographic_cameras.iter() {
+            println!("Using Perspective projection");
+            commands
+                .entity(entity)
+                .remove::<OrthographicProjection>()
+                .insert(PerspectiveProjection {
+                    method: PerspectiveProjectionMethod::Perspective,
+                    ..Default::default()
+                });
+        }
+    }
+}
+
+fn animate_light_direction(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<DirectionalLight>>,
+) {
+    for mut transform in query.iter_mut() {
+        transform.rotate(Quat::from_rotation_y(time.delta_seconds() * 0.5));
+    }
+}

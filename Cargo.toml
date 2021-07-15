@@ -176,6 +176,10 @@ name = "pbr_pipelined"
 path = "examples/3d/pbr_pipelined.rs"
 
 [[example]]
+name = "projection_swap_pipelined"
+path = "examples/3d/projection_swap_pipelined.rs"
+
+[[example]]
 name = "render_to_texture"
 path = "examples/3d/render_to_texture.rs"
 
