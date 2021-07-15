@@ -388,6 +388,9 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
     let surface_to_light_abs = abs(surface_to_light);
     let distance_to_light = max(surface_to_light_abs.x, max(surface_to_light_abs.y, surface_to_light_abs.z));
 
+    // The normal bias here is already scaled by the texel size at 1 world unit from the light.
+    // The texel size increases proportionally with distance from the light so multiplying by
+    // distance to light scales the normal bias to the texel size at the fragment distance.
     let normal_offset = light.shadow_normal_bias * distance_to_light * surface_normal.xyz;
     let depth_offset = light.shadow_depth_bias * normalize(surface_to_light.xyz);
     let offset_position = frag_position.xyz + normal_offset + depth_offset;
@@ -419,6 +422,7 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
 fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
     let light = lights.directional_lights[light_id];
 
+    // The normal bias is scaled to the texel size.
     let normal_offset = light.shadow_normal_bias * surface_normal.xyz;
     let depth_offset = light.shadow_depth_bias * light.direction_to_light.xyz;
     let offset_position = vec4<f32>(frag_position.xyz + normal_offset + depth_offset, frag_position.w);
