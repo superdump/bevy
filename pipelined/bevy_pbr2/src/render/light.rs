@@ -164,7 +164,7 @@ impl FromWorld for ShadowShaders {
             depth_stencil: Some(DepthStencilState {
                 format: SHADOW_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: CompareFunction::GreaterEqual,
+                depth_compare: CompareFunction::LessEqual,
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -200,7 +200,7 @@ impl FromWorld for ShadowShaders {
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
-                compare: Some(CompareFunction::GreaterEqual),
+                compare: Some(CompareFunction::LessEqual),
                 ..Default::default()
             }),
             directional_light_sampler: render_device.create_sampler(&SamplerDescriptor {
@@ -210,7 +210,7 @@ impl FromWorld for ShadowShaders {
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
-                compare: Some(CompareFunction::GreaterEqual),
+                compare: Some(CompareFunction::LessEqual),
                 ..Default::default()
             }),
         }
@@ -385,7 +385,7 @@ pub fn prepare_lights(
         // TODO: this should select lights based on relevance to the view instead of the first ones that show up in a query
         for (light_index, light) in point_lights.iter().enumerate().take(MAX_POINT_LIGHTS) {
             let projection =
-                Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1);
+                Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, light.range);
 
             // ignore scale because we don't want to effectively scale light radius and range
             // by applying those as a view transform to shadow map rendering of objects
@@ -426,6 +426,7 @@ pub fn prepare_lights(
                             height: POINT_SHADOW_SIZE.height,
                             transform: view_translation * view_rotation,
                             projection,
+                            projection_is_reverse: false,
                         },
                         RenderPhase::<ShadowPhase>::default(),
                     ))
@@ -512,6 +513,7 @@ pub fn prepare_lights(
                         height: DIRECTIONAL_SHADOW_SIZE.height,
                         transform: GlobalTransform::from_matrix(view.inverse()),
                         projection,
+                        projection_is_reverse: false,
                     },
                     RenderPhase::<ShadowPhase>::default(),
                 ))
@@ -606,7 +608,7 @@ impl Node for ShadowPassNode {
                     depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                         view: &view_light.depth_texture_view,
                         depth_ops: Some(Operations {
-                            load: LoadOp::Clear(0.0),
+                            load: LoadOp::Clear(1.0),
                             store: true,
                         }),
                         stencil_ops: None,

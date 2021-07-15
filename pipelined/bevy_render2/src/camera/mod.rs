@@ -80,6 +80,7 @@ fn extract_cameras(
                     },
                     ExtractedView {
                         projection: camera.projection_matrix,
+                        projection_is_reverse: camera.projection_is_reverse,
                         transform: *transform,
                         width: window.physical_width(),
                         height: window.physical_height(),
