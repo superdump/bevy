@@ -17,6 +17,18 @@ use bevy::{
 };
 
 fn main() {
+    println!(
+        "Controls:
+    WSAD   - forward/back/strafe left/right
+    LShift - 'run'
+    E      - up
+    Q      - down
+    L      - switch between directional and point lights
+    1/2    - decrease/increase point light depth bias
+    3/4    - decrease/increase point light normal bias
+    5/6    - decrease/increase direction light depth bias
+    7/8    - decrease/increase direction light normal bias"
+    );
     App::new()
         .add_plugins(PipelinedDefaultPlugins)
         .add_startup_system(setup.system())
