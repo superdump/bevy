@@ -34,7 +34,6 @@ impl Plugin for ViewPlugin {
 
 pub struct ExtractedView {
     pub projection: Mat4,
-    pub projection_is_reverse: bool,
     pub transform: GlobalTransform,
     pub width: u32,
     pub height: u32,

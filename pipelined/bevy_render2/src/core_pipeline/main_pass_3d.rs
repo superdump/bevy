@@ -13,10 +13,7 @@ use wgpu::{
 };
 
 pub struct MainPass3dNode {
-    query: QueryState<(
-        &'static RenderPhase<Transparent3dPhase>,
-        &'static ExtractedView,
-    )>,
+    query: QueryState<&'static RenderPhase<Transparent3dPhase>, With<ExtractedView>>,
 }
 
 impl MainPass3dNode {
@@ -50,14 +47,6 @@ impl Node for MainPass3dNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
-        let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
-        let draw_functions = world.get_resource::<DrawFunctions>().unwrap();
-
-        let (transparent_phase, extracted_view) = self
-            .query
-            .get_manual(world, view_entity)
-            .expect("view entity should exist");
-
         let color_attachment_texture = graph.get_input_texture(Self::IN_COLOR_ATTACHMENT)?;
         let depth_texture = graph.get_input_texture(Self::IN_DEPTH)?;
         let pass_descriptor = RenderPassDescriptor {
@@ -73,16 +62,20 @@ impl Node for MainPass3dNode {
             depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                 view: depth_texture,
                 depth_ops: Some(Operations {
-                    load: LoadOp::Clear(if extracted_view.projection_is_reverse {
-                        0.0
-                    } else {
-                        1.0
-                    }),
+                    load: LoadOp::Clear(0.0),
                     store: true,
                 }),
                 stencil_ops: None,
             }),
         };
+
+        let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
+        let draw_functions = world.get_resource::<DrawFunctions>().unwrap();
+
+        let transparent_phase = self
+            .query
+            .get_manual(world, view_entity)
+            .expect("view entity should exist");
 
         let render_pass = render_context
             .command_encoder

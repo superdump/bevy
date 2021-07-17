@@ -20,15 +20,14 @@ use bevy_transform::components::GlobalTransform;
 use bevy_utils::slab::{FrameSlabMap, FrameSlabMapKey};
 use crevice::std140::AsStd140;
 use wgpu::{
-    Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, PipelineLayout, TextureDimension,
-    TextureFormat, TextureViewDescriptor,
+    Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, TextureDimension, TextureFormat,
+    TextureViewDescriptor,
 };
 
 use crate::{StandardMaterial, StandardMaterialUniformData};
 
 pub struct PbrShaders {
-    pipeline_forward_projection: RenderPipeline,
-    pipeline_reverse_projection: RenderPipeline,
+    pipeline: RenderPipeline,
     shader_module: ShaderModule,
     view_layout: BindGroupLayout,
     material_layout: BindGroupLayout,
@@ -241,20 +240,84 @@ impl FromWorld for PbrShaders {
             bind_group_layouts: &[&view_layout, &mesh_layout, &material_layout],
         });
 
-        let pipeline_forward_projection = create_pbr_pipeline(
-            &*render_device,
-            &pipeline_layout,
-            &shader_module,
-            &shader_module,
-            CompareFunction::Less,
-        );
-        let pipeline_reverse_projection = create_pbr_pipeline(
-            &*render_device,
-            &pipeline_layout,
-            &shader_module,
-            &shader_module,
-            CompareFunction::Greater,
-        );
+        let pipeline = render_device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: None,
+            vertex: VertexState {
+                buffers: &[VertexBufferLayout {
+                    array_stride: 32,
+                    step_mode: InputStepMode::Vertex,
+                    attributes: &[
+                        // Position (GOTCHA! Vertex_Position isn't first in the buffer due to how Mesh sorts attributes (alphabetically))
+                        VertexAttribute {
+                            format: VertexFormat::Float32x3,
+                            offset: 12,
+                            shader_location: 0,
+                        },
+                        // Normal
+                        VertexAttribute {
+                            format: VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 1,
+                        },
+                        // Uv
+                        VertexAttribute {
+                            format: VertexFormat::Float32x2,
+                            offset: 24,
+                            shader_location: 2,
+                        },
+                    ],
+                }],
+                module: &shader_module,
+                entry_point: "vertex",
+            },
+            fragment: Some(FragmentState {
+                module: &shader_module,
+                entry_point: "fragment",
+                targets: &[ColorTargetState {
+                    format: TextureFormat::bevy_default(),
+                    blend: Some(BlendState {
+                        color: BlendComponent {
+                            src_factor: BlendFactor::SrcAlpha,
+                            dst_factor: BlendFactor::OneMinusSrcAlpha,
+                            operation: BlendOperation::Add,
+                        },
+                        alpha: BlendComponent {
+                            src_factor: BlendFactor::One,
+                            dst_factor: BlendFactor::One,
+                            operation: BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: ColorWrite::ALL,
+                }],
+            }),
+            depth_stencil: Some(DepthStencilState {
+                format: TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: CompareFunction::Greater,
+                stencil: StencilState {
+                    front: StencilFaceState::IGNORE,
+                    back: StencilFaceState::IGNORE,
+                    read_mask: 0,
+                    write_mask: 0,
+                },
+                bias: DepthBiasState {
+                    constant: 0,
+                    slope_scale: 0.0,
+                    clamp: 0.0,
+                },
+            }),
+            layout: Some(&pipeline_layout),
+            multisample: MultisampleState::default(),
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: FrontFace::Ccw,
+                cull_mode: Some(Face::Back),
+                polygon_mode: PolygonMode::Fill,
+                clamp_depth: false,
+                conservative: false,
+            },
+        });
 
         // A 1x1x1 'all 1.0' texture to use as a dummy texture to use in place of optional StandardMaterial textures
         let dummy_white_gpu_image = {
@@ -297,8 +360,7 @@ impl FromWorld for PbrShaders {
             }
         };
         PbrShaders {
-            pipeline_forward_projection,
-            pipeline_reverse_projection,
+            pipeline,
             shader_module,
             view_layout,
             material_layout,
@@ -306,93 +368,6 @@ impl FromWorld for PbrShaders {
             dummy_white_gpu_image,
         }
     }
-}
-
-pub fn create_pbr_pipeline(
-    render_device: &RenderDevice,
-    pipeline_layout: &PipelineLayout,
-    vertex_shader_module: &ShaderModule,
-    fragment_shader_module: &ShaderModule,
-    depth_compare: CompareFunction,
-) -> RenderPipeline {
-    render_device.create_render_pipeline(&RenderPipelineDescriptor {
-        label: None,
-        vertex: VertexState {
-            buffers: &[VertexBufferLayout {
-                array_stride: 32,
-                step_mode: InputStepMode::Vertex,
-                attributes: &[
-                    // Position (GOTCHA! Vertex_Position isn't first in the buffer due to how Mesh sorts attributes (alphabetically))
-                    VertexAttribute {
-                        format: VertexFormat::Float32x3,
-                        offset: 12,
-                        shader_location: 0,
-                    },
-                    // Normal
-                    VertexAttribute {
-                        format: VertexFormat::Float32x3,
-                        offset: 0,
-                        shader_location: 1,
-                    },
-                    // Uv
-                    VertexAttribute {
-                        format: VertexFormat::Float32x2,
-                        offset: 24,
-                        shader_location: 2,
-                    },
-                ],
-            }],
-            module: vertex_shader_module,
-            entry_point: "vertex",
-        },
-        fragment: Some(FragmentState {
-            module: fragment_shader_module,
-            entry_point: "fragment",
-            targets: &[ColorTargetState {
-                format: TextureFormat::bevy_default(),
-                blend: Some(BlendState {
-                    color: BlendComponent {
-                        src_factor: BlendFactor::SrcAlpha,
-                        dst_factor: BlendFactor::OneMinusSrcAlpha,
-                        operation: BlendOperation::Add,
-                    },
-                    alpha: BlendComponent {
-                        src_factor: BlendFactor::One,
-                        dst_factor: BlendFactor::One,
-                        operation: BlendOperation::Add,
-                    },
-                }),
-                write_mask: ColorWrite::ALL,
-            }],
-        }),
-        depth_stencil: Some(DepthStencilState {
-            format: TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare,
-            stencil: StencilState {
-                front: StencilFaceState::IGNORE,
-                back: StencilFaceState::IGNORE,
-                read_mask: 0,
-                write_mask: 0,
-            },
-            bias: DepthBiasState {
-                constant: 0,
-                slope_scale: 0.0,
-                clamp: 0.0,
-            },
-        }),
-        layout: Some(pipeline_layout),
-        multisample: MultisampleState::default(),
-        primitive: PrimitiveState {
-            topology: PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: FrontFace::Ccw,
-            cull_mode: Some(Face::Back),
-            polygon_mode: PolygonMode::Fill,
-            clamp_depth: false,
-            conservative: false,
-        },
-    })
 }
 
 struct ExtractedMesh {
@@ -764,7 +739,6 @@ type DrawPbrParams<'s, 'w> = (
         'w,
         's,
         (
-            &'w ExtractedView,
             &'w ViewUniformOffset,
             &'w ViewLights,
             &'w MeshViewBindGroups,
@@ -794,15 +768,10 @@ impl Draw for DrawPbr {
         _sort_key: usize,
     ) {
         let (pbr_shaders, mesh_meta, extracted_meshes, meshes, views) = self.params.get(world);
-        let (extracted_view, view_uniforms, view_lights, mesh_view_bind_groups) =
-            views.get(view).unwrap();
+        let (view_uniforms, view_lights, mesh_view_bind_groups) = views.get(view).unwrap();
         let extracted_mesh = &extracted_meshes.into_inner().meshes[draw_key];
         let mesh_meta = mesh_meta.into_inner();
-        pass.set_render_pipeline(if extracted_view.projection_is_reverse {
-            &pbr_shaders.into_inner().pipeline_reverse_projection
-        } else {
-            &pbr_shaders.into_inner().pipeline_forward_projection
-        });
+        pass.set_render_pipeline(&pbr_shaders.into_inner().pipeline);
         pass.set_bind_group(
             0,
             &mesh_view_bind_groups.view,

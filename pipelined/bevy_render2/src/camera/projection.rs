@@ -8,14 +8,6 @@ pub trait CameraProjection {
     fn get_projection_matrix(&self) -> Mat4;
     fn update(&mut self, width: f32, height: f32);
     fn depth_calculation(&self) -> DepthCalculation;
-    fn is_reverse(&self) -> bool;
-}
-
-#[derive(Debug, Clone, Reflect)]
-pub enum PerspectiveProjectionMethod {
-    Perspective,
-    PerspectiveInfinite,
-    PerspectiveInfiniteReverse,
 }
 
 #[derive(Debug, Clone, Reflect)]
@@ -25,22 +17,11 @@ pub struct PerspectiveProjection {
     pub aspect_ratio: f32,
     pub near: f32,
     pub far: f32,
-    pub method: PerspectiveProjectionMethod,
 }
 
 impl CameraProjection for PerspectiveProjection {
     fn get_projection_matrix(&self) -> Mat4 {
-        match self.method {
-            PerspectiveProjectionMethod::Perspective => {
-                Mat4::perspective_rh(self.fov, self.aspect_ratio, self.near, self.far)
-            }
-            PerspectiveProjectionMethod::PerspectiveInfinite => {
-                Mat4::perspective_infinite_rh(self.fov, self.aspect_ratio, self.near)
-            }
-            PerspectiveProjectionMethod::PerspectiveInfiniteReverse => {
-                Mat4::perspective_infinite_reverse_rh(self.fov, self.aspect_ratio, self.near)
-            }
-        }
+        Mat4::perspective_infinite_reverse_rh(self.fov, self.aspect_ratio, self.near)
     }
 
     fn update(&mut self, width: f32, height: f32) {
@@ -49,14 +30,6 @@ impl CameraProjection for PerspectiveProjection {
 
     fn depth_calculation(&self) -> DepthCalculation {
         DepthCalculation::Distance
-    }
-
-    fn is_reverse(&self) -> bool {
-        match self.method {
-            PerspectiveProjectionMethod::Perspective
-            | PerspectiveProjectionMethod::PerspectiveInfinite => false,
-            PerspectiveProjectionMethod::PerspectiveInfiniteReverse => true,
-        }
     }
 }
 
@@ -67,7 +40,6 @@ impl Default for PerspectiveProjection {
             near: 1.0,
             far: 1000.0,
             aspect_ratio: 1.0,
-            method: PerspectiveProjectionMethod::PerspectiveInfiniteReverse,
         }
     }
 }
@@ -116,8 +88,10 @@ impl CameraProjection for OrthographicProjection {
             self.right * self.scale,
             self.bottom * self.scale,
             self.top * self.scale,
-            self.near,
+            // NOTE: near and far are swapped to invert the depth range from [0,1] to [1,0]
+            // This is for interoperability with pipelines using infinite reverse perspective projections.
             self.far,
+            self.near,
         )
     }
 
@@ -171,10 +145,6 @@ impl CameraProjection for OrthographicProjection {
 
     fn depth_calculation(&self) -> DepthCalculation {
         self.depth_calculation
-    }
-
-    fn is_reverse(&self) -> bool {
-        false
     }
 }
 
