@@ -8,6 +8,9 @@ pub struct PointLight {
     pub range: f32,
     pub radius: f32,
     pub shadow_depth_bias: f32,
+    /// A bias applied along the direction of the fragment's surface normal. It is scaled to the
+    /// shadow map's texel size so that it can be small close to the camera and gets larger further
+    /// away.
     pub shadow_normal_bias: f32,
 }
 
@@ -25,8 +28,8 @@ impl Default for PointLight {
 }
 
 impl PointLight {
-    pub const DEFAULT_SHADOW_DEPTH_BIAS: f32 = 0.1;
-    pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.1;
+    pub const DEFAULT_SHADOW_DEPTH_BIAS: f32 = 0.02;
+    pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.5;
 }
 
 /// A Directional light.
@@ -61,6 +64,8 @@ pub struct DirectionalLight {
     pub illuminance: f32,
     pub shadow_projection: OrthographicProjection,
     pub shadow_depth_bias: f32,
+    /// A bias applied along the direction of the fragment's surface normal. It is scaled to the
+    /// shadow map's texel size so that it is automatically adjusted to the orthographic projection.
     pub shadow_normal_bias: f32,
 }
 
@@ -86,8 +91,8 @@ impl Default for DirectionalLight {
 }
 
 impl DirectionalLight {
-    pub const DEFAULT_SHADOW_DEPTH_BIAS: f32 = 0.1;
-    pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.1;
+    pub const DEFAULT_SHADOW_DEPTH_BIAS: f32 = 0.02;
+    pub const DEFAULT_SHADOW_NORMAL_BIAS: f32 = 0.6;
 }
 
 // Ambient light color.
