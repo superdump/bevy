@@ -164,7 +164,7 @@ impl FromWorld for ShadowShaders {
             depth_stencil: Some(DepthStencilState {
                 format: SHADOW_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: CompareFunction::GreaterEqual,
+                depth_compare: CompareFunction::LessEqual,
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -172,8 +172,8 @@ impl FromWorld for ShadowShaders {
                     write_mask: 0,
                 },
                 bias: DepthBiasState {
-                    constant: 2,
-                    slope_scale: 2.0,
+                    constant: 0,
+                    slope_scale: 0.0,
                     clamp: 0.0,
                 },
             }),
@@ -200,7 +200,7 @@ impl FromWorld for ShadowShaders {
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
-                compare: Some(CompareFunction::GreaterEqual),
+                compare: Some(CompareFunction::LessEqual),
                 ..Default::default()
             }),
             directional_light_sampler: render_device.create_sampler(&SamplerDescriptor {
@@ -210,7 +210,7 @@ impl FromWorld for ShadowShaders {
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
-                compare: Some(CompareFunction::GreaterEqual),
+                compare: Some(CompareFunction::LessEqual),
                 ..Default::default()
             }),
         }
@@ -228,6 +228,14 @@ pub fn extract_lights(
         color: ambient_light.color,
         brightness: ambient_light.brightness,
     });
+    // This is the point light shadow map texel size for one face of the cube as a distance of 1.0
+    // world unit from the light.
+    // point_light_texel_size = 2.0 * 1.0 * tan(PI / 4.0) / cube face width in texels
+    // PI / 4.0 is half the cube face fov, tan(PI / 4.0) = 1.0, so this simplifies to:
+    // point_light_texel_size = 2.0 / cube face width in texels
+    // NOTE: When using various PCF kernel sizes, this will need to be adjusted, according to:
+    // https://catlikecoding.com/unity/tutorials/custom-srp/point-and-spot-shadows/
+    let point_light_texel_size = 2.0 / POINT_SHADOW_SIZE.width as f32;
     for (entity, point_light, transform) in point_lights.iter() {
         commands.get_or_spawn(entity).insert(ExtractedPointLight {
             color: point_light.color,
@@ -236,10 +244,24 @@ pub fn extract_lights(
             radius: point_light.radius,
             transform: *transform,
             shadow_depth_bias: point_light.shadow_depth_bias,
-            shadow_normal_bias: point_light.shadow_normal_bias,
+            // The factor of SQRT_2 is for the worst-case diagonal offset
+            shadow_normal_bias: point_light.shadow_normal_bias
+                * point_light_texel_size
+                * std::f32::consts::SQRT_2,
         });
     }
     for (entity, directional_light, transform) in directional_lights.iter() {
+        // Calulate the directional light shadow map texel size using the largest x,y dimension of
+        // the orthographic projection divided by the shadow map resolution
+        // NOTE: When using various PCF kernel sizes, this will need to be adjusted, according to:
+        // https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/
+        let largest_dimension = (directional_light.shadow_projection.right
+            - directional_light.shadow_projection.left)
+            .max(
+                directional_light.shadow_projection.top
+                    - directional_light.shadow_projection.bottom,
+            );
+        let directional_light_texel_size = largest_dimension / DIRECTIONAL_SHADOW_SIZE.width as f32;
         commands
             .get_or_spawn(entity)
             .insert(ExtractedDirectionalLight {
@@ -248,7 +270,10 @@ pub fn extract_lights(
                 direction: transform.forward(),
                 projection: directional_light.shadow_projection.get_projection_matrix(),
                 shadow_depth_bias: directional_light.shadow_depth_bias,
-                shadow_normal_bias: directional_light.shadow_normal_bias,
+                // The factor of SQRT_2 is for the worst-case diagonal offset
+                shadow_normal_bias: directional_light.shadow_normal_bias
+                    * directional_light_texel_size
+                    * std::f32::consts::SQRT_2,
             });
     }
 }
@@ -385,7 +410,7 @@ pub fn prepare_lights(
         // TODO: this should select lights based on relevance to the view instead of the first ones that show up in a query
         for (light_index, light) in point_lights.iter().enumerate().take(MAX_POINT_LIGHTS) {
             let projection =
-                Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1);
+                Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, light.range);
 
             // ignore scale because we don't want to effectively scale light radius and range
             // by applying those as a view transform to shadow map rendering of objects
@@ -649,7 +674,7 @@ impl Node for ShadowPassNode {
                     depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                         view: &view_light.depth_texture_view,
                         depth_ops: Some(Operations {
-                            load: LoadOp::Clear(0.0),
+                            load: LoadOp::Clear(1.0),
                             store: true,
                         }),
                         stencil_ops: None,
