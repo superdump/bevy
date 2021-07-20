@@ -117,8 +117,8 @@ impl FromWorld for DepthNormalShaders {
                     write_mask: 0,
                 },
                 bias: DepthBiasState {
-                    constant: 2,
-                    slope_scale: 2.0,
+                    constant: 0,
+                    slope_scale: 0.0,
                     clamp: 0.0,
                 },
             }),
