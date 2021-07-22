@@ -392,6 +392,46 @@ fn directional_light(light: DirectionalLight, roughness: f32, NdotV: f32, normal
     return (specular_light + diffuse) * light.color.rgb * NoL;
 }
 
+var sample_offset_directions: array<vec3<f32>, 20> = array<vec3<f32>, 20>(
+    vec3<f32>( 1.0,  1.0,  1.0), vec3<f32>( 1.0, -1.0,  1.0), vec3<f32>(-1.0, -1.0,  1.0), vec3<f32>(-1.0,  1.0,  1.0),
+    vec3<f32>( 1.0,  1.0, -1.0), vec3<f32>( 1.0, -1.0, -1.0), vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(-1.0,  1.0, -1.0),
+    vec3<f32>( 1.0,  1.0,  0.0), vec3<f32>( 1.0, -1.0,  0.0), vec3<f32>(-1.0, -1.0,  0.0), vec3<f32>(-1.0,  1.0,  0.0),
+    vec3<f32>( 1.0,  0.0,  1.0), vec3<f32>(-1.0,  0.0,  1.0), vec3<f32>( 1.0,  0.0, -1.0), vec3<f32>(-1.0,  0.0, -1.0),
+    vec3<f32>( 0.0,  1.0,  1.0), vec3<f32>( 0.0, -1.0,  1.0), vec3<f32>( 0.0, -1.0, -1.0), vec3<f32>( 0.0,  1.0, -1.0)
+);
+
+fn sample_point_shadow_pcf(
+    center_to_fragment: vec3<f32>,
+    texture_index: i32,
+    depth: f32,
+    radius: f32,
+    n_samples: i32
+) -> f32 {
+    if (n_samples == 1) {
+        return textureSampleCompareLevel(
+            point_shadow_textures,
+            point_shadow_textures_sampler,
+            center_to_fragment,
+            texture_index,
+            depth
+        );
+    }
+    let inverse_sample_count = 1.0 / f32(n_samples);
+    var shadow: f32 = 0.0;
+    // FIXME: Offset by a disc about the center to fragment
+    for (var i: i32 = 0; i < n_samples; i = i + 1) {
+        // 2x2 hardware bilinear-filtered PCF
+        shadow = shadow + textureSampleCompareLevel(
+            point_shadow_textures,
+            point_shadow_textures_sampler,
+            center_to_fragment + sample_offset_directions[i] * radius,
+            texture_index,
+            depth
+        ) * inverse_sample_count;
+    }
+    return shadow;
+}
+
 fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
     let light = lights.point_lights[light_id];
 
@@ -431,13 +471,49 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
 
     let depth = z / w;
 
-    // do the lookup, using HW PCF and comparison
-    // NOTE: Due to the non-uniform control flow above, we must use the Level variant of
-    //       textureSampleCompare to avoid undefined behaviour due to some of the fragments in
-    //       a quad (2x2 fragments) being processed not being sampled, and this messing with
-    //       mip-mapping functionality. The shadow maps have no mipmaps so Level just samples
-    //       from LOD 0.
-    return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
+    let radius = (1.0 + (length(frag_ls) / light.far)) / 25.0;
+    return sample_point_shadow_pcf(
+        frag_ls,
+        i32(light_id),
+        depth,
+        radius,
+        20
+    );
+}
+
+fn sample_directional_shadow_pcf(
+    uv: vec2<f32>,
+    texture_index: i32,
+    depth: f32,
+    filter_size: i32
+) -> f32 {
+    if (filter_size == 1) {
+        return textureSampleCompareLevel(
+            directional_shadow_textures,
+            directional_shadow_textures_sampler,
+            uv,
+            texture_index,
+            depth
+        );
+    }
+    let bound = filter_size / 2;
+    let inverse_sample_count = 1.0 / f32(filter_size * filter_size);
+    let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(directional_shadow_textures));
+    var shadow: f32 = 0.0;
+    for (var y: i32 = -bound; y <= bound; y = y + 1) {
+        for (var x: i32 = -bound; x <= bound; x = x + 1) {
+            let texel_offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+            // 2x2 hardware bilinear-filtered PCF
+            shadow = shadow + textureSampleCompareLevel(
+                directional_shadow_textures,
+                directional_shadow_textures_sampler,
+                uv + texel_offset,
+                texture_index,
+                depth
+            ) * inverse_sample_count;
+        }
+    }
+    return shadow;
 }
 
 fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
@@ -465,10 +541,12 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
     let light_local = offset_position_ndc.xy * flip_correction + vec2<f32>(0.5, 0.5);
 
     let depth = offset_position_ndc.z;
-    // do the lookup, using HW PCF and comparison
-    // NOTE: Due to non-uniform control flow above, we must use the level variant of the texture
-    //       sampler to avoid use of implicit derivatives causing possible undefined behavior.
-    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
+    return sample_directional_shadow_pcf(
+        light_local,
+        i32(light_id),
+        depth,
+        5
+    );
 }
 
 struct FragmentInput {
