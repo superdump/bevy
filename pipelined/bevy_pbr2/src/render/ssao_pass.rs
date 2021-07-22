@@ -73,7 +73,7 @@ impl Default for SsaoConfig {
 }
 
 pub fn load_blue_noise(mut ssao_config: ResMut<SsaoConfig>, asset_server: Res<AssetServer>) {
-    ssao_config.blue_noise_image = Some(asset_server.load("textures/ssao_noise.png"));
+    ssao_config.blue_noise_image = Some(asset_server.load("textures/blue_noise.png"));
 }
 
 #[derive(Clone, AsStd140)]
