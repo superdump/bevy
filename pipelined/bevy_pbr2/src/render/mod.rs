@@ -2,7 +2,7 @@ mod light;
 pub use light::*;
 
 use crate::{NotShadowCaster, NotShadowReceiver, StandardMaterial, StandardMaterialUniformData};
-use bevy_asset::{Assets, Handle};
+use bevy_asset::{AssetServer, Assets, Handle};
 use bevy_core_pipeline::Transparent3dPhase;
 use bevy_ecs::{prelude::*, system::SystemState};
 use bevy_math::Mat4;
@@ -32,6 +32,7 @@ pub struct PbrShaders {
     mesh_layout: BindGroupLayout,
     // This dummy white texture is to be used in place of optional StandardMaterial textures
     dummy_white_gpu_image: GpuImage,
+    pub blue_noise_sampler: Sampler,
 }
 
 // TODO: this pattern for initializing the shaders / pipeline isn't ideal. this should be handled by the asset system
@@ -109,6 +110,27 @@ impl FromWorld for PbrShaders {
                     ty: BindingType::Sampler {
                         comparison: true,
                         filtering: true,
+                    },
+                    count: None,
+                },
+                // Blue Noise Texture
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        sample_type: TextureSampleType::Float { filterable: false },
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // Blue Noise Texture Sampler
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Sampler {
+                        comparison: false,
+                        filtering: false,
                     },
                     count: None,
                 },
@@ -319,6 +341,13 @@ impl FromWorld for PbrShaders {
             },
         });
 
+        let blue_noise_sampler = render_device.create_sampler(&SamplerDescriptor {
+            address_mode_u: AddressMode::Repeat,
+            address_mode_v: AddressMode::Repeat,
+            address_mode_w: AddressMode::Repeat,
+            ..Default::default()
+        });
+
         // A 1x1x1 'all 1.0' texture to use as a dummy texture to use in place of optional StandardMaterial textures
         let dummy_white_gpu_image = {
             let image = Image::new_fill(
@@ -365,8 +394,24 @@ impl FromWorld for PbrShaders {
             material_layout,
             mesh_layout,
             dummy_white_gpu_image,
+            blue_noise_sampler,
         }
     }
+}
+
+#[derive(Clone, Default)]
+pub struct BlueNoise {
+    pub image: Option<Handle<Image>>,
+}
+
+pub fn load_blue_noise(mut blue_noise: ResMut<BlueNoise>, asset_server: Res<AssetServer>) {
+    blue_noise.image = Some(asset_server.load("textures/blue_noise.png"));
+}
+
+type ExtractedBlueNoise = BlueNoise;
+
+pub fn extract_blue_noise(mut commands: Commands, blue_noise: Res<BlueNoise>) {
+    commands.insert_resource::<ExtractedBlueNoise>(blue_noise.clone());
 }
 
 struct ExtractedMesh {
@@ -537,6 +582,7 @@ pub fn queue_meshes(
     draw_functions: Res<DrawFunctions>,
     render_device: Res<RenderDevice>,
     pbr_shaders: Res<PbrShaders>,
+    blue_noise: Res<BlueNoise>,
     shadow_shaders: Res<ShadowShaders>,
     mesh_meta: ResMut<MeshMeta>,
     mut light_meta: ResMut<LightMeta>,
@@ -554,7 +600,11 @@ pub fn queue_meshes(
 ) {
     let mesh_meta = mesh_meta.into_inner();
 
-    if view_meta.uniforms.is_empty() {
+    if extracted_meshes.meshes.is_empty()
+        || blue_noise.image.is_none()
+        || gpu_images.get(blue_noise.image.as_ref().unwrap()).is_none()
+        || view_meta.uniforms.len() < 1
+    {
         return;
     }
 
@@ -568,9 +618,6 @@ pub fn queue_meshes(
             layout: &shadow_shaders.view_layout,
         })
     });
-    if extracted_meshes.meshes.is_empty() {
-        return;
-    }
 
     let transform_uniforms = &mesh_meta.transform_uniforms;
     mesh_meta.mesh_transform_bind_group.next_frame();
@@ -588,6 +635,10 @@ pub fn queue_meshes(
                 })
             },
         ));
+
+    let (blue_noise_texture_view, _default_sampler) =
+        image_handle_to_view_sampler(&pbr_shaders, &gpu_images, &blue_noise.image);
+
     for (entity, view, view_lights, mut transparent_phase) in views.iter_mut() {
         // TODO: cache this?
         let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
@@ -619,6 +670,14 @@ pub fn queue_meshes(
                 BindGroupEntry {
                     binding: 5,
                     resource: BindingResource::Sampler(&shadow_shaders.directional_light_sampler),
+                },
+                BindGroupEntry {
+                    binding: 6,
+                    resource: BindingResource::TextureView(blue_noise_texture_view),
+                },
+                BindGroupEntry {
+                    binding: 7,
+                    resource: BindingResource::Sampler(&pbr_shaders.blue_noise_sampler),
                 },
             ],
             label: None,

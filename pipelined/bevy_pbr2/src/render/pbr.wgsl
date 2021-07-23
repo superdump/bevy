@@ -146,6 +146,10 @@ var point_shadow_textures_sampler: sampler_comparison;
 var directional_shadow_textures: texture_depth_2d_array;
 [[group(0), binding(5)]]
 var directional_shadow_textures_sampler: sampler_comparison;
+[[group(0), binding(6)]]
+var blue_noise_texture: texture_2d<f32>;
+[[group(0), binding(7)]]
+var blue_noise_sampler: sampler;
 
 [[group(1), binding(0)]]
 var material: StandardMaterial;

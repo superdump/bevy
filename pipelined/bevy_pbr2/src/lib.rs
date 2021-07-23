@@ -30,10 +30,13 @@ impl Plugin for PbrPlugin {
         app.add_plugin(StandardMaterialPlugin)
             .init_resource::<AmbientLight>()
             .init_resource::<DirectionalLightShadowMap>()
-            .init_resource::<PointLightShadowMap>();
+            .init_resource::<PointLightShadowMap>()
+            .init_resource::<BlueNoise>()
+            .add_startup_system(render::load_blue_noise.system());
 
         let render_app = app.sub_app(RenderApp);
         render_app
+            .add_system_to_stage(RenderStage::Extract, render::extract_blue_noise)
             .add_system_to_stage(RenderStage::Extract, render::extract_meshes)
             .add_system_to_stage(RenderStage::Extract, render::extract_lights)
             .add_system_to_stage(RenderStage::Prepare, render::prepare_meshes)
