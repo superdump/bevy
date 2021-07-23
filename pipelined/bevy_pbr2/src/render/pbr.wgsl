@@ -534,11 +534,16 @@ fn sample_directional_shadow_pcf(
     var shadow: f32 = 0.0;
     for (var i: u32 = 0u; i < sample_count; i = i + 1u) {
         // Use R2 sequence for maximally-distant ideal sampling of the blue noise texture
-        let blue_noise_values = textureSampleLevel(blue_noise_texture, blue_noise_sampler, base_noise_uv + R2(i), 0.0).xy;
+        let blue_noise_values = textureSampleLevel(
+            blue_noise_texture,
+            blue_noise_sampler,
+            base_noise_uv + R2(i),
+            0.0
+        ).xy;
         // let frame_blue_noise_values = fract(blue_noise_values + frame_golden_ratio_offset);
         let texel_offsets =
             sqrt(blue_noise_values.y)
-            * vec2<f32>(sin(blue_noise_values.x * tau), cos(blue_noise_values.y * tau))
+            * vec2<f32>(sin(blue_noise_values.x * tau), cos(blue_noise_values.x * tau))
             * radius * shadow_map_texel_size;
         // 2x2 hardware bilinear-filtered PCF
         shadow = shadow + textureSampleCompareLevel(
