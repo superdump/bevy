@@ -500,6 +500,7 @@ fn R2(index: u32) -> vec2<f32> {
 }
 
 var golden_ratio: f32 = 0.618033988749895;
+var tau: f32 = 6.283185307179586;
 
 fn sample_directional_shadow_pcf(
     uv: vec2<f32>,
@@ -524,18 +525,21 @@ fn sample_directional_shadow_pcf(
     // tile noise texture over screen, based on screen dimensions divided by noise size
     let shadow_map_size = vec2<f32>(textureDimensions(directional_shadow_textures));
     let noise_size = vec2<f32>(textureDimensions(blue_noise_texture));
-    let shadow_texels_per_noise_texel = shadow_map_size / noise_size;
 
     let shadow_map_texel_size = vec2<f32>(1.0) / shadow_map_size;
 
     let base_noise_uv = frag_coord / noise_size;
+    // let frame_golden_ratio_offset = vec2<f32>(f32(view.frame_number % 64u) * golden_ratio);
 
     var shadow: f32 = 0.0;
     for (var i: u32 = 0u; i < sample_count; i = i + 1u) {
         // Use R2 sequence for maximally-distant ideal sampling of the blue noise texture
         let blue_noise_values = textureSampleLevel(blue_noise_texture, blue_noise_sampler, base_noise_uv + R2(i), 0.0).xy;
-        // let frame_blue_noise_values = fract(blue_noise_values + vec2<f32>(f32(view.frame_number % 64u) * golden_ratio));
-        let texel_offsets = (blue_noise_values * 2.0 - 1.0) * radius * shadow_map_texel_size;
+        // let frame_blue_noise_values = fract(blue_noise_values + frame_golden_ratio_offset);
+        let texel_offsets =
+            sqrt(blue_noise_values.y)
+            * vec2<f32>(sin(blue_noise_values.x * tau), cos(blue_noise_values.y * tau))
+            * radius * shadow_map_texel_size;
         // 2x2 hardware bilinear-filtered PCF
         shadow = shadow + textureSampleCompareLevel(
             directional_shadow_textures,
@@ -578,7 +582,7 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
         i32(light_id),
         depth,
         16u,
-        5.0 * 0.5,
+        100.0 * 0.5,
         frag_coord
     );
 }
