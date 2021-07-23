@@ -112,6 +112,7 @@ impl Plugin for RenderPlugin {
                 SystemStage::parallel().with_system(render_system.exclusive_system()),
             )
             .add_stage(RenderStage::Cleanup, SystemStage::parallel())
+            .init_resource::<FrameMeta>()
             .insert_resource(instance)
             .insert_resource(device)
             .insert_resource(queue)
@@ -170,6 +171,12 @@ impl Plugin for RenderPlugin {
                 .unwrap();
             cleanup.run(&mut render_app.world);
 
+            render_app
+                .world
+                .get_resource_mut::<FrameMeta>()
+                .unwrap()
+                .frame_number += 1;
+
             render_app.world.clear_entities();
         });
 
@@ -200,4 +207,9 @@ fn extract(app_world: &mut World, render_app: &mut App) {
     app_world.insert_resource(ScratchRenderWorld(scratch_world));
 
     extract.apply_buffers(&mut render_app.world);
+}
+
+#[derive(Default)]
+pub struct FrameMeta {
+    pub frame_number: u32,
 }

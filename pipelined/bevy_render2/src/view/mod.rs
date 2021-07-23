@@ -7,7 +7,7 @@ use crate::{
     render_graph::{Node, NodeRunError, RenderGraph, RenderGraphContext},
     render_resource::DynamicUniformVec,
     renderer::{RenderContext, RenderDevice},
-    RenderApp, RenderStage,
+    FrameMeta, RenderApp, RenderStage,
 };
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
@@ -44,6 +44,7 @@ pub struct ViewUniform {
     view_proj: Mat4,
     projection: Mat4,
     world_position: Vec3,
+    frame_number: u32,
 }
 
 #[derive(Default)]
@@ -59,6 +60,7 @@ fn prepare_views(
     mut commands: Commands,
     render_resources: Res<RenderDevice>,
     mut view_meta: ResMut<ViewMeta>,
+    frame_meta: Res<FrameMeta>,
     mut extracted_views: Query<(Entity, &ExtractedView)>,
 ) {
     view_meta
@@ -71,6 +73,7 @@ fn prepare_views(
                 view_proj: projection * camera.transform.compute_matrix().inverse(),
                 projection,
                 world_position: camera.transform.translation,
+                frame_number: frame_meta.frame_number,
             }),
         };
 
