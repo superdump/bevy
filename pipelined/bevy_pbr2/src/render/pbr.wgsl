@@ -486,13 +486,30 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
     );
 }
 
+// R2 given indices 0, 1, 2, ... will return values in [0.0, 1.0] that are 'maximally distant'
+// from each other. Scale this by a blue noise texture size to sample a blue noise texture due
+// to the way blue noise textures work (very different / very similar close for close neighbors
+// and this 'rippling' drops of to 0 at about 10 samples distance but maximally distant is best.)
+fn R2(index: u32) -> vec2<f32> {
+    // Generalized golden ratio to 2d.
+    // Solution to x^3 = x + 1
+    // AKA plastic constant.
+    // from http://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
+    let g = 1.32471795724474602596;
+    return fract(vec2<f32>(f32(index) / g, f32(index) / (g * g)));
+}
+
+var golden_ratio: f32 = 0.618033988749895;
+
 fn sample_directional_shadow_pcf(
     uv: vec2<f32>,
     texture_index: i32,
     depth: f32,
-    filter_size: i32
+    sample_count: u32,
+    radius: f32,
+    frag_coord: vec2<f32>,
 ) -> f32 {
-    if (filter_size == 1) {
+    if (sample_count == 1u) {
         return textureSampleCompareLevel(
             directional_shadow_textures,
             directional_shadow_textures_sampler,
@@ -501,27 +518,37 @@ fn sample_directional_shadow_pcf(
             depth
         );
     }
-    let bound = filter_size / 2;
-    let inverse_sample_count = 1.0 / f32(filter_size * filter_size);
-    let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(directional_shadow_textures));
+
+    let inverse_sample_count = 1.0 / f32(sample_count);
+
+    // tile noise texture over screen, based on screen dimensions divided by noise size
+    let shadow_map_size = vec2<f32>(textureDimensions(directional_shadow_textures));
+    let noise_size = vec2<f32>(textureDimensions(blue_noise_texture));
+    let shadow_texels_per_noise_texel = shadow_map_size / noise_size;
+
+    let shadow_map_texel_size = vec2<f32>(1.0) / shadow_map_size;
+
+    let base_noise_uv = frag_coord / noise_size;
+
     var shadow: f32 = 0.0;
-    for (var y: i32 = -bound; y <= bound; y = y + 1) {
-        for (var x: i32 = -bound; x <= bound; x = x + 1) {
-            let texel_offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-            // 2x2 hardware bilinear-filtered PCF
-            shadow = shadow + textureSampleCompareLevel(
-                directional_shadow_textures,
-                directional_shadow_textures_sampler,
-                uv + texel_offset,
-                texture_index,
-                depth
-            ) * inverse_sample_count;
-        }
+    for (var i: u32 = 0u; i < sample_count; i = i + 1u) {
+        // Use R2 sequence for maximally-distant ideal sampling of the blue noise texture
+        let blue_noise_values = textureSampleLevel(blue_noise_texture, blue_noise_sampler, base_noise_uv + R2(i), 0.0).xy;
+        // let frame_blue_noise_values = fract(blue_noise_values + vec2<f32>(f32(view.frame_number % 64u) * golden_ratio));
+        let texel_offsets = (blue_noise_values * 2.0 - 1.0) * radius * shadow_map_texel_size;
+        // 2x2 hardware bilinear-filtered PCF
+        shadow = shadow + textureSampleCompareLevel(
+            directional_shadow_textures,
+            directional_shadow_textures_sampler,
+            uv + texel_offsets,
+            texture_index,
+            depth
+        ) * inverse_sample_count;
     }
     return shadow;
 }
 
-fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
+fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>, frag_coord: vec2<f32>) -> f32 {
     let light = lights.directional_lights[light_id];
 
     // The normal bias is scaled to the texel size.
@@ -550,12 +577,15 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
         light_local,
         i32(light_id),
         depth,
-        5
+        16u,
+        5.0 * 0.5,
+        frag_coord
     );
 }
 
 struct FragmentInput {
     [[builtin(front_facing)]] is_front: bool;
+    [[builtin(position)]] frag_coord: vec4<f32>;
     [[location(0)]] world_position: vec4<f32>;
     [[location(1)]] world_normal: vec3<f32>;
     [[location(2)]] uv: vec2<f32>;
@@ -657,7 +687,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             let light = lights.directional_lights[i];
             var shadow: f32;
             if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u) {
-                shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
+                shadow = fetch_directional_shadow(i, in.world_position, in.world_normal, in.frag_coord.xy);
             } else {
                 shadow = 1.0;
             }
