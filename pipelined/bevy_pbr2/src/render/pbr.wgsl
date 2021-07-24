@@ -616,7 +616,10 @@ fn sample_directional_shadow_pcf_blue_noise_disc(
 
     let shadow_map_texel_size = vec2<f32>(1.0) / shadow_map_size;
 
-    let base_noise_uv = frag_coord / noise_size;
+    // Frame variation
+    // Offset the blue noise _UVs_ by the R2 sequence based on the frame number
+    let base_noise_uv = frag_coord / noise_size + R2(view.frame_number % 64u);
+    // Offset the blue noise _value_ by a frame number multiple of the golden ratio
     // let frame_golden_ratio_offset = vec2<f32>(f32(view.frame_number % 64u) * golden_ratio);
 
     var shadow: f32 = 0.0;
@@ -674,13 +677,13 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
     let depth = offset_position_ndc.z;
     if (use_blue_noise == 1u) {
         return sample_directional_shadow_pcf_blue_noise_disc(
-        light_local,
-        i32(light_id),
-        depth,
-        16u,
-        100.0 * 0.5,
-        frag_coord
-    );
+            light_local,
+            i32(light_id),
+            depth,
+            16u,
+            100.0 * 0.5,
+            frag_coord
+        );
     } else {
         return sample_directional_shadow_pcf_disc(
             light_local,
