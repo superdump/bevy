@@ -590,7 +590,7 @@ fn R2(index: u32) -> vec2<f32> {
 var golden_ratio: f32 = 0.618033988749895;
 var tau: f32 = 6.283185307179586;
 
-fn sample_directional_shadow_pcf(
+fn sample_directional_shadow_pcf_blue_noise_disc(
     uv: vec2<f32>,
     texture_index: i32,
     depth: f32,
@@ -645,6 +645,8 @@ fn sample_directional_shadow_pcf(
     return shadow;
 }
 
+var use_blue_noise: u32 = 1u;
+
 fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>, frag_coord: vec2<f32>) -> f32 {
     let light = lights.directional_lights[light_id];
 
@@ -670,7 +672,8 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
     let light_local = offset_position_ndc.xy * flip_correction + vec2<f32>(0.5, 0.5);
 
     let depth = offset_position_ndc.z;
-    return sample_directional_shadow_pcf(
+    if (use_blue_noise == 1u) {
+        return sample_directional_shadow_pcf_blue_noise_disc(
         light_local,
         i32(light_id),
         depth,
@@ -678,6 +681,15 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
         100.0 * 0.5,
         frag_coord
     );
+    } else {
+        return sample_directional_shadow_pcf_disc(
+            light_local,
+            i32(light_id),
+            depth,
+            7u,
+            100.0 * 0.5
+        );
+    }
 }
 
 struct FragmentInput {
