@@ -486,6 +486,94 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
     );
 }
 
+var pcf3_disc_count: u32 = 5;
+var pcf3_disc: array<vec2<f32>, 5> = array<vec2<f32>, 5>(
+                           vec2<f32>( 0.0,  1.0),
+    vec2<f32>(-1.0,  0.0), vec2<f32>( 0.0,  0.0), vec2<f32>( 1.0,  0.0),
+                           vec2<f32>( 0.0, -1.0)
+);
+
+var pcf5_disc_count: u32 = 21;
+var pcf5_disc: array<vec2<f32>, 21> = array<vec2<f32>, 21>(
+                           vec2<f32>(-1.0,  2.0), vec2<f32>( 0.0,  2.0), vec2<f32>( 1.0,  2.0),
+    vec2<f32>(-2.0,  1.0), vec2<f32>(-1.0,  1.0), vec2<f32>( 0.0,  1.0), vec2<f32>( 1.0,  1.0), vec2<f32>( 2.0,  1.0),
+    vec2<f32>(-2.0,  0.0), vec2<f32>(-1.0,  0.0), vec2<f32>( 0.0,  0.0), vec2<f32>( 1.0,  0.0), vec2<f32>( 2.0,  0.0),
+    vec2<f32>(-2.0, -1.0), vec2<f32>(-1.0, -1.0), vec2<f32>( 0.0, -1.0), vec2<f32>( 1.0, -1.0), vec2<f32>( 2.0, -1.0),
+                           vec2<f32>(-1.0, -2.0), vec2<f32>( 0.0, -2.0), vec2<f32>( 1.0, -2.0)
+);
+
+var pcf7_disc_count: u32 = 37;
+var pcf7_disc: array<vec2<f32>, 37> = array<vec2<f32>, 37>(
+                                                  vec2<f32>(-1.0,  3.0), vec2<f32>( 0.0,  3.0), vec2<f32>( 1.0,  3.0),
+                           vec2<f32>(-2.0,  2.0), vec2<f32>(-1.0,  2.0), vec2<f32>( 0.0,  2.0), vec2<f32>( 1.0,  2.0), vec2<f32>( 2.0,  2.0),
+    vec2<f32>(-3.0,  1.0), vec2<f32>(-2.0,  1.0), vec2<f32>(-1.0,  1.0), vec2<f32>( 0.0,  1.0), vec2<f32>( 1.0,  1.0), vec2<f32>( 2.0,  1.0), vec2<f32>( 3.0,  1.0),
+    vec2<f32>(-3.0,  0.0), vec2<f32>(-2.0,  0.0), vec2<f32>(-1.0,  0.0), vec2<f32>( 0.0,  0.0), vec2<f32>( 1.0,  0.0), vec2<f32>( 2.0,  0.0), vec2<f32>( 3.0,  0.0),
+    vec2<f32>(-3.0, -1.0), vec2<f32>(-2.0, -1.0), vec2<f32>(-1.0, -1.0), vec2<f32>( 0.0, -1.0), vec2<f32>( 1.0, -1.0), vec2<f32>( 2.0, -1.0), vec2<f32>( 3.0, -1.0),
+                           vec2<f32>(-2.0, -2.0), vec2<f32>(-1.0, -2.0), vec2<f32>( 0.0, -2.0), vec2<f32>( 1.0, -2.0), vec2<f32>( 2.0, -2.0),
+                                                  vec2<f32>(-1.0, -3.0), vec2<f32>( 0.0, -3.0), vec2<f32>( 1.0, -3.0)
+);
+
+fn sample_directional_shadow_pcf_disc(
+    uv: vec2<f32>,
+    texture_index: i32,
+    depth: f32,
+    filter_size: u32,
+    radius: f32
+) -> f32 {
+
+    let shadow_map_size = vec2<f32>(textureDimensions(directional_shadow_textures));
+    let shadow_map_texel_size = vec2<f32>(radius) / shadow_map_size;
+
+    var shadow: f32 = 0.0;
+    if (filter_size == 7u) {
+        let inverse_sample_count = 1.0 / f32(pcf7_disc_count);
+        for (var i: u32 = 0u; i < pcf7_disc_count; i = i + 1u) {
+            // 2x2 hardware bilinear-filtered PCF
+            shadow = shadow + textureSampleCompareLevel(
+                directional_shadow_textures,
+                directional_shadow_textures_sampler,
+                uv + shadow_map_texel_size * pcf7_disc[i],
+                texture_index,
+                depth
+            ) * inverse_sample_count;
+        }
+    } elseif (filter_size == 5u) {
+        let inverse_sample_count = 1.0 / f32(pcf5_disc_count);
+        for (var i: u32 = 0u; i < pcf5_disc_count; i = i + 1u) {
+            // 2x2 hardware bilinear-filtered PCF
+            shadow = shadow + textureSampleCompareLevel(
+                directional_shadow_textures,
+                directional_shadow_textures_sampler,
+                uv + shadow_map_texel_size * pcf5_disc[i],
+                texture_index,
+                depth
+            ) * inverse_sample_count;
+        }
+    } elseif (filter_size == 3u) {
+        let inverse_sample_count = 1.0 / f32(pcf3_disc_count);
+        for (var i: u32 = 0u; i < pcf3_disc_count; i = i + 1u) {
+            // 2x2 hardware bilinear-filtered PCF
+            shadow = shadow + textureSampleCompareLevel(
+                directional_shadow_textures,
+                directional_shadow_textures_sampler,
+                uv + shadow_map_texel_size * pcf3_disc[i],
+                texture_index,
+                depth
+            ) * inverse_sample_count;
+        }
+    } else {
+        shadow = textureSampleCompareLevel(
+            directional_shadow_textures,
+            directional_shadow_textures_sampler,
+            uv,
+            texture_index,
+            depth
+        );
+    }
+
+    return shadow;
+}
+
 // R2 given indices 0, 1, 2, ... will return values in [0.0, 1.0] that are 'maximally distant'
 // from each other. Scale this by a blue noise texture size to sample a blue noise texture due
 // to the way blue noise textures work (very different / very similar close for close neighbors
