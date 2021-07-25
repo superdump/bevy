@@ -87,7 +87,7 @@ bevy_winit = { path = "crates/bevy_winit", optional = true, version = "0.2.1" }
 bevy_gilrs = { path = "crates/bevy_gilrs", optional = true, version = "0.2.1" }
 
 [dev-dependencies]
-rand = "0.7.3"
+rand = "0.8.4"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
 
