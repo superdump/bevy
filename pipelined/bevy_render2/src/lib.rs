@@ -13,6 +13,7 @@ pub mod texture;
 pub mod view;
 
 pub use once_cell;
+use wgpu::Backends;
 
 use crate::{
     camera::CameraPlugin,
@@ -87,7 +88,7 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         let (instance, device, queue) =
             futures_lite::future::block_on(renderer::initialize_renderer(
-                BackendBit::PRIMARY,
+                wgpu::util::backend_bits_from_env().unwrap_or(Backends::PRIMARY),
                 &wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::HighPerformance,
                     ..Default::default()
