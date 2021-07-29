@@ -648,7 +648,7 @@ fn sample_directional_shadow_pcf_blue_noise_disc(
     return shadow;
 }
 
-var use_blue_noise: u32 = 1u;
+var use_blue_noise: u32 = 0u;
 
 fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>, frag_coord: vec2<f32>) -> f32 {
     let light = lights.directional_lights[light_id];
@@ -675,22 +675,22 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
     let light_local = offset_position_ndc.xy * flip_correction + vec2<f32>(0.5, 0.5);
 
     let depth = offset_position_ndc.z;
-    if (use_blue_noise == 1u) {
+    if (use_blue_noise == 0u) {
+        return sample_directional_shadow_pcf_disc(
+            light_local,
+            i32(light_id),
+            depth,
+            5u,
+            5.0 * 0.5
+        );
+    } else {
         return sample_directional_shadow_pcf_blue_noise_disc(
             light_local,
             i32(light_id),
             depth,
             16u,
-            100.0 * 0.5,
+            5.0 * 0.5,
             frag_coord
-        );
-    } else {
-        return sample_directional_shadow_pcf_disc(
-            light_local,
-            i32(light_id),
-            depth,
-            7u,
-            100.0 * 0.5
         );
     }
 }
