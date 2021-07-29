@@ -405,7 +405,15 @@ var sample_offset_directions: array<vec3<f32>, 20> = array<vec3<f32>, 20>(
     vec3<f32>( 0.0,  1.0,  1.0), vec3<f32>( 0.0, -1.0,  1.0), vec3<f32>( 0.0, -1.0, -1.0), vec3<f32>( 0.0,  1.0, -1.0)
 );
 
-fn sample_point_shadow_pcf(
+// 2x2 matrix inverse as WGSL does not have one yet
+fn inverse2x2(m: mat2x2<f32>) -> mat2x2<f32> {
+    let inv_det = 1.0 / determinant(m);
+    return mat2x2<f32>(
+        vec2<f32>( m[1][1], -m[0][1]),
+        vec2<f32>(-m[1][0],  m[0][0])
+    ) * inv_det;
+}
+
     center_to_fragment: vec3<f32>,
     texture_index: i32,
     depth: f32,
@@ -520,45 +528,56 @@ fn sample_directional_shadow_pcf_disc(
     filter_size: u32,
     radius: f32
 ) -> f32 {
-
     let shadow_map_size = vec2<f32>(textureDimensions(directional_shadow_textures));
     let shadow_map_texel_size = vec2<f32>(radius) / shadow_map_size;
+
+    // Receiver Plane Depth Bias
+    // from https://developer.amd.com/wordpress/media/2012/10/Isidoro-ShadowMapping.pdf
+    let uv_jacobian = mat2x2<f32>(dpdx(uv), dpdy(uv));
+    let ddepth_dscreenuv = vec2<f32>(dpdx(depth), dpdy(depth));
+    let ddepth_duv = transpose(inverse2x2(uv_jacobian)) * ddepth_dscreenuv;
 
     var shadow: f32 = 0.0;
     if (filter_size == 7u) {
         let inverse_sample_count = 1.0 / f32(pcf7_disc_count);
         for (var i: u32 = 0u; i < pcf7_disc_count; i = i + 1u) {
+            let uv_offset = shadow_map_texel_size * pcf7_disc[i];
+            let receiver_plane_depth_bias = dot(uv_offset, ddepth_duv);
             // 2x2 hardware bilinear-filtered PCF
             shadow = shadow + textureSampleCompareLevel(
                 directional_shadow_textures,
                 directional_shadow_textures_sampler,
-                uv + shadow_map_texel_size * pcf7_disc[i],
+                uv + uv_offset,
                 texture_index,
-                depth
+                depth + receiver_plane_depth_bias
             ) * inverse_sample_count;
         }
     } elseif (filter_size == 5u) {
         let inverse_sample_count = 1.0 / f32(pcf5_disc_count);
         for (var i: u32 = 0u; i < pcf5_disc_count; i = i + 1u) {
+            let uv_offset = shadow_map_texel_size * pcf5_disc[i];
+            let receiver_plane_depth_bias = dot(uv_offset, ddepth_duv);
             // 2x2 hardware bilinear-filtered PCF
             shadow = shadow + textureSampleCompareLevel(
                 directional_shadow_textures,
                 directional_shadow_textures_sampler,
-                uv + shadow_map_texel_size * pcf5_disc[i],
+                uv + uv_offset,
                 texture_index,
-                depth
+                depth + receiver_plane_depth_bias
             ) * inverse_sample_count;
         }
     } elseif (filter_size == 3u) {
         let inverse_sample_count = 1.0 / f32(pcf3_disc_count);
         for (var i: u32 = 0u; i < pcf3_disc_count; i = i + 1u) {
+            let uv_offset = shadow_map_texel_size * pcf3_disc[i];
+            let receiver_plane_depth_bias = dot(uv_offset, ddepth_duv);
             // 2x2 hardware bilinear-filtered PCF
             shadow = shadow + textureSampleCompareLevel(
                 directional_shadow_textures,
                 directional_shadow_textures_sampler,
-                uv + shadow_map_texel_size * pcf3_disc[i],
+                uv + uv_offset,
                 texture_index,
-                depth
+                depth + receiver_plane_depth_bias
             ) * inverse_sample_count;
         }
     } else {
@@ -598,23 +617,19 @@ fn sample_directional_shadow_pcf_blue_noise_disc(
     radius: f32,
     frag_coord: vec2<f32>,
 ) -> f32 {
-    if (sample_count == 1u) {
-        return textureSampleCompareLevel(
-            directional_shadow_textures,
-            directional_shadow_textures_sampler,
-            uv,
-            texture_index,
-            depth
-        );
-    }
-
     let inverse_sample_count = 1.0 / f32(sample_count);
 
     // tile noise texture over screen, based on screen dimensions divided by noise size
     let shadow_map_size = vec2<f32>(textureDimensions(directional_shadow_textures));
     let noise_size = vec2<f32>(textureDimensions(blue_noise_texture));
 
-    let shadow_map_texel_size = vec2<f32>(1.0) / shadow_map_size;
+    let shadow_map_texel_size = vec2<f32>(radius) / shadow_map_size;
+
+    // Receiver Plane Depth Bias
+    // from https://developer.amd.com/wordpress/media/2012/10/Isidoro-ShadowMapping.pdf
+    let uv_jacobian = mat2x2<f32>(dpdx(uv), dpdy(uv));
+    let ddepth_dscreenuv = vec2<f32>(dpdx(depth), dpdy(depth));
+    let ddepth_duv = transpose(inverse2x2(uv_jacobian)) * ddepth_dscreenuv;
 
     // Frame variation
     // Offset the blue noise _UVs_ by the R2 sequence based on the frame number
@@ -632,17 +647,18 @@ fn sample_directional_shadow_pcf_blue_noise_disc(
             0.0
         ).xy;
         // let frame_blue_noise_values = fract(blue_noise_values + frame_golden_ratio_offset);
-        let texel_offsets =
+        let uv_offset =
             sqrt(blue_noise_values.y)
             * vec2<f32>(sin(blue_noise_values.x * tau), cos(blue_noise_values.x * tau))
-            * radius * shadow_map_texel_size;
+            * shadow_map_texel_size;
+        let receiver_plane_depth_bias = dot(uv_offset, ddepth_duv);
         // 2x2 hardware bilinear-filtered PCF
         shadow = shadow + textureSampleCompareLevel(
             directional_shadow_textures,
             directional_shadow_textures_sampler,
-            uv + texel_offsets,
+            uv + uv_offset,
             texture_index,
-            depth
+            depth + receiver_plane_depth_bias
         ) * inverse_sample_count;
     }
     return shadow;
