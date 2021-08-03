@@ -47,6 +47,12 @@ pub struct ExtractedDirectionalLight {
     projection: Mat4,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+    near: f32,
+    far: f32,
 }
 
 pub type ExtractedDirectionalLightShadowMap = DirectionalLightShadowMap;
@@ -69,10 +75,18 @@ pub struct GpuPointLight {
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuDirectionalLight {
     view_projection: Mat4,
+    view: Mat4,
+    projection: Mat4,
     color: Vec4,
     dir_to_light: Vec3,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+    near: f32,
+    far: f32,
 }
 
 #[repr(C)]
@@ -313,6 +327,12 @@ pub fn extract_lights(
                 shadow_normal_bias: directional_light.shadow_normal_bias
                     * directional_light_texel_size
                     * std::f32::consts::SQRT_2,
+                left: directional_light.shadow_projection.left,
+                right: directional_light.shadow_projection.right,
+                bottom: directional_light.shadow_projection.bottom,
+                top: directional_light.shadow_projection.top,
+                near: directional_light.shadow_projection.near,
+                far: directional_light.shadow_projection.far,
             });
     }
 }
@@ -556,8 +576,16 @@ pub fn prepare_lights(
                 dir_to_light,
                 // NOTE: * view is correct, it should not be view.inverse() here
                 view_projection: projection * view,
+                view,
+                projection,
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
+                left: light.left,
+                right: light.right,
+                bottom: light.bottom,
+                top: light.top,
+                near: light.near,
+                far: light.far,
             };
 
             let depth_texture_view =

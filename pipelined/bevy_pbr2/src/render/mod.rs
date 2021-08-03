@@ -67,7 +67,7 @@ impl FromWorld for PbrShaders {
                         has_dynamic_offset: true,
                         // TODO: change this to GpuLights::std140_size_static once crevice fixes this!
                         // Context: https://github.com/LPGhatguy/crevice/issues/29
-                        min_binding_size: BufferSize::new(1424),
+                        min_binding_size: BufferSize::new(1792),
                     },
                     count: None,
                 },

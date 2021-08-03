@@ -119,10 +119,18 @@ struct PointLight {
 
 struct DirectionalLight {
     view_projection: mat4x4<f32>;
+    view: mat4x4<f32>;
+    projection: mat4x4<f32>;
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
     shadow_depth_bias: f32;
     shadow_normal_bias: f32;
+    left: f32;
+    right: f32;
+    bottom: f32;
+    top: f32;
+    near: f32;
+    far: f32;
 };
 
 [[block]]
