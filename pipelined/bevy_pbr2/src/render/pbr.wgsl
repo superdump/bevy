@@ -142,14 +142,18 @@ var lights: Lights;
 [[group(0), binding(2)]]
 var point_shadow_textures: texture_depth_cube_array;
 [[group(0), binding(3)]]
-var point_shadow_textures_sampler: sampler_comparison;
+var point_shadow_comparison_sampler: sampler_comparison;
 [[group(0), binding(4)]]
-var directional_shadow_textures: texture_depth_2d_array;
+var point_shadow_sampler: sampler;
 [[group(0), binding(5)]]
-var directional_shadow_textures_sampler: sampler_comparison;
+var directional_shadow_textures: texture_depth_2d_array;
 [[group(0), binding(6)]]
-var blue_noise_texture: texture_2d<f32>;
+var directional_shadow_comparison_sampler: sampler_comparison;
 [[group(0), binding(7)]]
+var directional_shadow_sampler: sampler;
+[[group(0), binding(8)]]
+var blue_noise_texture: texture_2d<f32>;
+[[group(0), binding(9)]]
 var blue_noise_sampler: sampler;
 
 [[group(1), binding(0)]]
@@ -468,7 +472,7 @@ fn sample_point_shadow_pcf_cube(
     if (n_samples == 1) {
         return textureSampleCompareLevel(
             point_shadow_textures,
-            point_shadow_textures_sampler,
+            point_shadow_comparison_sampler,
             center_to_fragment,
             texture_index,
             depth
@@ -485,7 +489,7 @@ fn sample_point_shadow_pcf_cube(
         // 2x2 hardware bilinear-filtered PCF
         shadow = shadow + textureSampleCompareLevel(
             point_shadow_textures,
-            point_shadow_textures_sampler,
+            point_shadow_comparison_sampler,
             center_to_fragment + sample_offset_directions[i] * shadow_map_step_texels,
             texture_index,
             depth
@@ -505,7 +509,7 @@ fn sample_point_shadow_pcf_disc(
     if (filter_size == 1u) {
         return textureSampleCompareLevel(
             point_shadow_textures,
-            point_shadow_textures_sampler,
+            point_shadow_comparison_sampler,
             center_to_fragment,
             texture_index,
             depth
@@ -528,7 +532,7 @@ fn sample_point_shadow_pcf_disc(
             // 2x2 hardware bilinear-filtered PCF
             shadow = shadow + textureSampleCompareLevel(
                 point_shadow_textures,
-                point_shadow_textures_sampler,
+                point_shadow_comparison_sampler,
                 center_to_fragment + right * pcf7_disc[i].x + up * pcf7_disc[i].y,
                 texture_index,
                 depth
@@ -540,7 +544,7 @@ fn sample_point_shadow_pcf_disc(
             // 2x2 hardware bilinear-filtered PCF
             shadow = shadow + textureSampleCompareLevel(
                 point_shadow_textures,
-                point_shadow_textures_sampler,
+                point_shadow_comparison_sampler,
                 center_to_fragment + right * pcf5_disc[i].x + up * pcf5_disc[i].y,
                 texture_index,
                 depth
@@ -552,7 +556,7 @@ fn sample_point_shadow_pcf_disc(
             // 2x2 hardware bilinear-filtered PCF
             shadow = shadow + textureSampleCompareLevel(
                 point_shadow_textures,
-                point_shadow_textures_sampler,
+                point_shadow_comparison_sampler,
                 center_to_fragment + right * pcf3_disc[i].x + up * pcf3_disc[i].y,
                 texture_index,
                 depth
@@ -561,7 +565,7 @@ fn sample_point_shadow_pcf_disc(
     } else {
         return textureSampleCompareLevel(
             point_shadow_textures,
-            point_shadow_textures_sampler,
+            point_shadow_comparison_sampler,
             center_to_fragment,
             texture_index,
             depth
@@ -583,7 +587,7 @@ fn sample_point_shadow_pcf_blue_noise_disc(
     if (sample_count == 1u) {
         return textureSampleCompareLevel(
             point_shadow_textures,
-            point_shadow_textures_sampler,
+            point_shadow_comparison_sampler,
             center_to_fragment,
             texture_index,
             depth
@@ -626,7 +630,7 @@ fn sample_point_shadow_pcf_blue_noise_disc(
         // 2x2 hardware bilinear-filtered PCF
         shadow = shadow + textureSampleCompareLevel(
             point_shadow_textures,
-            point_shadow_textures_sampler,
+            point_shadow_comparison_sampler,
             center_to_fragment_unit + offset_sample_space,
             texture_index,
             depth
@@ -737,7 +741,7 @@ fn sample_directional_shadow_pcf_disc(
             // 2x2 hardware bilinear-filtered PCF
             shadow = shadow + textureSampleCompareLevel(
                 directional_shadow_textures,
-                directional_shadow_textures_sampler,
+                directional_shadow_comparison_sampler,
                 uv + uv_offset,
                 texture_index,
                 depth + receiver_plane_depth_bias
@@ -751,7 +755,7 @@ fn sample_directional_shadow_pcf_disc(
             // 2x2 hardware bilinear-filtered PCF
             shadow = shadow + textureSampleCompareLevel(
                 directional_shadow_textures,
-                directional_shadow_textures_sampler,
+                directional_shadow_comparison_sampler,
                 uv + uv_offset,
                 texture_index,
                 depth + receiver_plane_depth_bias
@@ -765,7 +769,7 @@ fn sample_directional_shadow_pcf_disc(
             // 2x2 hardware bilinear-filtered PCF
             shadow = shadow + textureSampleCompareLevel(
                 directional_shadow_textures,
-                directional_shadow_textures_sampler,
+                directional_shadow_comparison_sampler,
                 uv + uv_offset,
                 texture_index,
                 depth + receiver_plane_depth_bias
@@ -774,7 +778,7 @@ fn sample_directional_shadow_pcf_disc(
     } else {
         shadow = textureSampleCompareLevel(
             directional_shadow_textures,
-            directional_shadow_textures_sampler,
+            directional_shadow_comparison_sampler,
             uv,
             texture_index,
             depth
@@ -830,7 +834,7 @@ fn sample_directional_shadow_pcf_blue_noise_disc(
         // 2x2 hardware bilinear-filtered PCF
         shadow = shadow + textureSampleCompareLevel(
             directional_shadow_textures,
-            directional_shadow_textures_sampler,
+            directional_shadow_comparison_sampler,
             uv + uv_offset,
             texture_index,
             depth + receiver_plane_depth_bias

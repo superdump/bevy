@@ -97,7 +97,9 @@ pub struct ShadowShaders {
     pub shader_module: ShaderModule,
     pub pipeline: RenderPipeline,
     pub view_layout: BindGroupLayout,
+    pub point_light_comparison_sampler: Sampler,
     pub point_light_sampler: Sampler,
+    pub directional_light_comparison_sampler: Sampler,
     pub directional_light_sampler: Sampler,
 }
 
@@ -198,7 +200,7 @@ impl FromWorld for ShadowShaders {
             shader_module,
             pipeline,
             view_layout,
-            point_light_sampler: render_device.create_sampler(&SamplerDescriptor {
+            point_light_comparison_sampler: render_device.create_sampler(&SamplerDescriptor {
                 address_mode_u: AddressMode::ClampToEdge,
                 address_mode_v: AddressMode::ClampToEdge,
                 address_mode_w: AddressMode::ClampToEdge,
@@ -208,7 +210,18 @@ impl FromWorld for ShadowShaders {
                 compare: Some(CompareFunction::GreaterEqual),
                 ..Default::default()
             }),
-            directional_light_sampler: render_device.create_sampler(&SamplerDescriptor {
+            point_light_sampler: render_device.create_sampler(&SamplerDescriptor {
+                address_mode_u: AddressMode::ClampToEdge,
+                address_mode_v: AddressMode::ClampToEdge,
+                address_mode_w: AddressMode::ClampToEdge,
+                mag_filter: FilterMode::Nearest,
+                min_filter: FilterMode::Nearest,
+                mipmap_filter: FilterMode::Nearest,
+                compare: None,
+                ..Default::default()
+            }),
+            directional_light_comparison_sampler: render_device.create_sampler(
+                &SamplerDescriptor {
                 address_mode_u: AddressMode::ClampToEdge,
                 address_mode_v: AddressMode::ClampToEdge,
                 address_mode_w: AddressMode::ClampToEdge,
@@ -216,6 +229,17 @@ impl FromWorld for ShadowShaders {
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
                 compare: Some(CompareFunction::GreaterEqual),
+                ..Default::default()
+                },
+            ),
+            directional_light_sampler: render_device.create_sampler(&SamplerDescriptor {
+                address_mode_u: AddressMode::ClampToEdge,
+                address_mode_v: AddressMode::ClampToEdge,
+                address_mode_w: AddressMode::ClampToEdge,
+                mag_filter: FilterMode::Nearest,
+                min_filter: FilterMode::Nearest,
+                mipmap_filter: FilterMode::Nearest,
+                compare: None,
                 ..Default::default()
             }),
         }

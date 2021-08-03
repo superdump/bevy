@@ -82,7 +82,7 @@ impl FromWorld for PbrShaders {
                     },
                     count: None,
                 },
-                // Point Shadow Texture Array Sampler
+                // Point Shadow Texture Cube Array Comparison Sampler
                 BindGroupLayoutEntry {
                     binding: 3,
                     visibility: ShaderStage::FRAGMENT,
@@ -92,9 +92,19 @@ impl FromWorld for PbrShaders {
                     },
                     count: None,
                 },
-                // Directional Shadow Texture Array
+                // Point Shadow Texture Cube Array Sampler
                 BindGroupLayoutEntry {
                     binding: 4,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Sampler {
+                        comparison: false,
+                        filtering: false,
+                    },
+                    count: None,
+                },
+                // Directional Shadow Texture Array
+                BindGroupLayoutEntry {
+                    binding: 5,
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Texture {
                         multisampled: false,
@@ -103,9 +113,9 @@ impl FromWorld for PbrShaders {
                     },
                     count: None,
                 },
-                // Directional Shadow Texture Array Sampler
+                // Directional Shadow Texture Array Comparison Sampler
                 BindGroupLayoutEntry {
-                    binding: 5,
+                    binding: 6,
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Sampler {
                         comparison: true,
@@ -113,9 +123,19 @@ impl FromWorld for PbrShaders {
                     },
                     count: None,
                 },
+                // Directional Shadow Texture Array Sampler
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Sampler {
+                        comparison: false,
+                        filtering: false,
+                    },
+                    count: None,
+                },
                 // Blue Noise Texture
                 BindGroupLayoutEntry {
-                    binding: 6,
+                    binding: 8,
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Texture {
                         multisampled: false,
@@ -126,7 +146,7 @@ impl FromWorld for PbrShaders {
                 },
                 // Blue Noise Texture Sampler
                 BindGroupLayoutEntry {
-                    binding: 7,
+                    binding: 9,
                     visibility: ShaderStage::FRAGMENT,
                     ty: BindingType::Sampler {
                         comparison: false,
@@ -659,24 +679,36 @@ pub fn queue_meshes(
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::Sampler(&shadow_shaders.point_light_sampler),
+                    resource: BindingResource::Sampler(
+                        &shadow_shaders.point_light_comparison_sampler,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 4,
+                    resource: BindingResource::Sampler(&shadow_shaders.point_light_sampler),
+                },
+                BindGroupEntry {
+                    binding: 5,
                     resource: BindingResource::TextureView(
                         &view_lights.directional_light_depth_texture_view,
                     ),
                 },
                 BindGroupEntry {
-                    binding: 5,
-                    resource: BindingResource::Sampler(&shadow_shaders.directional_light_sampler),
-                },
-                BindGroupEntry {
                     binding: 6,
-                    resource: BindingResource::TextureView(blue_noise_texture_view),
+                    resource: BindingResource::Sampler(
+                        &shadow_shaders.directional_light_comparison_sampler,
+                    ),
                 },
                 BindGroupEntry {
                     binding: 7,
+                    resource: BindingResource::Sampler(&shadow_shaders.directional_light_sampler),
+                },
+                BindGroupEntry {
+                    binding: 8,
+                    resource: BindingResource::TextureView(blue_noise_texture_view),
+                },
+                BindGroupEntry {
+                    binding: 9,
                     resource: BindingResource::Sampler(&pbr_shaders.blue_noise_sampler),
                 },
             ],
