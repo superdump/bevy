@@ -409,6 +409,266 @@ fn directional_light(light: DirectionalLight, roughness: f32, NdotV: f32, normal
     return (specular_light + diffuse) * light.color.rgb * NoL;
 }
 
+fn point_light_adaptive_depth_bias(
+    light_id: i32,
+    fragment_world: vec4<f32>,
+    fragment_world_normal: vec3<f32>,
+) -> f32 {
+    let light = lights.point_lights[light_id];
+
+    let fragment_to_light_world = light.position.xyz - fragment_world.xyz;
+    let fragment_to_light_world_abs = abs(fragment_to_light_world);
+    let distance_to_light = max(fragment_to_light_world_abs.x, max(fragment_to_light_world_abs.y, fragment_to_light_world_abs.z));
+    var light_world_to_view: mat4x4<f32>;
+    // FIXME: The following matrices are inverse view matrices. They were created by printing the
+    // inverse view matrices from the renderer code. They should be simplified to avoid the 4x4 matrix
+    // multiplication.
+    if (distance_to_light == fragment_to_light_world_abs.x) {
+        if (distance_to_light == fragment_to_light_world.x) {
+            // +X
+            light_world_to_view = mat4x4<f32>(
+                vec4<f32>( 0.0,  0.0,  1.0,  0.0),
+                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
+                vec4<f32>( 1.0,  0.0,  0.0,  0.0),
+                vec4<f32>(
+                    -light.position.z,
+                    light.position.y,
+                    -light.position.x,
+                    1.0,
+                ),
+            );
+        } else {
+            // -X
+            light_world_to_view = mat4x4<f32>(
+                vec4<f32>( 0.0,  0.0, -1.0,  0.0),
+                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
+                vec4<f32>(-1.0,  0.0,  0.0,  0.0),
+                vec4<f32>(
+                    light.position.z,
+                    light.position.y,
+                    light.position.x,
+                    1.0,
+                ),
+            );
+        }
+    } elseif (distance_to_light == fragment_to_light_world_abs.y) {
+        if (distance_to_light == fragment_to_light_world.y) {
+            // +Y
+            light_world_to_view = mat4x4<f32>(
+                vec4<f32>(-1.0,  0.0,  0.0,  0.0),
+                vec4<f32>( 0.0,  0.0,  1.0,  0.0),
+                vec4<f32>( 0.0,  1.0,  0.0,  0.0),
+                vec4<f32>(
+                    light.position.x,
+                    -light.position.z,
+                    -light.position.y,
+                    1.0,
+                ),
+            );
+        } else {
+            // -Y
+            light_world_to_view = mat4x4<f32>(
+                vec4<f32>(-1.0,  0.0,  0.0,  0.0),
+                vec4<f32>( 0.0,  0.0, -1.0,  0.0),
+                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
+                vec4<f32>(
+                    light.position.x,
+                    light.position.z,
+                    light.position.y,
+                    1.0,
+                ),
+            );
+        }
+    } else {
+        if (distance_to_light == fragment_to_light_world.z) {
+            // +Z
+            light_world_to_view = mat4x4<f32>(
+                vec4<f32>(-1.0,  0.0,  0.0,  0.0),
+                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
+                vec4<f32>( 0.0,  0.0,  1.0,  0.0),
+                vec4<f32>(
+                    light.position.x,
+                    light.position.y,
+                    -light.position.z,
+                    1.0,
+                ),
+            );
+        } else {
+            // -Z
+            light_world_to_view = mat4x4<f32>(
+                vec4<f32>( 1.0,  0.0,  0.0,  0.0),
+                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
+                vec4<f32>( 0.0,  0.0, -1.0,  0.0),
+                vec4<f32>(
+                    -light.position.x,
+                    light.position.y,
+                    light.position.z,
+                    1.0,
+                ),
+            );
+        }
+    }
+
+    // Calculate the shadow map texture coordinates and fragment light ndc depth
+    let fragment_light_view = light_world_to_view * fragment_world;
+    let fragment_light_clip = light.projection * fragment_light_view;
+    let fragment_light_ndc = fragment_light_clip / fragment_light_clip.w;
+    let fragment_shadow_map_uv = 0.5 * fragment_light_ndc.xy + vec2<f32>(0.5);
+    var fragment_light_ndc_depth: f32 = fragment_light_ndc.z;
+
+    // Calculate the shadow map texture coordinates at the center of the shadow map texel
+    // that contains the fragment_shadow_map_uv
+    let shadow_map_resolution = textureDimensions(point_shadow_textures).xy;
+    let shadow_map_resolution_f32 = vec2<f32>(shadow_map_resolution);
+    let shadow_map_texel_center_uv =
+        (floor(fragment_shadow_map_uv * shadow_map_resolution_f32)
+            + vec2<f32>(0.5))
+        / shadow_map_resolution_f32;
+
+    // Generate a ray from the near to far plane
+    let texel_center_light_ndc_xy = 2.0 * shadow_map_texel_center_uv - vec2<f32>(1.0);
+    let texel_center_at_distance_one = vec3<f32>(texel_center_light_ndc_xy, -1.0);
+    let texel_center_near_light_view = light.near * texel_center_at_distance_one;
+    let texel_center_far_light_view = light.far * texel_center_at_distance_one;
+    let ray_origin_light_view = texel_center_near_light_view;
+    let ray_direction_light_view = texel_center_far_light_view - texel_center_near_light_view;
+
+    // Calculate the intersection of the texel center ray with the plane defined by
+    // the fragment light view normal and fragment light view position
+    let fragment_light_view_normal = normalize(light_world_to_view * vec4<f32>(fragment_world_normal, 0.0));
+    let t_hit = dot(fragment_light_view.xyz - ray_origin_light_view, fragment_light_view_normal.xyz)
+        / dot(ray_direction_light_view, fragment_light_view_normal.xyz);
+    let p_light_view = ray_origin_light_view + t_hit * ray_direction_light_view;
+
+    // Calculate the projected depth of the intersection point p_light_view
+    let p_light_clip = light.projection * vec4<f32>(p_light_view, 1.0);
+    let p_light_ndc_depth = p_light_clip.z / p_light_clip.w;
+
+    // Calculate the optimal fragment light ndc depth
+    let optimal_fragment_light_ndc_depth = min(
+        fragment_light_ndc_depth,
+        p_light_ndc_depth
+    );
+
+    // Sample the closest light ndc depth from the shadow map texture
+    let closest_light_ndc_depth = textureSampleLevel(
+        point_shadow_textures,
+        point_shadow_sampler,
+        fragment_to_light_world,
+        light_id,
+        0.0
+    );
+
+    // Calculate the adaptive epsilon to avoid self-shadowing
+    let k = 0.0001;
+    let scene_scale = 30.0;
+    let constant_bias = scene_scale * k;
+    let adaptive_epsilon_temp = (fragment_light_ndc_depth * (light.near - light.far) + light.far);
+    let adaptive_epsilon = adaptive_epsilon_temp * adaptive_epsilon_temp * constant_bias / (light.near * light.far * (light.near - light.far));
+
+    var is_lit: f32;
+    let fragment_light_uv_ndc_depth = vec3<f32>(fragment_shadow_map_uv, fragment_light_ndc_depth);
+    let epsilon = 0.0001;
+    if (
+        (
+            closest_light_ndc_depth < optimal_fragment_light_ndc_depth + adaptive_epsilon
+            // // Shadow is only cast when the fragment is facing the light
+            // || dot(fragment_light_view_normal.xyz, fragment_light_view.xyz) > epsilon
+        )
+        // // Set the region outside the frustum to be lit
+        // && !any(clamp(fragment_light_uv_ndc_depth, vec3<f32>(0.0), vec3<f32>(1.0)) != fragment_light_uv_ndc_depth)
+    ) {
+        is_lit = 0.0;
+    } else {
+        is_lit = 1.0;
+    }
+
+    return is_lit;
+}
+
+fn directional_light_adaptive_depth_bias(
+    light_id: i32,
+    fragment_world: vec4<f32>,
+    fragment_world_normal: vec3<f32>,
+) -> f32 {
+    let light = lights.directional_lights[light_id];
+
+    // Calculate the shadow map texture coordinates and fragment light ndc depth
+    let fragment_light_view = light.view * fragment_world;
+    let fragment_light_clip = light.projection * fragment_light_view;
+    let fragment_light_ndc = fragment_light_clip / fragment_light_clip.w;
+    let fragment_shadow_map_uv = vec2<f32>(0.5, -0.5) * fragment_light_ndc.xy + vec2<f32>(0.5);
+    let fragment_light_ndc_depth = fragment_light_ndc.z;
+
+    // Calculate the shadow map texture coordinates at the center of the shadow map texel
+    // that contains the fragment_shadow_map_uv
+    let shadow_map_resolution = textureDimensions(directional_shadow_textures);
+    let shadow_map_resolution_f32 = vec2<f32>(shadow_map_resolution);
+    let shadow_map_texel_center_uv =
+        (floor(fragment_shadow_map_uv * shadow_map_resolution_f32)
+            + vec2<f32>(0.5))
+        / shadow_map_resolution_f32;
+
+    // Generate a ray from the near to far plane
+    let left_top = vec2<f32>(light.left, light.top);
+    let projection_size = vec2<f32>(
+        light.right - light.left,
+        light.bottom - light.top
+    );
+    let texel_center_light_view_xy = left_top + shadow_map_texel_center_uv * projection_size;
+    let ray_origin_light_view = vec3<f32>(texel_center_light_view_xy, -light.near);
+    // far - near, except that as we have -z forward, we have -far - (-near) = -far + near
+    let ray_direction_light_view = vec3<f32>(0.0, 0.0, -light.far + light.near);
+
+    // Calculate the intersection of the texel center ray with the plane defined by
+    // the fragment light view normal and fragment light view position
+    let fragment_light_view_normal = normalize(light.view * vec4<f32>(fragment_world_normal, 0.0));
+    let t_hit = dot(fragment_light_view.xyz - ray_origin_light_view, fragment_light_view_normal.xyz)
+        / dot(ray_direction_light_view, fragment_light_view_normal.xyz);
+    let p_light_view = ray_origin_light_view + t_hit * ray_direction_light_view;
+
+    // Calculate the projected depth of the intersection point p_light_view
+    let p_light_clip = light.projection * vec4<f32>(p_light_view, 1.0);
+    let p_light_ndc_depth = p_light_clip.z / p_light_clip.w;
+
+    // Calculate the optimal fragment light ndc depth
+    let optimal_fragment_light_ndc_depth = min(fragment_light_ndc_depth, p_light_ndc_depth);
+
+    // Sample the closest light ndc depth from the shadow map texture
+    let closest_light_ndc_depth = textureSampleLevel(
+        directional_shadow_textures,
+        directional_shadow_sampler,
+        fragment_shadow_map_uv,
+        light_id,
+        0.0
+    );
+
+    // Calculate the adaptive epsilon to avoid self-shadowing
+    let k = 0.0001;
+    let scene_scale = 500.0;
+    let constant_bias = scene_scale * k;
+    let adaptive_epsilon = constant_bias / (light.near - light.far);
+
+    var is_lit: f32;
+    let fragment_light_uv_ndc_depth = vec3<f32>(fragment_shadow_map_uv, fragment_light_ndc_depth);
+    let epsilon = 0.0001;
+    if (
+        (
+            closest_light_ndc_depth < optimal_fragment_light_ndc_depth + adaptive_epsilon
+            // // // Shadow is only cast when the fragment is facing the light
+            // || dot(fragment_light_view_normal.xyz, fragment_light_view.xyz) > epsilon
+        )
+        // Set the region outside the frustum to be lit
+        && !any(clamp(fragment_light_uv_ndc_depth, vec3<f32>(0.0), vec3<f32>(1.0)) != fragment_light_uv_ndc_depth)
+    ) {
+        is_lit = 0.0;
+    } else {
+        is_lit = 1.0;
+    }
+
+    return is_lit;
+}
+
 var sample_offset_directions: array<vec3<f32>, 20> = array<vec3<f32>, 20>(
     vec3<f32>( 1.0,  1.0,  1.0), vec3<f32>( 1.0, -1.0,  1.0), vec3<f32>(-1.0, -1.0,  1.0), vec3<f32>(-1.0,  1.0,  1.0),
     vec3<f32>( 1.0,  1.0, -1.0), vec3<f32>( 1.0, -1.0, -1.0), vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(-1.0,  1.0, -1.0),
@@ -658,6 +918,8 @@ fn fetch_point_shadow(
     surface_normal: vec3<f32>,
     frag_coord: vec2<f32>
 ) -> f32 {
+    // return point_light_adaptive_depth_bias(light_id, frag_position, surface_normal);
+
     let light = lights.point_lights[light_id];
 
     // because the shadow maps align with the axes and the frustum planes are at 45 degrees
@@ -704,7 +966,7 @@ fn fetch_point_shadow(
             5.0 * 0.5,
             20
         );
-    } elseif (point_shadow_sample_mode == 1u) {        
+    } elseif (point_shadow_sample_mode == 1u) {
         return sample_point_shadow_pcf_disc(
             offset_surface_to_light,
             i32(light_id),
@@ -853,7 +1115,14 @@ fn sample_directional_shadow_pcf_blue_noise_disc(
 
 var use_blue_noise: u32 = 0u;
 
-fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>, frag_coord: vec2<f32>) -> f32 {
+fn fetch_directional_shadow(
+    light_id: i32,
+    frag_position: vec4<f32>,
+    surface_normal: vec3<f32>,
+    frag_coord: vec2<f32>
+) -> f32 {
+    // return directional_light_adaptive_depth_bias(light_id, frag_position, surface_normal);
+
     let light = lights.directional_lights[light_id];
 
     // The normal bias is scaled to the texel size.
