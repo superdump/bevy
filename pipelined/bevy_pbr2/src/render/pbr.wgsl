@@ -655,7 +655,7 @@ fn directional_light_adaptive_depth_bias(
     if (
         (
             closest_light_ndc_depth < optimal_fragment_light_ndc_depth + adaptive_epsilon
-            // // // Shadow is only cast when the fragment is facing the light
+            // // Shadow is only cast when the fragment is facing the light
             // || dot(fragment_light_view_normal.xyz, fragment_light_view.xyz) > epsilon
         )
         // Set the region outside the frustum to be lit

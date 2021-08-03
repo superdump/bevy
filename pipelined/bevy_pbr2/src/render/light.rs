@@ -236,14 +236,14 @@ impl FromWorld for ShadowShaders {
             }),
             directional_light_comparison_sampler: render_device.create_sampler(
                 &SamplerDescriptor {
-                address_mode_u: AddressMode::ClampToEdge,
-                address_mode_v: AddressMode::ClampToEdge,
-                address_mode_w: AddressMode::ClampToEdge,
-                mag_filter: FilterMode::Linear,
-                min_filter: FilterMode::Linear,
-                mipmap_filter: FilterMode::Nearest,
-                compare: Some(CompareFunction::GreaterEqual),
-                ..Default::default()
+                    address_mode_u: AddressMode::ClampToEdge,
+                    address_mode_v: AddressMode::ClampToEdge,
+                    address_mode_w: AddressMode::ClampToEdge,
+                    mag_filter: FilterMode::Linear,
+                    min_filter: FilterMode::Linear,
+                    mipmap_filter: FilterMode::Nearest,
+                    compare: Some(CompareFunction::GreaterEqual),
+                    ..Default::default()
                 },
             ),
             directional_light_sampler: render_device.create_sampler(&SamplerDescriptor {
