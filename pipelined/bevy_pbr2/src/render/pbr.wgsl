@@ -559,12 +559,23 @@ fn point_light_adaptive_depth_bias(
         0.0
     );
 
+    // Adaptive Depth Bias for Soft Shadows adaptive epsilon scale factor
+    // https://dspace5.zcu.cz/bitstream/11025/29520/1/Ehm.pdf
+    // This avoids projective aliasing when the light direction is almost parallel to the fragment plane
+    let max_adaptive_epsilon_scale = 100.0;
+    let light_direction_world = normalize(-fragment_to_light_world);
+    let light_dir_dot_frag_normal = dot(light_direction_world, fragment_world_normal);
+    let adaptive_epsilon_scale_factor = min(
+        1.0 / (light_dir_dot_frag_normal * light_dir_dot_frag_normal),
+        max_adaptive_epsilon_scale
+    );
+
     // Calculate the adaptive epsilon to avoid self-shadowing
     let k = 0.0001;
     let scene_scale = 30.0;
-    let constant_bias = scene_scale * k;
     let adaptive_epsilon_temp = (fragment_light_ndc_depth * (light.near - light.far) + light.far);
-    let adaptive_epsilon = adaptive_epsilon_temp * adaptive_epsilon_temp * constant_bias / (light.near * light.far * (light.near - light.far));
+    let adaptive_epsilon = adaptive_epsilon_temp * adaptive_epsilon_temp * scene_scale * k * adaptive_epsilon_scale_factor
+        / (light.near * light.far * (light.near - light.far));
 
     var is_lit: f32;
     let fragment_light_uv_ndc_depth = vec3<f32>(fragment_shadow_map_uv, fragment_light_ndc_depth);
@@ -643,11 +654,21 @@ fn directional_light_adaptive_depth_bias(
         0.0
     );
 
+    // Adaptive Depth Bias for Soft Shadows adaptive epsilon scale factor
+    // https://dspace5.zcu.cz/bitstream/11025/29520/1/Ehm.pdf
+    // This avoids projective aliasing when the light direction is almost parallel to the fragment plane
+    let max_adaptive_epsilon_scale = 100.0;
+    let light_dir_dot_frag_normal = dot(light.direction_to_light, fragment_world_normal);
+    let adaptive_epsilon_scale_factor = min(
+        1.0 / (light_dir_dot_frag_normal * light_dir_dot_frag_normal),
+        max_adaptive_epsilon_scale
+    );
+
     // Calculate the adaptive epsilon to avoid self-shadowing
     let k = 0.0001;
-    let scene_scale = 500.0;
-    let constant_bias = scene_scale * k;
-    let adaptive_epsilon = constant_bias / (light.near - light.far);
+    let scene_scale = 30.0;
+    let adaptive_epsilon = scene_scale * k * adaptive_epsilon_scale_factor
+        / (light.near - light.far);
 
     var is_lit: f32;
     let fragment_light_uv_ndc_depth = vec3<f32>(fragment_shadow_map_uv, fragment_light_ndc_depth);
