@@ -409,6 +409,97 @@ fn directional_light(light: DirectionalLight, roughness: f32, NdotV: f32, normal
     return (specular_light + diffuse) * light.color.rgb * NoL;
 }
 
+// indices are ordered +X,-X,+Y,-Y,+Z,-Z as in the cube map
+fn fragment_to_light_dir_world_to_cubemap_face(
+    fragment_to_light_dir_world: vec3<f32>,
+) -> u32 {
+    let fragment_to_light_dir_world_abs = abs(fragment_to_light_dir_world);
+    let distance_to_light = max(fragment_to_light_dir_world_abs.x, max(fragment_to_light_dir_world_abs.y, fragment_to_light_dir_world_abs.z));
+    if (distance_to_light == fragment_to_light_dir_world_abs.x) {
+        if (distance_to_light == fragment_to_light_dir_world.x) {
+            // +X
+            return 0u;
+        } else {
+            // -X
+            return 1u;
+        }
+    } elseif (distance_to_light == fragment_to_light_dir_world_abs.y) {
+        if (distance_to_light == fragment_to_light_dir_world.y) {
+            // +Y
+            return 2u;
+        } else {
+            // -Y
+            return 3u;
+        }
+    } else {
+        if (distance_to_light == fragment_to_light_dir_world.z) {
+            // +Z
+            return 4u;
+        } else {
+            // -Z
+            return 5u;
+        }
+    }
+}
+
+fn cubemap_fragment_world_to_light_view(
+    face_index: u32,
+    fragment_world: vec3<f32>,
+    offset_world: vec3<f32>,
+) -> vec4<f32> {
+    var fragment_light_view: vec4<f32> = vec4<f32>(0.0);
+    if (face_index == 0u) {
+        // +X
+        fragment_light_view = vec4<f32>(
+             fragment_world.z - offset_world.z,
+            -fragment_world.y + offset_world.y,
+             fragment_world.x - offset_world.x,
+             1.0
+        );
+    } elseif (face_index == 1u) {
+        // -X
+        fragment_light_view = vec4<f32>(
+            -fragment_world.z + offset_world.z,
+            -fragment_world.y + offset_world.y,
+            -fragment_world.x + offset_world.x,
+             1.0
+        );
+    } elseif (face_index == 2u) {
+        // +Y
+        fragment_light_view = vec4<f32>(
+            -fragment_world.x + offset_world.x,
+             fragment_world.z - offset_world.z,
+             fragment_world.y - offset_world.y,
+             1.0
+        );
+    } elseif (face_index == 3u) {
+        // -Y
+        fragment_light_view = vec4<f32>(
+            -fragment_world.x + offset_world.x,
+            -fragment_world.z + offset_world.z,
+            -fragment_world.y + offset_world.y,
+             1.0
+        );
+    } elseif (face_index == 4u) {
+        // +Z
+        fragment_light_view = vec4<f32>(
+            -fragment_world.x + offset_world.x,
+            -fragment_world.y + offset_world.y,
+             fragment_world.z - offset_world.z,
+             1.0
+        );
+    } elseif (face_index == 5u) {
+        // -Z
+        fragment_light_view = vec4<f32>(
+             fragment_world.x - offset_world.x,
+            -fragment_world.y + offset_world.y,
+            -fragment_world.z + offset_world.z,
+             1.0
+        );
+    }
+    return fragment_light_view;
+}
+
 fn point_light_adaptive_depth_bias(
     light_id: i32,
     fragment_world: vec4<f32>,
@@ -416,101 +507,18 @@ fn point_light_adaptive_depth_bias(
 ) -> f32 {
     let light = lights.point_lights[light_id];
 
-    let fragment_to_light_world = light.position.xyz - fragment_world.xyz;
-    let fragment_to_light_world_abs = abs(fragment_to_light_world);
-    let distance_to_light = max(fragment_to_light_world_abs.x, max(fragment_to_light_world_abs.y, fragment_to_light_world_abs.z));
-    var light_world_to_view: mat4x4<f32>;
-    // FIXME: The following matrices are inverse view matrices. They were created by printing the
-    // inverse view matrices from the renderer code. They should be simplified to avoid the 4x4 matrix
-    // multiplication.
-    if (distance_to_light == fragment_to_light_world_abs.x) {
-        if (distance_to_light == fragment_to_light_world.x) {
-            // +X
-            light_world_to_view = mat4x4<f32>(
-                vec4<f32>( 0.0,  0.0,  1.0,  0.0),
-                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
-                vec4<f32>( 1.0,  0.0,  0.0,  0.0),
-                vec4<f32>(
-                    -light.position.z,
-                    light.position.y,
-                    -light.position.x,
-                    1.0,
-                ),
-            );
-        } else {
-            // -X
-            light_world_to_view = mat4x4<f32>(
-                vec4<f32>( 0.0,  0.0, -1.0,  0.0),
-                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
-                vec4<f32>(-1.0,  0.0,  0.0,  0.0),
-                vec4<f32>(
-                    light.position.z,
-                    light.position.y,
-                    light.position.x,
-                    1.0,
-                ),
-            );
-        }
-    } elseif (distance_to_light == fragment_to_light_world_abs.y) {
-        if (distance_to_light == fragment_to_light_world.y) {
-            // +Y
-            light_world_to_view = mat4x4<f32>(
-                vec4<f32>(-1.0,  0.0,  0.0,  0.0),
-                vec4<f32>( 0.0,  0.0,  1.0,  0.0),
-                vec4<f32>( 0.0,  1.0,  0.0,  0.0),
-                vec4<f32>(
-                    light.position.x,
-                    -light.position.z,
-                    -light.position.y,
-                    1.0,
-                ),
-            );
-        } else {
-            // -Y
-            light_world_to_view = mat4x4<f32>(
-                vec4<f32>(-1.0,  0.0,  0.0,  0.0),
-                vec4<f32>( 0.0,  0.0, -1.0,  0.0),
-                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
-                vec4<f32>(
-                    light.position.x,
-                    light.position.z,
-                    light.position.y,
-                    1.0,
-                ),
-            );
-        }
-    } else {
-        if (distance_to_light == fragment_to_light_world.z) {
-            // +Z
-            light_world_to_view = mat4x4<f32>(
-                vec4<f32>(-1.0,  0.0,  0.0,  0.0),
-                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
-                vec4<f32>( 0.0,  0.0,  1.0,  0.0),
-                vec4<f32>(
-                    light.position.x,
-                    light.position.y,
-                    -light.position.z,
-                    1.0,
-                ),
-            );
-        } else {
-            // -Z
-            light_world_to_view = mat4x4<f32>(
-                vec4<f32>( 1.0,  0.0,  0.0,  0.0),
-                vec4<f32>( 0.0, -1.0,  0.0,  0.0),
-                vec4<f32>( 0.0,  0.0, -1.0,  0.0),
-                vec4<f32>(
-                    -light.position.x,
-                    light.position.y,
-                    light.position.z,
-                    1.0,
-                ),
-            );
-        }
-    }
+    let fragment_to_light_dir_world = light.position.xyz - fragment_world.xyz;
+
+    let fragment_light_cubemap_face_index = fragment_to_light_dir_world_to_cubemap_face(
+        fragment_to_light_dir_world
+    );
 
     // Calculate the shadow map texture coordinates and fragment light ndc depth
-    let fragment_light_view = light_world_to_view * fragment_world;
+    let fragment_light_view = cubemap_fragment_world_to_light_view(
+        fragment_light_cubemap_face_index,
+        fragment_world.xyz,
+        light.position.xyz,
+    );
     let fragment_light_clip = light.projection * fragment_light_view;
     let fragment_light_ndc = fragment_light_clip / fragment_light_clip.w;
     let fragment_shadow_map_uv = 0.5 * fragment_light_ndc.xy + vec2<f32>(0.5);
@@ -535,7 +543,11 @@ fn point_light_adaptive_depth_bias(
 
     // Calculate the intersection of the texel center ray with the plane defined by
     // the fragment light view normal and fragment light view position
-    let fragment_light_view_normal = normalize(light_world_to_view * vec4<f32>(fragment_world_normal, 0.0));
+    let fragment_light_view_normal = normalize(cubemap_fragment_world_to_light_view(
+        fragment_light_cubemap_face_index,
+        fragment_world_normal.xyz,
+        vec3<f32>(0.0),
+    ));
     let t_hit = dot(fragment_light_view.xyz - ray_origin_light_view, fragment_light_view_normal.xyz)
         / dot(ray_direction_light_view, fragment_light_view_normal.xyz);
     let p_light_view = ray_origin_light_view + t_hit * ray_direction_light_view;
@@ -554,7 +566,7 @@ fn point_light_adaptive_depth_bias(
     let closest_light_ndc_depth = textureSampleLevel(
         point_shadow_textures,
         point_shadow_sampler,
-        fragment_to_light_world,
+        fragment_to_light_dir_world,
         light_id,
         0.0
     );
@@ -563,7 +575,7 @@ fn point_light_adaptive_depth_bias(
     // https://dspace5.zcu.cz/bitstream/11025/29520/1/Ehm.pdf
     // This avoids projective aliasing when the light direction is almost parallel to the fragment plane
     let max_adaptive_epsilon_scale = 100.0;
-    let light_direction_world = normalize(-fragment_to_light_world);
+    let light_direction_world = normalize(-fragment_to_light_dir_world);
     let light_dir_dot_frag_normal = dot(light_direction_world, fragment_world_normal);
     let adaptive_epsilon_scale_factor = min(
         1.0 / (light_dir_dot_frag_normal * light_dir_dot_frag_normal),
