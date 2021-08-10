@@ -589,7 +589,7 @@ fn calculate_point_light_texel_center_ray_intersection(
 
 fn calculate_point_light_adaptive_epsilon(
     light: PointLight,
-    light_direction_world: vec3<f32>,
+    light_world_direction: vec3<f32>,
     fragment_world_normal: vec3<f32>,
     fragment_light_ndc_depth: f32
 ) -> f32 {
@@ -597,7 +597,7 @@ fn calculate_point_light_adaptive_epsilon(
     // https://dspace5.zcu.cz/bitstream/11025/29520/1/Ehm.pdf
     // This avoids projective aliasing when the light direction is almost parallel to the fragment plane
     let max_adaptive_epsilon_scale = 100.0;
-    let light_dir_dot_frag_normal = dot(light_direction_world, fragment_world_normal);
+    let light_dir_dot_frag_normal = dot(light_world_direction, fragment_world_normal);
     let adaptive_epsilon_scale_factor = min(
         1.0 / (light_dir_dot_frag_normal * light_dir_dot_frag_normal),
         max_adaptive_epsilon_scale
