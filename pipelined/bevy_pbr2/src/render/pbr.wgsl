@@ -413,21 +413,21 @@ fn directional_light(light: DirectionalLight, roughness: f32, NdotV: f32, normal
 }
 
 // indices are ordered +X,-X,+Y,-Y,+Z,-Z as in the cube map
-fn fragment_to_light_dir_world_to_cubemap_face(
-    fragment_to_light_dir_world: vec3<f32>,
+fn world_direction_to_cubemap_face(
+    world_direction: vec3<f32>,
 ) -> u32 {
-    let fragment_to_light_dir_world_abs = abs(fragment_to_light_dir_world);
-    let distance_to_light = max(fragment_to_light_dir_world_abs.x, max(fragment_to_light_dir_world_abs.y, fragment_to_light_dir_world_abs.z));
-    if (distance_to_light == fragment_to_light_dir_world_abs.x) {
-        if (distance_to_light == fragment_to_light_dir_world.x) {
+    let world_direction_abs = abs(world_direction);
+    let distance_to_light = max(world_direction_abs.x, max(world_direction_abs.y, world_direction_abs.z));
+    if (distance_to_light == world_direction_abs.x) {
+        if (distance_to_light == world_direction.x) {
             // +X
             return 0u;
         } else {
             // -X
             return 1u;
         }
-    } elseif (distance_to_light == fragment_to_light_dir_world_abs.y) {
-        if (distance_to_light == fragment_to_light_dir_world.y) {
+    } elseif (distance_to_light == world_direction_abs.y) {
+        if (distance_to_light == world_direction.y) {
             // +Y
             return 2u;
         } else {
@@ -435,7 +435,7 @@ fn fragment_to_light_dir_world_to_cubemap_face(
             return 3u;
         }
     } else {
-        if (distance_to_light == fragment_to_light_dir_world.z) {
+        if (distance_to_light == world_direction.z) {
             // +Z
             return 4u;
         } else {
@@ -516,20 +516,20 @@ struct TexelCenterOutput {
 
 fn calculate_point_light_texel_center(
     light: PointLight,
-    fragment_to_light_dir_world: vec3<f32>,
+    light_to_fragment_world: vec3<f32>,
     fragment_world: vec3<f32>,
     fragment_world_normal: vec3<f32>,
 ) -> TexelCenterOutput {
-    let fragment_light_cubemap_face_index = fragment_to_light_dir_world_to_cubemap_face(
-        fragment_to_light_dir_world
+    let cubemap_face_index = world_direction_to_cubemap_face(
+        light_to_fragment_world
     );
     let fragment_light_view = cubemap_fragment_world_to_light_view(
-        fragment_light_cubemap_face_index,
-        fragment_world.xyz,
+        cubemap_face_index,
+        fragment_world,
         light.position.xyz,
     );
     let fragment_light_view_normal = normalize(cubemap_fragment_world_to_light_view(
-        fragment_light_cubemap_face_index,
+        cubemap_face_index,
         fragment_world_normal.xyz,
         vec3<f32>(0.0),
     ));
