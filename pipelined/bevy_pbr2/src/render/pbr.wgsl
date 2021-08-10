@@ -890,6 +890,7 @@ fn sample_point_shadow_pcf_regular_disc(
 // Regular distribution of samples in a disc about the normalized surface to light vector
 fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
     light_to_fragment_world: vec3<f32>,
+    fragment_world: vec3<f32>,
     fragment_world_normal: vec3<f32>,
     texture_index: i32,
     depth: f32,
@@ -1068,6 +1069,7 @@ fn sample_point_shadow_pcf_blue_noise_disc(
 // Blue noise distribution of samples in a disc about the normalized surface to light vector
 fn sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
     light_to_fragment_world: vec3<f32>,
+    fragment_world: vec3<f32>,
     fragment_world_normal: vec3<f32>,
     texture_index: i32,
     depth: f32,
@@ -1219,6 +1221,7 @@ fn sample_point_shadow_pcf_disc(
         if (point_shadow_sample_mode == 1u) {
             return sample_point_shadow_pcf_regular_disc_adaptive_bias(
                 light_to_fragment_world,
+                fragment_world,
                 fragment_world_normal,
                 texture_index,
                 optimal_fragment_depth,
@@ -1231,6 +1234,7 @@ fn sample_point_shadow_pcf_disc(
         } else {
             return sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
                 light_to_fragment_world,
+                fragment_world,
                 fragment_world_normal,
                 texture_index,
                 optimal_fragment_depth,
