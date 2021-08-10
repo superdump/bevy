@@ -707,8 +707,9 @@ fn calculate_directional_light_adaptive_epsilon(
 var point_shadow_sample_mode: u32 = 1u;
 
 // 0: Depth / shadow map texel-scaled Normal bias, no special bias for PCF
-// 1: Adaptive Depth Bias for Shadow Maps and Adaptive Depth Bias for Soft Shadows
-var point_shadow_bias_mode: u32 = 0u;
+// 1: Adaptive Depth Bias for Shadow Maps and Adaptive Depth Bias for Soft Shadows - per-sample (slow)
+// 2: Adaptive Depth Bias for Shadow Maps and Adaptive Depth Bias for Soft Shadows - delta bias
+var point_shadow_bias_mode: u32 = 1u;
 
 // 0: regular disc sampling kernel
 // 1: blue noise disc sampling kernel
@@ -887,11 +888,72 @@ fn sample_point_shadow_pcf_regular_disc(
     return is_lit;
 }
 
+fn calculate_offset_fragment_light_view(
+    fragment_world: vec3<f32>,
+    light_world: vec3<f32>,
+    fragment_light_view: vec3<f32>,
+    cubemap_face_index: u32,
+    offset_light_to_fragment_world: vec3<f32>,
+) -> vec3<f32> {
+    var cubemap_fragment_light_view: vec3<f32>;
+
+    let offset_cubemap_face_index = world_direction_to_cubemap_face(offset_light_to_fragment_world);
+    if (offset_cubemap_face_index == cubemap_face_index) {
+        cubemap_fragment_light_view = fragment_light_view;
+    } else {
+        let offset_cubemap_face_fragment_light_view = cubemap_fragment_world_to_light_view(
+            offset_cubemap_face_index,
+            fragment_world,
+            light_world,
+        );
+        cubemap_fragment_light_view = offset_cubemap_face_fragment_light_view.xyz;
+    }
+
+    return cubemap_fragment_light_view;
+}
+
+fn calculate_point_light_optimal_offset_fragment_depth(
+    light: PointLight,
+    fragment_world: vec3<f32>,
+    fragment_world_normal: vec3<f32>,
+    fragment_light_view: vec3<f32>,
+    cubemap_face_index: u32,
+    offset_light_to_fragment_world: vec3<f32>,
+    offset_fragment_world: vec3<f32>,
+) -> f32 {
+    let cubemap_fragment_light_view = calculate_offset_fragment_light_view(
+        fragment_world,
+        light.position.xyz,
+        fragment_light_view,
+        cubemap_face_index,
+        offset_light_to_fragment_world,
+    );
+    let texel_center = calculate_point_light_texel_center(
+        light,
+        offset_light_to_fragment_world,
+        offset_fragment_world,
+        fragment_world_normal,
+    );
+    let f_o = calculate_point_light_texel_center_ray_intersection(
+        light,
+        texel_center.shadow_map_texel_center_uv,
+        cubemap_fragment_light_view,
+        texel_center.fragment_light_view_normal.xyz
+    );
+    let optimal_fragment_depth = min(
+        texel_center.fragment_light_ndc.z,
+        f_o.z
+    );
+
+    return optimal_fragment_depth;
+}
+
 // Regular distribution of samples in a disc about the normalized surface to light vector
 fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
     light_to_fragment_world: vec3<f32>,
     fragment_world: vec3<f32>,
     fragment_world_normal: vec3<f32>,
+    fragment_light_view: vec3<f32>,
     texture_index: i32,
     depth: f32,
     dbias: vec2<f32>,
@@ -901,7 +963,7 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
     radius: f32
 ) -> f32 {
     let light = lights.point_lights[texture_index];
-    let light_direction_world = normalize(light_to_fragment_world);
+    let cubemap_face_index = world_direction_to_cubemap_face(light_to_fragment_world);
     var is_lit: f32 = 0.0;
     if (filter_size == 7u) {
         let inverse_sample_count = 1.0 / f32(pcf7_disc_count);
@@ -910,12 +972,25 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
         for (var i: u32 = 0u; i < pcf7_disc_count; i = i + 1u) {
             let offset_texels = radius_step * pcf7_disc[i];
 
-            let optimal_fragment_depth = depth + dot(dbias, offset_texels);
-
             let offset_fragment_world = fragment_world.xyz
                 + offset_texels.x * right
                 + offset_texels.y * up;
             let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+
+            var optimal_fragment_depth: f32;
+            if (point_shadow_bias_mode == 1u) {
+                optimal_fragment_depth = calculate_point_light_optimal_offset_fragment_depth(
+                    light,
+                    fragment_world,
+                    fragment_world_normal,
+                    fragment_light_view,
+                    cubemap_face_index,
+                    offset_light_to_fragment_world,
+                    offset_fragment_world,
+                );
+            } else { // point_shadow_bias_mode == 2u
+                optimal_fragment_depth = depth + dot(dbias, offset_texels);
+            }
 
             let offset_light_world_direction = normalize(offset_light_to_fragment_world);
             let adaptive_epsilon = calculate_point_light_adaptive_epsilon(
@@ -941,12 +1016,25 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
         for (var i: u32 = 0u; i < pcf5_disc_count; i = i + 1u) {
             let offset_texels = radius_step * pcf5_disc[i];
 
-            let optimal_fragment_depth = depth + dot(dbias, offset_texels);
-
             let offset_fragment_world = fragment_world
                 + offset_texels.x * right
                 + offset_texels.y * up;
             let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+
+            var optimal_fragment_depth: f32;
+            if (point_shadow_bias_mode == 1u) {
+                optimal_fragment_depth = calculate_point_light_optimal_offset_fragment_depth(
+                    light,
+                    fragment_world,
+                    fragment_world_normal,
+                    fragment_light_view,
+                    cubemap_face_index,
+                    offset_light_to_fragment_world,
+                    offset_fragment_world,
+                );
+            } else { // point_shadow_bias_mode == 2u
+                optimal_fragment_depth = depth + dot(dbias, offset_texels);
+            }
 
             let offset_light_direction_world = normalize(offset_light_to_fragment_world);
             let adaptive_epsilon = calculate_point_light_adaptive_epsilon(
@@ -972,12 +1060,25 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
         for (var i: u32 = 0u; i < pcf3_disc_count; i = i + 1u) {
             let offset_texels = radius_step * pcf3_disc[i];
 
-            let optimal_fragment_depth = depth + dot(dbias, offset_texels);
-
             let offset_fragment_world = fragment_world.xyz
                 + offset_texels.x * right
                 + offset_texels.y * up;
             let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+ 
+            var optimal_fragment_depth: f32;
+            if (point_shadow_bias_mode == 1u) {
+                optimal_fragment_depth = calculate_point_light_optimal_offset_fragment_depth(
+                    light,
+                    fragment_world,
+                    fragment_world_normal,
+                    fragment_light_view,
+                    cubemap_face_index,
+                    offset_light_to_fragment_world,
+                    offset_fragment_world,
+                );
+            } else { // point_shadow_bias_mode == 2u
+                optimal_fragment_depth = depth + dot(dbias, offset_texels);
+            }
 
             let offset_light_world_direction = normalize(offset_light_to_fragment_world);
             let adaptive_epsilon = calculate_point_light_adaptive_epsilon(
@@ -997,7 +1098,7 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
             ) * inverse_sample_count;
         }
     } else {
-        let optimal_fragment_depth = depth;
+        let light_direction_world = normalize(light_to_fragment_world);
         let adaptive_epsilon = calculate_point_light_adaptive_epsilon(
             light,
             light_direction_world,
@@ -1071,6 +1172,7 @@ fn sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
     light_to_fragment_world: vec3<f32>,
     fragment_world: vec3<f32>,
     fragment_world_normal: vec3<f32>,
+    fragment_light_view: vec3<f32>,
     texture_index: i32,
     depth: f32,
     dbias: vec2<f32>,
@@ -1081,7 +1183,6 @@ fn sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
     radius: f32
 ) -> f32 {
     let light = lights.point_lights[texture_index];
-    let light_direction_world = normalize(light_to_fragment_world);
 
     // tile noise texture over screen, based on screen dimensions divided by noise size
     let noise_scale = vec2<f32>(1.0) / vec2<f32>(textureDimensions(blue_noise_texture));
@@ -1091,6 +1192,8 @@ fn sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
     let base_noise_uv = frag_coord * noise_scale + R2(view.frame_number % 64u);
     // Offset the blue noise _value_ by a frame number multiple of the golden ratio
     // let frame_golden_ratio_offset = vec2<f32>(f32(view.frame_number % 64u) * golden_ratio);
+
+    let cubemap_face_index = world_direction_to_cubemap_face(light_to_fragment_world);
 
     let inverse_sample_count = 1.0 / f32(sample_count);
     var is_lit: f32 = 0.0;
@@ -1106,12 +1209,25 @@ fn sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
             sqrt(blue_noise_values.y)
             * vec2<f32>(sin(blue_noise_values.x * tau), cos(blue_noise_values.x * tau));
 
-        let optimal_fragment_depth = depth + dot(dbias, offset_texels);
-
         let offset_fragment_world = fragment_world
             + offset_texels.x * right
             + offset_texels.y * up;
         let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+
+        var optimal_fragment_depth: f32;
+        if (point_shadow_bias_mode == 1u) {
+            optimal_fragment_depth = calculate_point_light_optimal_offset_fragment_depth(
+                light,
+                fragment_world,
+                fragment_world_normal,
+                fragment_light_view,
+                cubemap_face_index,
+                offset_light_to_fragment_world,
+                offset_fragment_world,
+            );
+        } else { // point_shadow_bias_mode == 2u
+            optimal_fragment_depth = depth + dot(dbias, offset_texels);
+        }
 
         let offset_light_direction_world = normalize(offset_light_to_fragment_world);
         let adaptive_epsilon = calculate_point_light_adaptive_epsilon(
@@ -1189,7 +1305,6 @@ fn sample_point_shadow_pcf_disc(
             fragment_world.xyz,
             fragment_world_normal,
         );
-
         let f_o = calculate_point_light_texel_center_ray_intersection(
             light,
             texel_center.shadow_map_texel_center_uv,
@@ -1200,17 +1315,53 @@ fn sample_point_shadow_pcf_disc(
             texel_center.fragment_light_ndc.z,
             f_o.z
         );
+
+        let cubemap_face_index = world_direction_to_cubemap_face(light_to_fragment_world);
+
+        let f_o_x_offset_fragment_world = fragment_world.xyz + right;
+        let f_o_x_offset_light_to_fragment_world = f_o_x_offset_fragment_world - light.position.xyz;
+
+        let f_o_x_cubemap_fragment_light_view = calculate_offset_fragment_light_view(
+            fragment_world,
+            light.position.xyz,
+            texel_center.fragment_light_view.xyz,
+            cubemap_face_index,
+            f_o_x_offset_light_to_fragment_world,
+        );
+        let f_o_x_texel_center = calculate_point_light_texel_center(
+            light,
+            f_o_x_offset_light_to_fragment_world,
+            f_o_x_offset_fragment_world,
+            fragment_world_normal,
+        );
         let f_o_x = calculate_point_light_texel_center_ray_intersection(
             light,
-            texel_center.shadow_map_texel_center_uv + vec2<f32>(shadow_map_step_texel.x, 0.0),
+            f_o_x_texel_center.shadow_map_texel_center_uv,
+            f_o_x_cubemap_fragment_light_view,
+            f_o_x_texel_center.fragment_light_view_normal.xyz
+        );
+
+        let f_o_y_offset_fragment_world = fragment_world.xyz + up;
+        let f_o_y_offset_light_to_fragment_world = f_o_y_offset_fragment_world - light.position.xyz;
+
+        let f_o_y_cubemap_fragment_light_view = calculate_offset_fragment_light_view(
+            fragment_world,
+            light.position.xyz,
             texel_center.fragment_light_view.xyz,
-            texel_center.fragment_light_view_normal.xyz
+            cubemap_face_index,
+            f_o_y_offset_light_to_fragment_world,
+        );
+        let f_o_y_texel_center = calculate_point_light_texel_center(
+            light,
+            f_o_y_offset_light_to_fragment_world,
+            f_o_y_offset_fragment_world,
+            fragment_world_normal,
         );
         let f_o_y = calculate_point_light_texel_center_ray_intersection(
             light,
-            texel_center.shadow_map_texel_center_uv + vec2<f32>(0.0, shadow_map_step_texel.y),
-            texel_center.fragment_light_view.xyz,
-            texel_center.fragment_light_view_normal.xyz
+            f_o_y_texel_center.shadow_map_texel_center_uv,
+            f_o_y_cubemap_fragment_light_view,
+            f_o_y_texel_center.fragment_light_view_normal.xyz
         );
 
         var dbias: vec2<f32> = vec2<f32>(
@@ -1223,6 +1374,7 @@ fn sample_point_shadow_pcf_disc(
                 light_to_fragment_world,
                 fragment_world,
                 fragment_world_normal,
+                texel_center.fragment_light_view.xyz,
                 texture_index,
                 optimal_fragment_depth,
                 dbias,
@@ -1236,6 +1388,7 @@ fn sample_point_shadow_pcf_disc(
                 light_to_fragment_world,
                 fragment_world,
                 fragment_world_normal,
+                texel_center.fragment_light_view.xyz,
                 texture_index,
                 optimal_fragment_depth,
                 dbias,
