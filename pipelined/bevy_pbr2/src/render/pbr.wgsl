@@ -822,41 +822,54 @@ fn sample_point_shadow_pcf_regular_disc(
     depth: f32,
     filter_size: u32,
     right: vec3<f32>,
-    up: vec3<f32>
+    up: vec3<f32>,
+    radius: f32
 ) -> f32 {
     var is_lit: f32 = 0.0;
     if (filter_size == 7u) {
         let inverse_sample_count = 1.0 / f32(pcf7_disc_count);
+        // NOTE: 7.0 - 1.0 because one sample is in the center
+        let radius_step = 2.0 * radius / (7.0 - 1.0);
         for (var i: u32 = 0u; i < pcf7_disc_count; i = i + 1u) {
             // 2x2 hardware bilinear-filtered PCF
             is_lit = is_lit + textureSampleCompareLevel(
                 point_shadow_textures,
                 point_shadow_comparison_sampler,
                 light_to_fragment_world
+                    + radius_step * pcf7_disc[i].x * right
+                    + radius_step * pcf7_disc[i].y * up,
                 texture_index,
                 depth
             ) * inverse_sample_count;
         }
     } elseif (filter_size == 5u) {
         let inverse_sample_count = 1.0 / f32(pcf5_disc_count);
+        // NOTE: 5.0 - 1.0 because one sample is in the center
+        let radius_step = 2.0 * radius / (5.0 - 1.0);
         for (var i: u32 = 0u; i < pcf5_disc_count; i = i + 1u) {
             // 2x2 hardware bilinear-filtered PCF
             is_lit = is_lit + textureSampleCompareLevel(
                 point_shadow_textures,
                 point_shadow_comparison_sampler,
                 light_to_fragment_world
+                    + radius_step * pcf5_disc[i].x * right
+                    + radius_step * pcf5_disc[i].y * up,
                 texture_index,
                 depth
             ) * inverse_sample_count;
         }
     } elseif (filter_size == 3u) {
         let inverse_sample_count = 1.0 / f32(pcf3_disc_count);
+        // NOTE: 3.0 - 1.0 because one sample is in the center
+        let radius_step = 2.0 * radius / (3.0 - 1.0);
         for (var i: u32 = 0u; i < pcf3_disc_count; i = i + 1u) {
             // 2x2 hardware bilinear-filtered PCF
             is_lit = is_lit + textureSampleCompareLevel(
                 point_shadow_textures,
                 point_shadow_comparison_sampler,
                 light_to_fragment_world
+                    + radius_step * pcf3_disc[i].x * right
+                    + radius_step * pcf3_disc[i].y * up,
                 texture_index,
                 depth
             ) * inverse_sample_count;
@@ -883,70 +896,101 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
     dbias: vec2<f32>,
     filter_size: u32,
     right: vec3<f32>,
-    up: vec3<f32>
+    up: vec3<f32>,
+    radius: f32
 ) -> f32 {
     let light = lights.point_lights[texture_index];
     let light_direction_world = normalize(light_to_fragment_world);
     var is_lit: f32 = 0.0;
     if (filter_size == 7u) {
         let inverse_sample_count = 1.0 / f32(pcf7_disc_count);
+        // NOTE: 7.0 - 1.0 because one sample is in the center
+        let radius_step = 2.0 * radius / (7.0 - 1.0);
         for (var i: u32 = 0u; i < pcf7_disc_count; i = i + 1u) {
-            let optimal_fragment_depth = depth + dot(dbias, pcf7_disc[i]);
+            let offset_texels = radius_step * pcf7_disc[i];
+
+            let optimal_fragment_depth = depth + dot(dbias, offset_texels);
+
+            let offset_fragment_world = fragment_world.xyz
+                + offset_texels.x * right
+                + offset_texels.y * up;
+            let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+
+            let offset_light_world_direction = normalize(offset_light_to_fragment_world);
             let adaptive_epsilon = calculate_point_light_adaptive_epsilon(
                 light,
-                light_direction_world,
+                offset_light_world_direction,
                 fragment_world_normal,
                 optimal_fragment_depth
             );
+
             // 2x2 hardware bilinear-filtered PCF
             is_lit = is_lit + textureSampleCompareLevel(
                 point_shadow_textures,
                 point_shadow_comparison_sampler,
-                light_to_fragment_world
-                    + right * pcf7_disc[i].x
-                    + up * pcf7_disc[i].y,
+                offset_light_to_fragment_world,
                 texture_index,
                 optimal_fragment_depth + adaptive_epsilon
             ) * inverse_sample_count;
         }
     } elseif (filter_size == 5u) {
         let inverse_sample_count = 1.0 / f32(pcf5_disc_count);
+        // NOTE: 5.0 - 1.0 because one sample is in the center
+        let radius_step = 2.0 * radius / (5.0 - 1.0);
         for (var i: u32 = 0u; i < pcf5_disc_count; i = i + 1u) {
-            let optimal_fragment_depth = depth + dot(dbias, pcf5_disc[i]);
+            let offset_texels = radius_step * pcf5_disc[i];
+
+            let optimal_fragment_depth = depth + dot(dbias, offset_texels);
+
+            let offset_fragment_world = fragment_world
+                + offset_texels.x * right
+                + offset_texels.y * up;
+            let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+
+            let offset_light_direction_world = normalize(offset_light_to_fragment_world);
             let adaptive_epsilon = calculate_point_light_adaptive_epsilon(
                 light,
-                light_direction_world,
+                offset_light_direction_world,
                 fragment_world_normal,
                 optimal_fragment_depth
             );
+
             // 2x2 hardware bilinear-filtered PCF
             is_lit = is_lit + textureSampleCompareLevel(
                 point_shadow_textures,
                 point_shadow_comparison_sampler,
-                light_to_fragment_world
-                    + right * pcf5_disc[i].x
-                    + up * pcf5_disc[i].y,
+                offset_light_to_fragment_world,
                 texture_index,
                 optimal_fragment_depth + adaptive_epsilon
             ) * inverse_sample_count;
         }
     } elseif (filter_size == 3u) {
         let inverse_sample_count = 1.0 / f32(pcf3_disc_count);
+        // NOTE: 3.0 - 1.0 because one sample is in the center
+        let radius_step = 2.0 * radius / (3.0 - 1.0);
         for (var i: u32 = 0u; i < pcf3_disc_count; i = i + 1u) {
-            let optimal_fragment_depth = depth + dot(dbias, pcf3_disc[i]);
+            let offset_texels = radius_step * pcf3_disc[i];
+
+            let optimal_fragment_depth = depth + dot(dbias, offset_texels);
+
+            let offset_fragment_world = fragment_world.xyz
+                + offset_texels.x * right
+                + offset_texels.y * up;
+            let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+
+            let offset_light_world_direction = normalize(offset_light_to_fragment_world);
             let adaptive_epsilon = calculate_point_light_adaptive_epsilon(
                 light,
-                light_direction_world,
+                offset_light_world_direction,
                 fragment_world_normal,
                 optimal_fragment_depth
             );
+
             // 2x2 hardware bilinear-filtered PCF
             is_lit = is_lit + textureSampleCompareLevel(
                 point_shadow_textures,
                 point_shadow_comparison_sampler,
-                light_to_fragment_world
-                    + right * pcf3_disc[i].x
-                    + up * pcf3_disc[i].y,
+                offset_light_to_fragment_world,
                 texture_index,
                 optimal_fragment_depth + adaptive_epsilon
             ) * inverse_sample_count;
@@ -980,7 +1024,8 @@ fn sample_point_shadow_pcf_blue_noise_disc(
     sample_count: u32,
     frag_coord: vec2<f32>,
     right: vec3<f32>,
-    up: vec3<f32>
+    up: vec3<f32>,
+    radius: f32
 ) -> f32 {
     // tile noise texture over screen, based on screen dimensions divided by noise size
     let noise_scale = vec2<f32>(1.0) / vec2<f32>(textureDimensions(blue_noise_texture));
@@ -1005,12 +1050,13 @@ fn sample_point_shadow_pcf_blue_noise_disc(
         let offset_texels =
             sqrt(blue_noise_values.y)
             * vec2<f32>(sin(blue_noise_values.x * tau), cos(blue_noise_values.x * tau));
-        let offset_sample_space = right * offset_texels.x + up * offset_texels.y;
         // 2x2 hardware bilinear-filtered PCF
         is_lit = is_lit + textureSampleCompareLevel(
             point_shadow_textures,
             point_shadow_comparison_sampler,
-            light_world_direction + offset_sample_space,
+            light_world_direction
+                + radius * offset_texels.x * right
+                + radius * offset_texels.y * up,
             texture_index,
             depth
         ) * inverse_sample_count;
@@ -1029,7 +1075,8 @@ fn sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
     sample_count: u32,
     frag_coord: vec2<f32>,
     right: vec3<f32>,
-    up: vec3<f32>
+    up: vec3<f32>,
+    radius: f32
 ) -> f32 {
     let light = lights.point_lights[texture_index];
     let light_direction_world = normalize(light_to_fragment_world);
@@ -1053,23 +1100,30 @@ fn sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
             base_noise_uv + R2(i),
             0.0
         ).xy;
-        // let frame_blue_noise_values = fract(blue_noise_values + frame_golden_ratio_offset);
-        let offset_texels =
+        let offset_texels = radius *
             sqrt(blue_noise_values.y)
             * vec2<f32>(sin(blue_noise_values.x * tau), cos(blue_noise_values.x * tau));
-        let offset_sample_space = right * offset_texels.x + up * offset_texels.y;
+
         let optimal_fragment_depth = depth + dot(dbias, offset_texels);
+
+        let offset_fragment_world = fragment_world
+            + offset_texels.x * right
+            + offset_texels.y * up;
+        let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+
+        let offset_light_direction_world = normalize(offset_light_to_fragment_world);
         let adaptive_epsilon = calculate_point_light_adaptive_epsilon(
             light,
-            light_direction_world,
+            offset_light_direction_world,
             fragment_world_normal,
             optimal_fragment_depth
         );
+
         // 2x2 hardware bilinear-filtered PCF
         is_lit = is_lit + textureSampleCompareLevel(
             point_shadow_textures,
             point_shadow_comparison_sampler,
-            light_direction_world + offset_sample_space,
+            offset_light_to_fragment_world,
             texture_index,
             optimal_fragment_depth + adaptive_epsilon
         ) * inverse_sample_count;
@@ -1091,15 +1145,14 @@ fn sample_point_shadow_pcf_disc(
 ) -> f32 {
     let shadow_map_size = vec2<f32>(textureDimensions(point_shadow_textures).xy);
     let shadow_map_step_texel = vec2<f32>(1.0) / shadow_map_size;
-    let shadow_map_step_texels = radius * shadow_map_step_texel;
 
     let light_world_direction = normalize(light_to_fragment_world);
     var up: vec3<f32> = vec3<f32>(0.0, 1.0, 0.0);
     // NOTE: left-handed
     var right: vec3<f32> = normalize(cross(up, light_world_direction));
     up = normalize(cross(light_world_direction, right));
-    right = right * shadow_map_step_texels.x;
-    up = up * shadow_map_step_texels.y;
+    right = right * shadow_map_step_texel.x;
+    up = up * shadow_map_step_texel.y;
 
     if (point_shadow_bias_mode == 0u) {
         if (point_shadow_sample_mode == 1u) {
@@ -1109,7 +1162,8 @@ fn sample_point_shadow_pcf_disc(
                 depth,
                 sample_count,
                 right,
-                up
+                up,
+                radius
             );
         } else {
             return sample_point_shadow_pcf_blue_noise_disc(
@@ -1119,7 +1173,8 @@ fn sample_point_shadow_pcf_disc(
                 sample_count,
                 frag_coord,
                 right,
-                up
+                up,
+                radius
             );
         }
     } else {
@@ -1156,7 +1211,7 @@ fn sample_point_shadow_pcf_disc(
             texel_center.fragment_light_view_normal.xyz
         );
 
-        var dbias: vec2<f32> = radius * vec2<f32>(
+        var dbias: vec2<f32> = vec2<f32>(
             f_o_x.z - f_o.z,
             f_o_y.z - f_o.z
         );
@@ -1170,7 +1225,8 @@ fn sample_point_shadow_pcf_disc(
                 dbias,
                 sample_count,
                 right,
-                up
+                up,
+                radius
             );
         } else {
             return sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
@@ -1182,7 +1238,8 @@ fn sample_point_shadow_pcf_disc(
                 sample_count,
                 frag_coord,
                 right,
-                up
+                up,
+                radius
             );
         }
     }
