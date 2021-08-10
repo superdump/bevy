@@ -19,6 +19,8 @@ var mesh: Mesh;
 
 struct Vertex {
     [[location(0)]] position: vec3<f32>;
+    [[location(1)]] normal: vec3<f32>;
+    [[location(2)]] uv: vec2<f32>;
 };
 
 struct VertexOutput {
@@ -28,6 +30,14 @@ struct VertexOutput {
 [[stage(vertex)]]
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_position = view.view_proj * mesh.model * vec4<f32>(vertex.position, 1.0);
+    // NOTE: mesh.model is right-handed. Apply the right-handed transform to the right-handed vertex position
+    //       then flip the sign of the z component to make the result be left-handed y-up
+    // NOTE: The point light view_proj is left-handed
+    out.clip_position = view.view_proj * mesh.model * vec4<f32>(
+        vertex.position.x,
+        vertex.position.y,
+        -vertex.position.z,
+        1.0
+    );
     return out;
 }

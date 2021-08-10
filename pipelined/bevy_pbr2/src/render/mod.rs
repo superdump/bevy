@@ -54,7 +54,7 @@ impl FromWorld for PbrShaders {
                         has_dynamic_offset: true,
                         // TODO: change this to ViewUniform::std140_size_static once crevice fixes this!
                         // Context: https://github.com/LPGhatguy/crevice/issues/29
-                        min_binding_size: BufferSize::new(144),
+                        min_binding_size: BufferSize::new(160),
                     },
                     count: None,
                 },
@@ -724,7 +724,7 @@ pub fn queue_meshes(
         mesh_meta.mesh_draw_info.clear();
         mesh_meta.material_bind_groups.next_frame();
 
-        let view_matrix = view.transform.compute_matrix();
+        let view_matrix = view.view;
         let view_row_2 = view_matrix.row(2);
         for (i, mesh) in extracted_meshes.meshes.iter_mut().enumerate() {
             let gpu_material = &render_materials

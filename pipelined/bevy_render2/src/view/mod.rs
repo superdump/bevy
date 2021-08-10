@@ -1,6 +1,5 @@
 pub mod window;
 
-use bevy_transform::components::GlobalTransform;
 pub use window::*;
 
 use crate::{
@@ -34,7 +33,8 @@ impl Plugin for ViewPlugin {
 
 pub struct ExtractedView {
     pub projection: Mat4,
-    pub transform: GlobalTransform,
+    pub view: Mat4,
+    pub position: Vec3,
     pub width: u32,
     pub height: u32,
 }
@@ -70,9 +70,9 @@ fn prepare_views(
         let projection = camera.projection;
         let view_uniforms = ViewUniformOffset {
             offset: view_meta.uniforms.push(ViewUniform {
-                view_proj: projection * camera.transform.compute_matrix().inverse(),
+                view_proj: projection * camera.view.inverse(),
                 projection,
-                world_position: camera.transform.translation,
+                world_position: camera.position,
                 frame_number: frame_meta.frame_number,
             }),
         };

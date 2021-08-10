@@ -75,8 +75,9 @@ fn extract_cameras(
                         name: camera.name.clone(),
                     },
                     ExtractedView {
+                        view: transform.compute_matrix(),
                         projection: camera.projection_matrix,
-                        transform: *transform,
+                        position: transform.translation,
                         width: window.physical_width(),
                         height: window.physical_height(),
                     },

@@ -21,6 +21,7 @@ use bevy_render2::{
 use bevy_transform::components::GlobalTransform;
 use crevice::std140::AsStd140;
 use std::num::NonZeroU32;
+use wgpu::PipelineLayout;
 
 pub struct ExtractedAmbientLight {
     color: Color,
@@ -108,8 +109,8 @@ pub const DIRECTIONAL_SHADOW_LAYERS: u32 = MAX_DIRECTIONAL_LIGHTS as u32;
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
 pub struct ShadowShaders {
-    pub shader_module: ShaderModule,
-    pub pipeline: RenderPipeline,
+    pub directional_pipeline: RenderPipeline,
+    pub point_pipeline: RenderPipeline,
     pub view_layout: BindGroupLayout,
     pub point_light_comparison_sampler: Sampler,
     pub point_light_sampler: Sampler,
@@ -122,8 +123,10 @@ impl FromWorld for ShadowShaders {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
         let pbr_shaders = world.get_resource::<PbrShaders>().unwrap();
-        let shader = Shader::from_wgsl(include_str!("depth.wgsl"));
-        let shader_module = render_device.create_shader_module(&shader);
+        let directional_shader = Shader::from_wgsl(include_str!("depth.wgsl"));
+        let directional_shader_module = render_device.create_shader_module(&directional_shader);
+        let point_shader = Shader::from_wgsl(include_str!("point_light_cubemap_depth.wgsl"));
+        let point_shader_module = render_device.create_shader_module(&point_shader);
 
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[
@@ -136,7 +139,7 @@ impl FromWorld for ShadowShaders {
                         has_dynamic_offset: true,
                         // TODO: change this to ViewUniform::std140_size_static once crevice fixes this!
                         // Context: https://github.com/LPGhatguy/crevice/issues/29
-                        min_binding_size: BufferSize::new(144),
+                        min_binding_size: BufferSize::new(160),
                     },
                     count: None,
                 },
@@ -150,69 +153,18 @@ impl FromWorld for ShadowShaders {
             bind_group_layouts: &[&view_layout, &pbr_shaders.mesh_layout],
         });
 
-        let pipeline = render_device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: None,
-            vertex: VertexState {
-                buffers: &[VertexBufferLayout {
-                    array_stride: 32,
-                    step_mode: InputStepMode::Vertex,
-                    attributes: &[
-                        // Position (GOTCHA! Vertex_Position isn't first in the buffer due to how Mesh sorts attributes (alphabetically))
-                        VertexAttribute {
-                            format: VertexFormat::Float32x3,
-                            offset: 12,
-                            shader_location: 0,
-                        },
-                        // Normal
-                        VertexAttribute {
-                            format: VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 1,
-                        },
-                        // Uv
-                        VertexAttribute {
-                            format: VertexFormat::Float32x2,
-                            offset: 24,
-                            shader_location: 2,
-                        },
-                    ],
-                }],
-                module: &shader_module,
-                entry_point: "vertex",
-            },
-            fragment: None,
-            depth_stencil: Some(DepthStencilState {
-                format: SHADOW_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::GreaterEqual,
-                stencil: StencilState {
-                    front: StencilFaceState::IGNORE,
-                    back: StencilFaceState::IGNORE,
-                    read_mask: 0,
-                    write_mask: 0,
-                },
-                bias: DepthBiasState {
-                    constant: 0,
-                    slope_scale: 0.0,
-                    clamp: 0.0,
-                },
-            }),
-            layout: Some(&pipeline_layout),
-            multisample: MultisampleState::default(),
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: PolygonMode::Fill,
-                clamp_depth: false,
-                conservative: false,
-            },
-        });
+        let directional_pipeline = create_render_pipeline(
+            &*render_device,
+            &pipeline_layout,
+            &directional_shader_module,
+        );
+
+        let point_pipeline =
+            create_render_pipeline(&*render_device, &pipeline_layout, &point_shader_module);
 
         ShadowShaders {
-            shader_module,
-            pipeline,
+            directional_pipeline,
+            point_pipeline,
             view_layout,
             point_light_comparison_sampler: render_device.create_sampler(&SamplerDescriptor {
                 address_mode_u: AddressMode::ClampToEdge,
@@ -258,6 +210,72 @@ impl FromWorld for ShadowShaders {
             }),
         }
     }
+}
+
+fn create_render_pipeline(
+    render_device: &RenderDevice,
+    pipeline_layout: &PipelineLayout,
+    shader_module: &ShaderModule,
+) -> RenderPipeline {
+    render_device.create_render_pipeline(&RenderPipelineDescriptor {
+        label: None,
+        vertex: VertexState {
+            buffers: &[VertexBufferLayout {
+                array_stride: 32,
+                step_mode: InputStepMode::Vertex,
+                attributes: &[
+                    // Position (GOTCHA! Vertex_Position isn't first in the buffer due to how Mesh sorts attributes (alphabetically))
+                    VertexAttribute {
+                        format: VertexFormat::Float32x3,
+                        offset: 12,
+                        shader_location: 0,
+                    },
+                    // Normal
+                    VertexAttribute {
+                        format: VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 1,
+                    },
+                    // Uv
+                    VertexAttribute {
+                        format: VertexFormat::Float32x2,
+                        offset: 24,
+                        shader_location: 2,
+                    },
+                ],
+            }],
+            module: shader_module,
+            entry_point: "vertex",
+        },
+        fragment: None,
+        depth_stencil: Some(DepthStencilState {
+            format: SHADOW_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: CompareFunction::GreaterEqual,
+            stencil: StencilState {
+                front: StencilFaceState::IGNORE,
+                back: StencilFaceState::IGNORE,
+                read_mask: 0,
+                write_mask: 0,
+            },
+            bias: DepthBiasState {
+                constant: 0,
+                slope_scale: 0.0,
+                clamp: 0.0,
+            },
+        }),
+        layout: Some(pipeline_layout),
+        multisample: MultisampleState::default(),
+        primitive: PrimitiveState {
+            topology: PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: FrontFace::Ccw,
+            cull_mode: None,
+            polygon_mode: PolygonMode::Fill,
+            clamp_depth: false,
+            conservative: false,
+        },
+    })
 }
 
 // TODO: ultimately these could be filtered down to lights relevant to actual views
@@ -348,39 +366,41 @@ struct CubeMapFace {
 }
 
 // see https://www.khronos.org/opengl/wiki/Cubemap_Texture
+// NOTE: left-handed
 const CUBE_MAP_FACES: [CubeMapFace; 6] = [
-    // 0 	GL_TEXTURE_CUBE_MAP_POSITIVE_X
-    CubeMapFace {
-        target: NEGATIVE_X,
-        up: NEGATIVE_Y,
-    },
-    // 1 	GL_TEXTURE_CUBE_MAP_NEGATIVE_X
+    // +x
     CubeMapFace {
         target: Vec3::X,
-        up: NEGATIVE_Y,
+        up: Vec3::Y,
     },
-    // 2 	GL_TEXTURE_CUBE_MAP_POSITIVE_Y
+    // -x
     CubeMapFace {
-        target: NEGATIVE_Y,
-        up: Vec3::Z,
+        target: NEGATIVE_X,
+        up: Vec3::Y,
     },
-    // 3 	GL_TEXTURE_CUBE_MAP_NEGATIVE_Y
+    // +y
     CubeMapFace {
         target: Vec3::Y,
         up: NEGATIVE_Z,
     },
-    // 4 	GL_TEXTURE_CUBE_MAP_POSITIVE_Z
+    // -y
     CubeMapFace {
-        target: NEGATIVE_Z,
-        up: NEGATIVE_Y,
+        target: NEGATIVE_Y,
+        up: Vec3::Z,
     },
-    // 5 	GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
+    // +z
     CubeMapFace {
         target: Vec3::Z,
-        up: NEGATIVE_Y,
+        up: Vec3::Y,
+    },
+    // -z
+    CubeMapFace {
+        target: NEGATIVE_Z,
+        up: Vec3::Y,
     },
 ];
 
+// NOTE: left-handed, light to fragment
 fn face_index_to_name(face_index: usize) -> &'static str {
     match face_index {
         0 => "+x",
@@ -393,9 +413,15 @@ fn face_index_to_name(face_index: usize) -> &'static str {
     }
 }
 
+pub enum LightType {
+    Directional,
+    Point,
+}
+
 pub struct ViewLight {
     pub depth_texture_view: TextureView,
     pub pass_name: String,
+    pub light_type: LightType,
 }
 
 pub struct ViewLights {
@@ -478,17 +504,27 @@ pub fn prepare_lights(
 
         // TODO: this should select lights based on relevance to the view instead of the first ones that show up in a query
         for (light_index, light) in point_lights.iter().enumerate().take(MAX_POINT_LIGHTS) {
+            // NOTE: Cubemaps are left-handed so use a left-handed projection and convert the light position
+            //       to left-handed y-up
             let projection =
-                Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1);
-
-            // ignore scale because we don't want to effectively scale light radius and range
-            // by applying those as a view transform to shadow map rendering of objects
-            // and ignore rotation because we want the shadow map projections to align with the axes
-            let view_translation = GlobalTransform::from_translation(light.transform.translation);
+                Mat4::perspective_infinite_reverse_lh(std::f32::consts::FRAC_PI_2, 1.0, 0.1);
+            let light_position_world_lh = Vec3::new(
+                light.transform.translation.x,
+                light.transform.translation.y,
+                -light.transform.translation.z,
+            );
 
             for (face_index, CubeMapFace { target, up }) in CUBE_MAP_FACES.iter().enumerate() {
                 // use the cubemap projection direction
-                let view_rotation = GlobalTransform::identity().looking_at(*target, *up);
+                // ignore scale because we don't want to effectively scale light radius and range
+                // by applying those as a view transform to shadow map rendering of objects
+                // and ignore rotation because we want the shadow map projections to align with the axes
+                // NOTE: Cubemaps are left-handed
+                let view = Mat4::look_at_lh(
+                    light_position_world_lh,
+                    light_position_world_lh + *target,
+                    *up,
+                );
 
                 let depth_texture_view =
                     point_light_depth_texture
@@ -514,11 +550,14 @@ pub fn prepare_lights(
                                 light_index,
                                 face_index_to_name(face_index)
                             ),
+                            light_type: LightType::Point,
                         },
                         ExtractedView {
                             width: point_light_shadow_map.size as u32,
                             height: point_light_shadow_map.size as u32,
-                            transform: view_translation * view_rotation,
+                            position: light_position_world_lh,
+                            // Inverse here as the Mat4::look_at_* seem to produce inverse matrices
+                            view: view.inverse(),
                             projection,
                         },
                         RenderPhase::<ShadowPhase>::default(),
@@ -533,7 +572,7 @@ pub fn prepare_lights(
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: (light.color.as_rgba_linear() * light.intensity).into(),
                 radius: light.radius,
-                position: light.transform.translation,
+                position: light_position_world_lh,
                 inverse_square_range: 1.0 / (light.range * light.range),
                 near: 0.1,
                 far: light.range,
@@ -608,11 +647,13 @@ pub fn prepare_lights(
                     ViewLight {
                         depth_texture_view,
                         pass_name: format!("shadow pass directional light {}", i),
+                        light_type: LightType::Directional,
                     },
                     ExtractedView {
                         width: directional_light_shadow_map.size as u32,
                         height: directional_light_shadow_map.size as u32,
-                        transform: GlobalTransform::from_matrix(view.inverse()),
+                        position: Vec3::ZERO,
+                        view,
                         projection,
                     },
                     RenderPhase::<ShadowPhase>::default(),
@@ -745,7 +786,7 @@ type DrawShadowMeshParams<'s, 'w> = (
     Res<'w, LightMeta>,
     Res<'w, MeshMeta>,
     Res<'w, RenderAssets<Mesh>>,
-    Query<'w, 's, &'w ViewUniformOffset>,
+    Query<'w, 's, (&'w ViewUniformOffset, &'w ViewLight)>,
 );
 pub struct DrawShadowMesh {
     params: SystemState<DrawShadowMeshParams<'static, 'static>>,
@@ -770,10 +811,13 @@ impl Draw for DrawShadowMesh {
     ) {
         let (shadow_shaders, extracted_meshes, light_meta, mesh_meta, meshes, views) =
             self.params.get(world);
-        let view_uniform_offset = views.get(view).unwrap();
+        let (view_uniform_offset, view_light) = views.get(view).unwrap();
         let extracted_mesh = &extracted_meshes.into_inner().meshes[draw_key];
         let shadow_shaders = shadow_shaders.into_inner();
-        pass.set_render_pipeline(&shadow_shaders.pipeline);
+        pass.set_render_pipeline(match view_light.light_type {
+            LightType::Directional => &shadow_shaders.directional_pipeline,
+            LightType::Point => &shadow_shaders.point_pipeline,
+        });
         pass.set_bind_group(
             0,
             light_meta
