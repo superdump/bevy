@@ -930,7 +930,7 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
                 point_shadow_comparison_sampler,
                 offset_light_to_fragment_world,
                 texture_index,
-                optimal_fragment_depth + adaptive_epsilon
+                optimal_fragment_depth - adaptive_epsilon
             ) * inverse_sample_count;
         }
     } elseif (filter_size == 5u) {
@@ -961,7 +961,7 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
                 point_shadow_comparison_sampler,
                 offset_light_to_fragment_world,
                 texture_index,
-                optimal_fragment_depth + adaptive_epsilon
+                optimal_fragment_depth - adaptive_epsilon
             ) * inverse_sample_count;
         }
     } elseif (filter_size == 3u) {
@@ -992,7 +992,7 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
                 point_shadow_comparison_sampler,
                 offset_light_to_fragment_world,
                 texture_index,
-                optimal_fragment_depth + adaptive_epsilon
+                optimal_fragment_depth - adaptive_epsilon
             ) * inverse_sample_count;
         }
     } else {
@@ -1009,7 +1009,7 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
             point_shadow_comparison_sampler,
             light_to_fragment_world,
             texture_index,
-            optimal_fragment_depth + adaptive_epsilon
+            optimal_fragment_depth - adaptive_epsilon
         );
     }
 
@@ -1125,7 +1125,7 @@ fn sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
             point_shadow_comparison_sampler,
             offset_light_to_fragment_world,
             texture_index,
-            optimal_fragment_depth + adaptive_epsilon
+            optimal_fragment_depth - adaptive_epsilon
         ) * inverse_sample_count;
     }
 
