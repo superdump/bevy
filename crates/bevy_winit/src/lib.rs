@@ -40,8 +40,19 @@ pub struct WinitPlugin;
 
 impl Plugin for WinitPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WinitWindows>()
-            .set_runner(winit_runner)
+        app.init_resource::<WinitWindows>();
+        if cfg!(target_arch = "wasm32") {
+            // TODO
+            // dirty hack - we need to create window early because wgpu initialization needs it
+            let event_loop = EventLoop::new();
+            let mut create_window_event_reader = ManualEventReader::<CreateWindow>::default();
+            handle_create_window_events(
+                &mut app.world,
+                &event_loop,
+                &mut create_window_event_reader,
+            );
+        }
+        app.set_runner(winit_runner)
             .add_system_to_stage(CoreStage::PostUpdate, change_window.exclusive_system());
     }
 }

@@ -75,7 +75,7 @@ pub struct LogSettings {
 impl Default for LogSettings {
     fn default() -> Self {
         Self {
-            filter: "wgpu=error".to_string(),
+            filter: "wgpu=info".to_string(),
             level: Level::INFO,
         }
     }

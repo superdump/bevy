@@ -30,12 +30,10 @@ pub type RenderQueue = Arc<Queue>;
 pub type RenderInstance = Instance;
 
 pub async fn initialize_renderer(
-    backends: Backends,
+    instance: &wgpu::Instance,
     request_adapter_options: &RequestAdapterOptions<'_>,
     device_descriptor: &DeviceDescriptor<'_>,
-) -> (RenderInstance, RenderDevice, RenderQueue) {
-    let instance = wgpu::Instance::new(backends);
-
+) -> (RenderDevice, RenderQueue) {
     let adapter = instance
         .request_adapter(request_adapter_options)
         .await
@@ -60,7 +58,7 @@ pub async fn initialize_renderer(
         .unwrap();
     let device = Arc::new(device);
     let queue = Arc::new(queue);
-    (instance, RenderDevice::from(device), queue)
+    (RenderDevice::from(device), queue)
 }
 
 pub struct RenderContext {

@@ -141,10 +141,15 @@ impl<'a> From<&'a Shader> for ShaderModuleDescriptor<'a> {
                     ShaderSource::Wgsl(wgsl.into())
                 }
                 Shader::SpirV(_) => {
-                    // TODO: we can probably just transmute the u8 array to u32?
-                    let reflection = shader.reflect().unwrap();
-                    let spirv = reflection.get_spirv().unwrap();
-                    ShaderSource::SpirV(Cow::Owned(spirv))
+                    #[cfg(target_arch = "wasm32")]
+                    panic!("no spirv");
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        // TODO: we can probably just transmute the u8 array to u32?
+                        let reflection = shader.reflect().unwrap();
+                        let spirv = reflection.get_spirv().unwrap();
+                        ShaderSource::SpirV(Cow::Owned(spirv))
+                    }
                 }
             },
         }

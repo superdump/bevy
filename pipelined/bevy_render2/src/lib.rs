@@ -86,15 +86,37 @@ struct ScratchRenderWorld(World);
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        let (instance, device, queue) =
+        let backend = if cfg!(not(target_arch = "wasm32")) {
+            Backends::PRIMARY
+        } else {
+            Backends::GL
+        };
+        let instance = wgpu::Instance::new(backend);
+        let (device, queue) = {
+            let world = app.world.cell();
+            let windows = world.get_resource_mut::<bevy_window::Windows>().unwrap();
+
+            let surface = windows.get_primary().map(|window| unsafe {
+                let raw_handle = window.raw_window_handle().get_handle();
+                instance.create_surface(&raw_handle)
+            });
+            bevy_log::info!("surface: {:?}", surface);
+
+            let device_descriptor = wgpu::DeviceDescriptor {
+                limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                ..Default::default()
+            };
+
             futures_lite::future::block_on(renderer::initialize_renderer(
-                wgpu::util::backend_bits_from_env().unwrap_or(Backends::PRIMARY),
+                &instance,
                 &wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::HighPerformance,
-                    ..Default::default()
+                    compatible_surface: surface.as_ref(),
                 },
-                &wgpu::DeviceDescriptor::default(),
-            ));
+                &device_descriptor,
+            ))
+        };
+
         app.insert_resource(device.clone())
             .insert_resource(queue.clone())
             .init_resource::<ScratchRenderWorld>();

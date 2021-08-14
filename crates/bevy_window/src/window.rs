@@ -555,7 +555,7 @@ impl Default for WindowDescriptor {
             cursor_visible: true,
             mode: WindowMode::Windowed,
             #[cfg(target_arch = "wasm32")]
-            canvas: None,
+            canvas: Some("#bevy_canvas".to_string()),
         }
     }
 }

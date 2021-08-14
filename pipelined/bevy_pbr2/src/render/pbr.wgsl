@@ -168,14 +168,14 @@ struct ClusterOffsetsAndCounts {
 
 [[group(0), binding(1)]]
 var lights: Lights;
-[[group(0), binding(2)]]
-var point_shadow_textures: texture_depth_cube_array;
-[[group(0), binding(3)]]
-var point_shadow_textures_sampler: sampler_comparison;
-[[group(0), binding(4)]]
-var directional_shadow_textures: texture_depth_2d_array;
-[[group(0), binding(5)]]
-var directional_shadow_textures_sampler: sampler_comparison;
+// [[group(0), binding(2)]]
+// var point_shadow_textures: texture_depth_cube_array;
+// [[group(0), binding(3)]]
+// var point_shadow_textures_sampler: sampler_comparison;
+// [[group(0), binding(4)]]
+// var directional_shadow_textures: texture_depth_2d_array;
+// [[group(0), binding(5)]]
+// var directional_shadow_textures_sampler: sampler_comparison;
 [[group(0), binding(6)]]
 var point_lights: PointLights;
 [[group(0), binding(7)]]
@@ -496,7 +496,8 @@ fn fetch_point_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: v
     //       a quad (2x2 fragments) being processed not being sampled, and this messing with
     //       mip-mapping functionality. The shadow maps have no mipmaps so Level just samples
     //       from LOD 0.
-    return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
+    //return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
+    return 1.0;
 }
 
 fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
@@ -527,7 +528,8 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
     // do the lookup, using HW PCF and comparison
     // NOTE: Due to non-uniform control flow above, we must use the level variant of the texture
     //       sampler to avoid use of implicit derivatives causing possible undefined behavior.
-    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
+    // return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
+    return 1.0;
 }
 
 fn hsv2rgb(hue: f32, saturation: f32, value: f32) -> vec3<f32> {
