@@ -6,7 +6,7 @@ use crate::{
 };
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
-use bevy_utils::{tracing::debug, HashMap};
+use bevy_utils::{tracing::debug, HashMap, HashSet};
 use bevy_window::{RawWindowHandleWrapper, WindowId, Windows};
 use std::ops::{Deref, DerefMut};
 use wgpu::TextureFormat;
@@ -100,7 +100,8 @@ fn extract_windows(mut render_world: ResMut<RenderWorld>, windows: Res<Windows>)
 #[derive(Default)]
 pub struct WindowSurfaces {
     surfaces: HashMap<WindowId, wgpu::Surface>,
-    swap_chains: HashMap<WindowId, wgpu::SwapChain>,
+    /// List of windows that we have already called the initial `configure_surface` for
+    configured_windows: HashSet<WindowId>,
 }
 
 pub fn prepare_windows(
@@ -122,7 +123,7 @@ pub fn prepare_windows(
                 render_instance.create_surface(&window.handle.get_handle())
             });
 
-        let swap_chain_descriptor = wgpu::SwapChainDescriptor {
+        let swap_chain_descriptor = wgpu::SurfaceConfiguration {
             format: TextureFormat::bevy_default(),
             width: window.physical_width,
             height: window.physical_height,
@@ -134,30 +135,19 @@ pub fn prepare_windows(
             },
         };
 
-        if window.size_changed {
-            window_surfaces.swap_chains.insert(
-                window.id,
-                render_device.create_swap_chain(surface, &swap_chain_descriptor),
-            );
+        // Do the surface configuration if it hasn't been configured yet
+        // or if the window size changed
+        if window_surfaces.configured_windows.insert(window.id) || window.size_changed {
+            render_device.configure_surface(surface, &swap_chain_descriptor);
         }
 
-        let swap_chain = window_surfaces
-            .swap_chains
-            .entry(window.id)
-            .or_insert_with(|| render_device.create_swap_chain(surface, &swap_chain_descriptor));
-
-        let frame = match swap_chain.get_current_frame() {
+        let frame = match surface.get_current_frame() {
             Ok(swap_chain_frame) => swap_chain_frame,
-            Err(wgpu::SwapChainError::Outdated) => {
-                let new_swap_chain =
-                    render_device.create_swap_chain(surface, &swap_chain_descriptor);
-                let frame = new_swap_chain
+            Err(wgpu::SurfaceError::Outdated) => {
+                render_device.configure_surface(surface, &swap_chain_descriptor);
+                surface
                     .get_current_frame()
-                    .expect("Error recreating swap chain");
-                window_surfaces
-                    .swap_chains
-                    .insert(window.id, new_swap_chain);
-                frame
+                    .expect("Error reconfiguring surface")
             }
             err => err.expect("Failed to acquire next swap chain texture!"),
         };
