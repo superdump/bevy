@@ -106,9 +106,9 @@ let STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT: u32               = 16u;
 let STANDARD_MATERIAL_FLAGS_UNLIT_BIT: u32                      = 32u;
 
 struct PointLight {
-    projection: mat4x4<f32>;
+    projection_lh: mat4x4<f32>;
     color: vec4<f32>;
-    position: vec3<f32>;
+    position_lh: vec3<f32>;
     inverse_square_range: f32;
     radius: f32;
     near: f32;
@@ -345,7 +345,7 @@ fn point_light(
     world_position: vec3<f32>, light: PointLight, roughness: f32, NdotV: f32, N: vec3<f32>, V: vec3<f32>,
     R: vec3<f32>, F0: vec3<f32>, diffuseColor: vec3<f32>
 ) -> vec3<f32> {
-    let light_position_world_rh = light.position.xyz * flip_z.xyz;
+    let light_position_world_rh = light.position_lh.xyz * flip_z.xyz;
     let frag_to_light = light_position_world_rh - world_position.xyz;
     let distance_square = dot(frag_to_light, frag_to_light);
     let rangeAttenuation =
@@ -526,7 +526,7 @@ fn calculate_point_light_texel_center(
     let fragment_light_view = cubemap_fragment_world_to_light_view(
         cubemap_face_index,
         fragment_world,
-        light.position.xyz,
+        light.position_lh.xyz,
     );
     let fragment_light_view_normal = normalize(cubemap_fragment_world_to_light_view(
         cubemap_face_index,
@@ -536,7 +536,7 @@ fn calculate_point_light_texel_center(
 
 
     // Calculate the shadow map texture coordinates and fragment light ndc depth
-    let fragment_light_clip = light.projection * fragment_light_view;
+    let fragment_light_clip = light.projection_lh * fragment_light_view;
     let fragment_light_ndc = fragment_light_clip / fragment_light_clip.w;
     let fragment_shadow_map_uv = 0.5 * fragment_light_ndc.xy + vec2<f32>(0.5);
 
@@ -582,7 +582,7 @@ fn calculate_point_light_texel_center_ray_intersection(
     let p_light_view = ray_origin_light_view + t_hit * ray_direction_light_view;
 
     // Calculate the projected position of the intersection point p_light_view
-    let p_light_clip = light.projection * vec4<f32>(p_light_view, 1.0);
+    let p_light_clip = light.projection_lh * vec4<f32>(p_light_view, 1.0);
 
     return p_light_clip.xyz / p_light_clip.w;
 }
@@ -923,7 +923,7 @@ fn calculate_point_light_optimal_offset_fragment_depth(
 ) -> f32 {
     let cubemap_fragment_light_view = calculate_offset_fragment_light_view(
         fragment_world,
-        light.position.xyz,
+        light.position_lh.xyz,
         fragment_light_view,
         cubemap_face_index,
         offset_light_to_fragment_world,
@@ -975,7 +975,7 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
             let offset_fragment_world = fragment_world.xyz
                 + offset_texels.x * right
                 + offset_texels.y * up;
-            let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+            let offset_light_to_fragment_world = offset_fragment_world - light.position_lh.xyz;
 
             var optimal_fragment_depth: f32;
             if (point_shadow_bias_mode == 1u) {
@@ -1019,7 +1019,7 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
             let offset_fragment_world = fragment_world
                 + offset_texels.x * right
                 + offset_texels.y * up;
-            let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+            let offset_light_to_fragment_world = offset_fragment_world - light.position_lh.xyz;
 
             var optimal_fragment_depth: f32;
             if (point_shadow_bias_mode == 1u) {
@@ -1063,7 +1063,7 @@ fn sample_point_shadow_pcf_regular_disc_adaptive_bias(
             let offset_fragment_world = fragment_world.xyz
                 + offset_texels.x * right
                 + offset_texels.y * up;
-            let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+            let offset_light_to_fragment_world = offset_fragment_world - light.position_lh.xyz;
  
             var optimal_fragment_depth: f32;
             if (point_shadow_bias_mode == 1u) {
@@ -1212,7 +1212,7 @@ fn sample_point_shadow_pcf_blue_noise_disc_adaptive_bias(
         let offset_fragment_world = fragment_world
             + offset_texels.x * right
             + offset_texels.y * up;
-        let offset_light_to_fragment_world = offset_fragment_world - light.position.xyz;
+        let offset_light_to_fragment_world = offset_fragment_world - light.position_lh.xyz;
 
         var optimal_fragment_depth: f32;
         if (point_shadow_bias_mode == 1u) {
@@ -1319,11 +1319,11 @@ fn sample_point_shadow_pcf_disc(
         let cubemap_face_index = world_direction_to_cubemap_face(light_to_fragment_world);
 
         let f_o_x_offset_fragment_world = fragment_world.xyz + right;
-        let f_o_x_offset_light_to_fragment_world = f_o_x_offset_fragment_world - light.position.xyz;
+        let f_o_x_offset_light_to_fragment_world = f_o_x_offset_fragment_world - light.position_lh.xyz;
 
         let f_o_x_cubemap_fragment_light_view = calculate_offset_fragment_light_view(
             fragment_world,
-            light.position.xyz,
+            light.position_lh.xyz,
             texel_center.fragment_light_view.xyz,
             cubemap_face_index,
             f_o_x_offset_light_to_fragment_world,
@@ -1342,11 +1342,11 @@ fn sample_point_shadow_pcf_disc(
         );
 
         let f_o_y_offset_fragment_world = fragment_world.xyz + up;
-        let f_o_y_offset_light_to_fragment_world = f_o_y_offset_fragment_world - light.position.xyz;
+        let f_o_y_offset_light_to_fragment_world = f_o_y_offset_fragment_world - light.position_lh.xyz;
 
         let f_o_y_cubemap_fragment_light_view = calculate_offset_fragment_light_view(
             fragment_world,
-            light.position.xyz,
+            light.position_lh.xyz,
             texel_center.fragment_light_view.xyz,
             cubemap_face_index,
             f_o_y_offset_light_to_fragment_world,
@@ -1410,47 +1410,53 @@ fn fetch_point_shadow(
     frag_coord: vec2<f32>
 ) -> f32 {
     // NOTE: Convert right-handed y-up world coordinates to left-handed y-up
-    let fragment_world = fragment_world_rh * flip_z;
-    let fragment_world_normal = fragment_world_normal_rh * flip_z.xyz;
+    let fragment_world_lh = fragment_world_rh * flip_z;
+    let fragment_world_normal_lh = fragment_world_normal_rh * flip_z.xyz;
 
     let light = lights.point_lights[light_id];
 
     // because the shadow maps align with the axes and the frustum planes are at 45 degrees
     // we can get the worldspace depth by taking the largest absolute axis
-    var light_to_fragment_world: vec3<f32> = fragment_world.xyz - light.position.xyz;
+    var light_to_fragment_world_lh: vec3<f32> = fragment_world_lh.xyz - light.position_lh.xyz;
     // Full shadow beyond the range of the light
-    if (dot(light_to_fragment_world, light_to_fragment_world) > light.far * light.far) {
+    if (dot(light_to_fragment_world_lh, light_to_fragment_world_lh) > light.far * light.far) {
         return 0.0;
     }
-    let light_to_fragment_world_abs = abs(light_to_fragment_world);
-    var major_axis_magnitude: f32 = max(light_to_fragment_world_abs.x, max(light_to_fragment_world_abs.y, light_to_fragment_world_abs.z));
+    let light_to_fragment_world_abs_lh = abs(light_to_fragment_world_lh);
+    var major_axis_magnitude: f32 = max(
+        light_to_fragment_world_abs_lh.x,
+        max(
+            light_to_fragment_world_abs_lh.y,
+            light_to_fragment_world_abs_lh.z
+        )
+    );
 
     if (point_shadow_bias_mode == 0u) {
         // The normal bias here is already scaled by the texel size at 1 world unit from the light.
         // The texel size increases proportionally with distance from the light so multiplying by
         // distance to light scales the normal bias to the texel size at the fragment distance.
-        let normal_offset = light.shadow_normal_bias * major_axis_magnitude * fragment_world_normal.xyz;
-        let depth_offset = light.shadow_depth_bias * normalize(light_to_fragment_world.xyz);
-        let offset_position = fragment_world.xyz + normal_offset + depth_offset;
+        let normal_offset = light.shadow_normal_bias * major_axis_magnitude * fragment_world_normal_lh.xyz;
+        let depth_offset = light.shadow_depth_bias * normalize(light_to_fragment_world_lh.xyz);
+        let offset_position = fragment_world_lh.xyz + normal_offset + depth_offset;
 
         // similar largest-absolute-axis trick as above, but now with the offset fragment position
-        light_to_fragment_world = offset_position.xyz - light.position.xyz;
-        let abs_position_ls = abs(light_to_fragment_world);
-        major_axis_magnitude = max(abs_position_ls.x, max(abs_position_ls.y, abs_position_ls.z));
+        light_to_fragment_world_lh = offset_position.xyz - light.position_lh.xyz;
+        let abs_position_ls_lh = abs(light_to_fragment_world_lh);
+        major_axis_magnitude = max(abs_position_ls_lh.x, max(abs_position_ls_lh.y, abs_position_ls_lh.z));
     }
 
     // NOTE: This simplification comes from multiplying:
     //       projection * vec4(0, 0, major_axis_magnitude, 1.0)
     //       and keeping only the terms that have any impact on the depth.
-    // NOTE: Left-handed y-up so z in front of the camera is positive
+    // NOTE: Left-handed y-up so +z is in front of the camera is positive
     // Projection-agnostic approach:
-    let clip_z = major_axis_magnitude * light.projection[2][2] + light.projection[3][2];
-    let clip_w = major_axis_magnitude * light.projection[2][3] + light.projection[3][3];
+    let clip_z = major_axis_magnitude * light.projection_lh[2][2] + light.projection_lh[3][2];
+    let clip_w = major_axis_magnitude * light.projection_lh[2][3] + light.projection_lh[3][3];
     let depth = clip_z / clip_w;
 
     if (point_shadow_sample_mode == 0u) {
         return sample_point_shadow_pcf_cube(
-            light_to_fragment_world,
+            light_to_fragment_world_lh,
             i32(light_id),
             depth,
             5.0 * 0.5,
@@ -1458,9 +1464,9 @@ fn fetch_point_shadow(
         );
     } else {
         return sample_point_shadow_pcf_disc(
-            light_to_fragment_world,
-            fragment_world.xyz,
-            fragment_world_normal,
+            light_to_fragment_world_lh,
+            fragment_world_lh.xyz,
+            fragment_world_normal_lh,
             i32(light_id),
             depth,
             5u,
