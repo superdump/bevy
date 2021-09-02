@@ -1436,7 +1436,7 @@ fn fetch_point_shadow(
         // The texel size increases proportionally with distance from the light so multiplying by
         // distance to light scales the normal bias to the texel size at the fragment distance.
         let normal_offset = light.shadow_normal_bias * major_axis_magnitude * fragment_world_normal_lh.xyz;
-        let depth_offset = light.shadow_depth_bias * normalize(light_to_fragment_world_lh.xyz);
+        let depth_offset = light.shadow_depth_bias * normalize(-light_to_fragment_world_lh.xyz);
         let offset_position = fragment_world_lh.xyz + normal_offset + depth_offset;
 
         // similar largest-absolute-axis trick as above, but now with the offset fragment position
