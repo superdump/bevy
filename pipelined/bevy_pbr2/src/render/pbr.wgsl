@@ -1847,8 +1847,6 @@ fn fetch_directional_shadow(
     surface_normal: vec3<f32>,
     frag_coord: vec2<f32>
 ) -> f32 {
-    // return directional_light_adaptive_depth_bias(light_id, frag_position, surface_normal);
-
     let light = lights.directional_lights[light_id];
 
     var fragment_world: vec4<f32> = frag_position;
@@ -1878,7 +1876,7 @@ fn fetch_directional_shadow(
 
     return sample_directional_shadow_pcf_disc(
         fragment_shadow_map_uv,
-        frag_position,
+        fragment_world,
         surface_normal,
         light_id,
         fragment_light_ndc.z,
