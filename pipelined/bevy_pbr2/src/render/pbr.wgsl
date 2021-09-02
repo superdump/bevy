@@ -696,7 +696,8 @@ fn calculate_directional_light_adaptive_epsilon(
     let k = 0.0001;
     let scene_scale = 30.0;
     let adaptive_epsilon = scene_scale * k * adaptive_epsilon_scale_factor
-        / (light.near - light.far);
+        // NOTE: for forward z this would be light.near - light.far
+        / (light.far - light.near);
     
     return adaptive_epsilon;
 }
