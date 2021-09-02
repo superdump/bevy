@@ -119,7 +119,7 @@ struct PointLight {
 
 struct DirectionalLight {
     view_projection: mat4x4<f32>;
-    view: mat4x4<f32>;
+    inverse_view: mat4x4<f32>;
     projection: mat4x4<f32>;
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
@@ -619,8 +619,8 @@ fn calculate_directional_light_texel_center(
     fragment_world: vec3<f32>,
     fragment_world_normal: vec3<f32>,
 ) -> TexelCenterOutput {
-    let fragment_light_view = light.view * vec4<f32>(fragment_world, 1.0);
-    let fragment_light_view_normal = normalize(light.view * vec4<f32>(fragment_world_normal, 0.0));
+    let fragment_light_view = light.inverse_view * vec4<f32>(fragment_world, 1.0);
+    let fragment_light_view_normal = normalize(light.inverse_view * vec4<f32>(fragment_world_normal, 0.0));
 
     // Calculate the shadow map texture coordinates and fragment light ndc depth
     let fragment_light_clip = light.projection * fragment_light_view;

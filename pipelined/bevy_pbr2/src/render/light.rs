@@ -76,7 +76,7 @@ pub struct GpuPointLight {
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuDirectionalLight {
     view_projection: Mat4,
-    view: Mat4,
+    inverse_view: Mat4,
     projection: Mat4,
     color: Vec4,
     dir_to_light: Vec3,
@@ -616,7 +616,7 @@ pub fn prepare_lights(
                 color: (light.color.as_rgba_linear() * intensity).into(),
                 dir_to_light,
                 view_projection: projection * view.inverse(),
-                view,
+                inverse_view: view.inverse(),
                 projection,
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
