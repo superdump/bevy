@@ -32,11 +32,12 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
     // NOTE: mesh.model is right-handed. Apply the right-handed transform to the right-handed vertex position
     //       then flip the sign of the z component to make the result be left-handed y-up
+    let world_position_rh = mesh.model * vec4<f32>(vertex.position.xyz, 1.0);
     // NOTE: The point light view_proj is left-handed
-    out.clip_position = view.view_proj * mesh.model * vec4<f32>(
-        vertex.position.x,
-        vertex.position.y,
-        -vertex.position.z,
+    out.clip_position = view.view_proj * vec4<f32>(
+        world_position_rh.x,
+        world_position_rh.y,
+        -world_position_rh.z,
         1.0
     );
     return out;
