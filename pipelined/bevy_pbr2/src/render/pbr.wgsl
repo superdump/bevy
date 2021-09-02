@@ -606,10 +606,9 @@ fn calculate_point_light_adaptive_epsilon(
     // Calculate the adaptive epsilon to avoid self-shadowing
     let k = 0.0001;
     let scene_scale = 30.0;
-    // left-handed perspective projection
-    let adaptive_epsilon_temp = fragment_light_ndc_depth * (light.far - light.near) - light.far;
-    let adaptive_epsilon = adaptive_epsilon_temp * adaptive_epsilon_temp * scene_scale * k * adaptive_epsilon_scale_factor
-        / (light.near * light.far * (light.far - light.near));
+    // left-handed infinite reverse perspective projection
+    let adaptive_epsilon = -(fragment_light_ndc_depth * fragment_light_ndc_depth) * scene_scale * k * adaptive_epsilon_scale_factor
+        / light.near;
     
     return adaptive_epsilon;
 }
