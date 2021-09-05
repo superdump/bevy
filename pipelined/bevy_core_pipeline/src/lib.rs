@@ -83,6 +83,7 @@ impl Plugin for CorePipelinePlugin {
                 RenderStage::PhaseSort,
                 sort_phase_system::<Transparent2dPhase>,
             )
+            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Opaque3dPhase>)
             .add_system_to_stage(
                 RenderStage::PhaseSort,
                 sort_phase_system::<Transparent3dPhase>,
@@ -160,6 +161,7 @@ impl Plugin for CorePipelinePlugin {
     }
 }
 
+pub struct Opaque3dPhase;
 pub struct Transparent3dPhase;
 pub struct Transparent2dPhase;
 
@@ -189,9 +191,10 @@ pub fn extract_core_pipeline_camera_phases(
     }
     if let Some(camera_3d) = active_cameras.get(CameraPlugin::CAMERA_3D) {
         if let Some(entity) = camera_3d.entity {
-            commands
-                .get_or_spawn(entity)
-                .insert(RenderPhase::<Transparent3dPhase>::default());
+            commands.get_or_spawn(entity).insert_bundle((
+                RenderPhase::<Opaque3dPhase>::default(),
+                RenderPhase::<Transparent3dPhase>::default(),
+            ));
         }
     }
 }
@@ -200,7 +203,13 @@ pub fn prepare_core_views_system(
     mut commands: Commands,
     mut texture_cache: ResMut<TextureCache>,
     render_device: Res<RenderDevice>,
-    views: Query<(Entity, &ExtractedView), With<RenderPhase<Transparent3dPhase>>>,
+    views: Query<
+        (Entity, &ExtractedView),
+        (
+            With<RenderPhase<Opaque3dPhase>>,
+            With<RenderPhase<Transparent3dPhase>>,
+        ),
+    >,
 ) {
     for (entity, view) in views.iter() {
         let cached_texture = texture_cache.get(

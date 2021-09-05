@@ -3,7 +3,7 @@ pub use light::*;
 
 use crate::{NotShadowCaster, NotShadowReceiver, StandardMaterial, StandardMaterialUniformData};
 use bevy_asset::{Assets, Handle};
-use bevy_core_pipeline::Transparent3dPhase;
+use bevy_core_pipeline::{Opaque3dPhase, Transparent3dPhase};
 use bevy_ecs::{prelude::*, system::SystemState};
 use bevy_math::Mat4;
 use bevy_render2::{
@@ -548,6 +548,7 @@ pub fn queue_meshes(
         Entity,
         &ExtractedView,
         &ViewLights,
+        &mut RenderPhase<Opaque3dPhase>,
         &mut RenderPhase<Transparent3dPhase>,
     )>,
     mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
@@ -588,7 +589,7 @@ pub fn queue_meshes(
                 })
             },
         ));
-    for (entity, view, view_lights, mut transparent_phase) in views.iter_mut() {
+    for (entity, view, view_lights, mut opaque_phase, mut transparent_phase) in views.iter_mut() {
         // TODO: cache this?
         let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             entries: &[
