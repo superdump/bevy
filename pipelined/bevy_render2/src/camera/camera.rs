@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 #[reflect(Component)]
 pub struct Camera {
     pub projection_matrix: Mat4,
+    pub near: f32,
+    pub far: f32,
     pub name: Option<String>,
     #[reflect(ignore)]
     pub window: WindowId,
@@ -107,6 +109,8 @@ pub fn camera_system<T: CameraProjection + Component>(
             {
                 camera_projection.update(window.width(), window.height());
                 camera.projection_matrix = camera_projection.get_projection_matrix();
+                camera.near = camera_projection.near();
+                camera.far = camera_projection.far();
                 camera.depth_calculation = camera_projection.depth_calculation();
             }
         }

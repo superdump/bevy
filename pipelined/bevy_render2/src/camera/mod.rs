@@ -79,6 +79,8 @@ fn extract_cameras(
                         transform: *transform,
                         width: window.physical_width(),
                         height: window.physical_height(),
+                        near: camera.near,
+                        far: camera.far,
                     },
                 ));
             }

@@ -37,6 +37,8 @@ pub struct ExtractedView {
     pub transform: GlobalTransform,
     pub width: u32,
     pub height: u32,
+    pub near: f32,
+    pub far: f32,
 }
 
 #[derive(Clone, AsStd140)]
