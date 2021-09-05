@@ -1,4 +1,4 @@
-use crate::{DirectionalLight, PointLight, StandardMaterial};
+use crate::{AlphaMode, DirectionalLight, PointLight, StandardMaterial};
 use bevy_asset::Handle;
 use bevy_ecs::bundle::Bundle;
 use bevy_render2::mesh::Mesh;
@@ -8,6 +8,7 @@ use bevy_transform::components::{GlobalTransform, Transform};
 pub struct PbrBundle {
     pub mesh: Handle<Mesh>,
     pub material: Handle<StandardMaterial>,
+    pub alpha_mode: AlphaMode,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
 }
@@ -17,6 +18,7 @@ impl Default for PbrBundle {
         Self {
             mesh: Default::default(),
             material: Default::default(),
+            alpha_mode: Default::default(),
             transform: Default::default(),
             global_transform: Default::default(),
         }
