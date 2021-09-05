@@ -2,7 +2,7 @@ use crate::{
     AmbientLight, DirectionalLight, DirectionalLightShadowMap, ExtractedMeshes, MeshMeta,
     PbrShaders, PointLight, PointLightShadowMap,
 };
-use bevy_core_pipeline::{Opaque3dPhase, Transparent3dPhase};
+use bevy_core_pipeline::{AlphaMask3dPhase, Opaque3dPhase, Transparent3dPhase};
 use bevy_ecs::{prelude::*, system::SystemState};
 use bevy_math::{const_vec3, Mat4, Vec3, Vec4};
 use bevy_render2::{
@@ -383,6 +383,7 @@ pub fn prepare_lights(
         Entity,
         (
             With<RenderPhase<Opaque3dPhase>>,
+            With<RenderPhase<AlphaMask3dPhase>>,
             With<RenderPhase<Transparent3dPhase>>,
         ),
     >,

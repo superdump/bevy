@@ -86,6 +86,10 @@ impl Plugin for CorePipelinePlugin {
             .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Opaque3dPhase>)
             .add_system_to_stage(
                 RenderStage::PhaseSort,
+                sort_phase_system::<AlphaMask3dPhase>,
+            )
+            .add_system_to_stage(
+                RenderStage::PhaseSort,
                 sort_phase_system::<Transparent3dPhase>,
             );
 
@@ -162,6 +166,7 @@ impl Plugin for CorePipelinePlugin {
 }
 
 pub struct Opaque3dPhase;
+pub struct AlphaMask3dPhase;
 pub struct Transparent3dPhase;
 pub struct Transparent2dPhase;
 
@@ -193,6 +198,7 @@ pub fn extract_core_pipeline_camera_phases(
         if let Some(entity) = camera_3d.entity {
             commands.get_or_spawn(entity).insert_bundle((
                 RenderPhase::<Opaque3dPhase>::default(),
+                RenderPhase::<AlphaMask3dPhase>::default(),
                 RenderPhase::<Transparent3dPhase>::default(),
             ));
         }
@@ -207,6 +213,7 @@ pub fn prepare_core_views_system(
         (Entity, &ExtractedView),
         (
             With<RenderPhase<Opaque3dPhase>>,
+            With<RenderPhase<AlphaMask3dPhase>>,
             With<RenderPhase<Transparent3dPhase>>,
         ),
     >,

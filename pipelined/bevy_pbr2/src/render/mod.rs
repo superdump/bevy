@@ -6,7 +6,7 @@ use crate::{
     StandardMaterial, StandardMaterialUniformData,
 };
 use bevy_asset::{Assets, Handle};
-use bevy_core_pipeline::{Opaque3dPhase, Transparent3dPhase};
+use bevy_core_pipeline::{AlphaMask3dPhase, Opaque3dPhase, Transparent3dPhase};
 use bevy_ecs::{prelude::*, system::SystemState};
 use bevy_math::Mat4;
 use bevy_render2::{
@@ -575,6 +575,7 @@ pub fn queue_meshes(
         &ExtractedView,
         &ViewLights,
         &mut RenderPhase<Opaque3dPhase>,
+        &mut RenderPhase<AlphaMask3dPhase>,
         &mut RenderPhase<Transparent3dPhase>,
     )>,
     mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
@@ -616,7 +617,15 @@ pub fn queue_meshes(
                 })
             },
         ));
-    for (entity, view, view_lights, mut opaque_phase, mut transparent_phase) in views.iter_mut() {
+    for (
+        entity,
+        view,
+        view_lights,
+        mut opaque_phase,
+        mut alpha_mask_phase,
+        mut transparent_phase,
+    ) in views.iter_mut()
+    {
         // TODO: cache this?
         let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
             entries: &[
@@ -761,40 +770,52 @@ pub fn queue_meshes(
             // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
             //       gives the z component of translation of the mesh in view space
             let mesh_z = view_row_2.dot(mesh.transform.col(3));
-            if mesh.alpha_mode == AlphaMode::Blend {
-                // FIXME: Switch from usize to u64 for portability and use sort key encoding
-                //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
-                // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
-                // NOTE: Back-to-front ordering for transparent with ascending sort means far should have the
-                //       lowest sort key and getting closer should increase. As we are casting to usize, and have
-                //       -z in front fo the camera, the largest distance is -far with values increasing toward the
-                //       camera. Calculating z + far (where far is a positive value by convention)
-                //       will result in anything further away than far being < 0, and everything at or closer than far
-                //       being >= 0
-                let sort_key = ((((view.far + mesh_z) * 1000.0) as usize) << 10)
-                    | (material_bind_group_key.index() & ((1 << 10) - 1));
-                transparent_phase.add(Drawable {
-                    draw_function: draw_pbr,
-                    draw_key: i,
-                    sort_key,
-                });
-            } else {
-                // FIXME: Switch from usize to u64 for portability and use sort key encoding
-                //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
-                // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
-                // NOTE: Front-to-back ordering for opaque with ascending sort means near should have the
-                //       lowest sort key and getting further away should increase. As we are casting to usize, and have
-                //       -z in front fo the camera, the smallest distance is -near with values decreasing away from the
-                //       camera. Calculating -z - near (where near is a positive value by convention)
-                //       will result in anything closer than near being < 0, and everything at or further away than near
-                //       being >= 0
-                let sort_key = ((((-mesh_z - view.near) * 1000.0) as usize) << 10)
-                    | (material_bind_group_key.index() & ((1 << 10) - 1));
-                opaque_phase.add(Drawable {
-                    draw_function: draw_pbr,
-                    draw_key: i,
-                    sort_key,
-                });
+            match mesh.alpha_mode {
+                AlphaMode::Opaque | AlphaMode::Mask(_) => {
+                    // FIXME: Switch from usize to u64 for portability and use sort key encoding
+                    //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
+                    // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
+                    // NOTE: Front-to-back ordering for opaque and alpha mask with ascending sort means near should have the
+                    //       lowest sort key and getting further away should increase. As we are casting to usize, and have
+                    //       -z in front fo the camera, the smallest distance is -near with values decreasing away from the
+                    //       camera. Calculating -z - near (where near is a positive value by convention)
+                    //       will result in anything closer than near being < 0, and everything at or further away than near
+                    //       being >= 0
+                    let sort_key = ((((-mesh_z - view.near) * 1000.0) as usize) << 10)
+                        | (material_bind_group_key.index() & ((1 << 10) - 1));
+                    if mesh.alpha_mode == AlphaMode::Opaque {
+                        opaque_phase.add(Drawable {
+                            draw_function: draw_pbr,
+                            draw_key: i,
+                            sort_key,
+                        });
+                    } else {
+                        // Mask
+                        alpha_mask_phase.add(Drawable {
+                            draw_function: draw_pbr,
+                            draw_key: i,
+                            sort_key,
+                        });
+                    }
+                }
+                AlphaMode::Blend => {
+                    // FIXME: Switch from usize to u64 for portability and use sort key encoding
+                    //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
+                    // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
+                    // NOTE: Back-to-front ordering for transparent with ascending sort means far should have the
+                    //       lowest sort key and getting closer should increase. As we are casting to usize, and have
+                    //       -z in front fo the camera, the largest distance is -far with values increasing toward the
+                    //       camera. Calculating z + far (where far is a positive value by convention)
+                    //       will result in anything further away than far being < 0, and everything at or closer than far
+                    //       being >= 0
+                    let sort_key = ((((view.far + mesh_z) * 1000.0) as usize) << 10)
+                        | (material_bind_group_key.index() & ((1 << 10) - 1));
+                    transparent_phase.add(Drawable {
+                        draw_function: draw_pbr,
+                        draw_key: i,
+                        sort_key,
+                    });
+                }
             }
         }
 

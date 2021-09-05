@@ -1,4 +1,4 @@
-use crate::{ClearColor, Opaque3dPhase, Transparent3dPhase};
+use crate::{AlphaMask3dPhase, ClearColor, Opaque3dPhase, Transparent3dPhase};
 use bevy_ecs::prelude::*;
 use bevy_render2::{
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
@@ -15,6 +15,7 @@ pub struct MainPass3dNode {
     query: QueryState<
         (
             &'static RenderPhase<Opaque3dPhase>,
+            &'static RenderPhase<AlphaMask3dPhase>,
             &'static RenderPhase<Transparent3dPhase>,
         ),
         With<ExtractedView>,
@@ -59,7 +60,7 @@ impl Node for MainPass3dNode {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
         let draw_functions = world.get_resource::<DrawFunctions>().unwrap();
 
-        let (opaque_phase, transparent_phase) = self
+        let (opaque_phase, alpha_mask_phase, transparent_phase) = self
             .query
             .get_manual(world, view_entity)
             .expect("view entity should exist");
@@ -100,6 +101,46 @@ impl Node for MainPass3dNode {
                 draw_function.draw(
                     world,
                     &mut opaque_tracked_pass,
+                    view_entity,
+                    drawable.draw_key,
+                    drawable.sort_key,
+                );
+            }
+        }
+
+        {
+            // Run the alpha_mask pass, sorted front-to-back
+            // NOTE: Scoped to drop the mutable borrow of render_context
+            let alpha_mask_pass_descriptor = RenderPassDescriptor {
+                label: Some("main_alpha_mask_pass_3d"),
+                color_attachments: &[RenderPassColorAttachment {
+                    view: color_attachment_texture,
+                    resolve_target: None,
+                    // NOTE: The alpha_mask pass loads the color buffer as well as overwriting it where appropriate.
+                    ops: Operations {
+                        load: LoadOp::Load,
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view: depth_texture,
+                    // NOTE: The alpha_mask pass clears and writes to the depth buffer.
+                    depth_ops: Some(Operations {
+                        load: LoadOp::Load,
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
+            };
+            let alpha_mask_render_pass = render_context
+                .command_encoder
+                .begin_render_pass(&alpha_mask_pass_descriptor);
+            let mut alpha_mask_tracked_pass = TrackedRenderPass::new(alpha_mask_render_pass);
+            for drawable in alpha_mask_phase.drawn_things.iter() {
+                let draw_function = draw_functions.get_mut(drawable.draw_function).unwrap();
+                draw_function.draw(
+                    world,
+                    &mut alpha_mask_tracked_pass,
                     view_entity,
                     drawable.draw_key,
                     drawable.sort_key,
