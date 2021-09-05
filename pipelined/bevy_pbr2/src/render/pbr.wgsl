@@ -135,6 +135,16 @@ struct Lights {
     n_directional_lights: u32;
 };
 
+[[block]]
+struct AlphaMode {
+    mode: u32;
+    cutoff: f32;
+};
+
+let ALPHA_MODE_OPAQUE: u32 = 0u;
+let ALPHA_MODE_MASK: u32   = 1u;
+let ALPHA_MODE_BLEND: u32  = 2u;
+
 
 [[group(0), binding(1)]]
 var lights: Lights;
@@ -165,6 +175,8 @@ var metallic_roughness_sampler: sampler;
 var occlusion_texture: texture_2d<f32>;
 [[group(1), binding(8)]]
 var occlusion_sampler: sampler;
+[[group(1), binding(9)]]
+var alpha_mode: AlphaMode;
 
 let PI: f32 = 3.141592653589793;
 
@@ -507,6 +519,23 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         var occlusion: f32 = 1.0;
         if ((material.flags & STANDARD_MATERIAL_FLAGS_OCCLUSION_TEXTURE_BIT) != 0u) {
             occlusion = textureSample(occlusion_texture, occlusion_sampler, in.uv).r;
+        }
+
+        // NOTE: This is placed after sampling to meet the requirements of uniform control flow for textureSample calls above
+        // FIXME: execute cutoff in a separate pipeline or something to avoid this problem?
+        // NOTE: ALPHA_MODE_OPAQUE is 0, so == is fine here
+        if (alpha_mode.mode == ALPHA_MODE_OPAQUE) {
+            // NOTE: If rendering as opaque, alpha should be ignored so set to 1.0
+            output_color.a = 1.0;
+        } elseif ((alpha_mode.mode & ALPHA_MODE_MASK) != 0u) {
+            if (output_color.a >= alpha_mode.cutoff) {
+                // NOTE: If rendering as masked alpha and >= the cutoff, render as fully opaque
+                output_color.a = 1.0;
+            } else {
+                // NOTE: If rendering as masked alpha and < the cutoff, render as fully transparent
+                //       by discarding the fragment entirely.
+                discard;
+            }
         }
 
         var N: vec3<f32> = normalize(in.world_normal);

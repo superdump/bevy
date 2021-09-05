@@ -1,7 +1,10 @@
 mod light;
 pub use light::*;
 
-use crate::{NotShadowCaster, NotShadowReceiver, StandardMaterial, StandardMaterialUniformData};
+use crate::{
+    AlphaMode, AlphaModeMeta, AlphaModeUniformOffset, NotShadowCaster, NotShadowReceiver,
+    StandardMaterial, StandardMaterialUniformData,
+};
 use bevy_asset::{Assets, Handle};
 use bevy_core_pipeline::{Opaque3dPhase, Transparent3dPhase};
 use bevy_ecs::{prelude::*, system::SystemState};
@@ -214,6 +217,19 @@ impl FromWorld for PbrShaders {
                     },
                     count: None,
                 },
+                // AlphaMode
+                BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        // TODO: change this to AlphaModeUniform::std140_size_static once crevice fixes this!
+                        // Context: https://github.com/LPGhatguy/crevice/issues/29
+                        min_binding_size: BufferSize::new(8),
+                    },
+                    count: None,
+                },
             ],
             label: None,
         });
@@ -374,8 +390,10 @@ struct ExtractedMesh {
     mesh: Handle<Mesh>,
     transform_binding_offset: u32,
     material_handle: Handle<StandardMaterial>,
+    alpha_mode: AlphaMode,
     casts_shadows: bool,
     receives_shadows: bool,
+    entity: Entity,
 }
 
 pub struct ExtractedMeshes {
@@ -388,18 +406,22 @@ pub fn extract_meshes(
     materials: Res<Assets<StandardMaterial>>,
     images: Res<Assets<Image>>,
     query: Query<(
+        Entity,
         &GlobalTransform,
         &Handle<Mesh>,
         &Handle<StandardMaterial>,
+        &AlphaMode,
         Option<&NotShadowCaster>,
         Option<&NotShadowReceiver>,
     )>,
 ) {
     let mut extracted_meshes = Vec::new();
     for (
+        entity,
         transform,
         mesh_handle,
         material_handle,
+        alpha_mode,
         maybe_not_shadow_caster,
         maybe_not_shadow_receiver,
     ) in query.iter()
@@ -434,10 +456,12 @@ pub fn extract_meshes(
                 mesh: mesh_handle.clone_weak(),
                 transform_binding_offset: 0,
                 material_handle: material_handle.clone_weak(),
+                alpha_mode: alpha_mode.clone(),
                 // NOTE: Double-negative is so that meshes cast and receive shadows by default
                 // Not not shadow caster means that this mesh is a shadow caster
                 casts_shadows: maybe_not_shadow_caster.is_none(),
                 receives_shadows: maybe_not_shadow_receiver.is_none(),
+                entity,
             });
         } else {
             continue;
@@ -452,6 +476,7 @@ pub fn extract_meshes(
 struct MeshDrawInfo {
     // TODO: compare cost of doing this vs cloning the BindGroup?
     material_bind_group_key: FrameSlabMapKey<BufferId, BindGroup>,
+    alpha_mode_uniform_offset: u32,
 }
 
 #[derive(Debug, AsStd140)]
@@ -541,6 +566,7 @@ pub fn queue_meshes(
     mesh_meta: ResMut<MeshMeta>,
     mut light_meta: ResMut<LightMeta>,
     view_meta: Res<ViewMeta>,
+    alpha_mode_meta: Res<AlphaModeMeta>,
     mut extracted_meshes: ResMut<ExtractedMeshes>,
     gpu_images: Res<RenderAssets<Image>>,
     render_materials: Res<RenderAssets<StandardMaterial>>,
@@ -552,6 +578,7 @@ pub fn queue_meshes(
         &mut RenderPhase<Transparent3dPhase>,
     )>,
     mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
+    alpha_modes: Query<&AlphaModeUniformOffset>,
 ) {
     let mesh_meta = mesh_meta.into_inner();
 
@@ -634,10 +661,10 @@ pub fn queue_meshes(
         mesh_meta.mesh_draw_info.clear();
         mesh_meta.material_bind_groups.next_frame();
 
-        let view_matrix = view.transform.compute_matrix();
+        let view_matrix = view.transform.compute_matrix().inverse();
         let view_row_2 = view_matrix.row(2);
         for (i, mesh) in extracted_meshes.meshes.iter_mut().enumerate() {
-            let gpu_material = &render_materials
+            let gpu_material = render_materials
                 .get(&mesh.material_handle)
                 .expect("Failed to get StandardMaterial PreparedAsset");
             let material_bind_group_key =
@@ -710,30 +737,65 @@ pub fn queue_meshes(
                                     binding: 8,
                                     resource: BindingResource::Sampler(occlusion_sampler),
                                 },
+                                BindGroupEntry {
+                                    binding: 9,
+                                    resource: alpha_mode_meta.uniforms.binding(),
+                                },
                             ],
                             label: None,
                             layout: &pbr_shaders.material_layout,
                         })
                     });
 
+            let alpha_mode_uniform_offset =
+                if let Ok(alpha_mode_uniform) = alpha_modes.get(mesh.entity) {
+                    alpha_mode_uniform.offset
+                } else {
+                    0
+                };
             mesh_meta.mesh_draw_info.push(MeshDrawInfo {
                 material_bind_group_key,
+                alpha_mode_uniform_offset,
             });
 
             // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
             //       gives the z component of translation of the mesh in view space
             let mesh_z = view_row_2.dot(mesh.transform.col(3));
-            // FIXME: Switch from usize to u64 for portability and use sort key encoding
-            //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
-            // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
-            let sort_key = (((mesh_z * 1000.0) as usize) << 10)
-                | (material_bind_group_key.index() & ((1 << 10) - 1));
-            // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
-            transparent_phase.add(Drawable {
-                draw_function: draw_pbr,
-                draw_key: i,
-                sort_key,
-            });
+            if mesh.alpha_mode == AlphaMode::Blend {
+                // FIXME: Switch from usize to u64 for portability and use sort key encoding
+                //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
+                // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
+                // NOTE: Back-to-front ordering for transparent with ascending sort means far should have the
+                //       lowest sort key and getting closer should increase. As we are casting to usize, and have
+                //       -z in front fo the camera, the largest distance is -far with values increasing toward the
+                //       camera. Calculating z + far (where far is a positive value by convention)
+                //       will result in anything further away than far being < 0, and everything at or closer than far
+                //       being >= 0
+                let sort_key = ((((view.far + mesh_z) * 1000.0) as usize) << 10)
+                    | (material_bind_group_key.index() & ((1 << 10) - 1));
+                transparent_phase.add(Drawable {
+                    draw_function: draw_pbr,
+                    draw_key: i,
+                    sort_key,
+                });
+            } else {
+                // FIXME: Switch from usize to u64 for portability and use sort key encoding
+                //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
+                // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
+                // NOTE: Front-to-back ordering for opaque with ascending sort means near should have the
+                //       lowest sort key and getting further away should increase. As we are casting to usize, and have
+                //       -z in front fo the camera, the smallest distance is -near with values decreasing away from the
+                //       camera. Calculating -z - near (where near is a positive value by convention)
+                //       will result in anything closer than near being < 0, and everything at or further away than near
+                //       being >= 0
+                let sort_key = ((((-mesh_z - view.near) * 1000.0) as usize) << 10)
+                    | (material_bind_group_key.index() & ((1 << 10) - 1));
+                opaque_phase.add(Drawable {
+                    draw_function: draw_pbr,
+                    draw_key: i,
+                    sort_key,
+                });
+            }
         }
 
         // ultimately lights should check meshes for relevancy (ex: light views can "see" different meshes than the main view can)
@@ -828,7 +890,7 @@ impl Draw for DrawPbr {
             1,
             // &mesh_meta.material_bind_groups[sort_key & ((1 << 10) - 1)],
             &mesh_meta.material_bind_groups[mesh_draw_info.material_bind_group_key],
-            &[],
+            &[mesh_draw_info.alpha_mode_uniform_offset],
         );
         pass.set_bind_group(
             2,
