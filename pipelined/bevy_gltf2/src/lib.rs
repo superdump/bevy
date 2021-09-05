@@ -5,7 +5,7 @@ pub use loader::*;
 
 use bevy_app::prelude::*;
 use bevy_asset::{AddAsset, Handle};
-use bevy_pbr2::StandardMaterial;
+use bevy_pbr2::{AlphaMode, StandardMaterial};
 use bevy_reflect::TypeUuid;
 use bevy_render2::mesh::Mesh;
 use bevy_scene::Scene;
@@ -31,8 +31,8 @@ pub struct Gltf {
     pub named_scenes: HashMap<String, Handle<Scene>>,
     pub meshes: Vec<Handle<GltfMesh>>,
     pub named_meshes: HashMap<String, Handle<GltfMesh>>,
-    pub materials: Vec<Handle<StandardMaterial>>,
-    pub named_materials: HashMap<String, Handle<StandardMaterial>>,
+    pub materials: Vec<(Handle<StandardMaterial>, AlphaMode)>,
+    pub named_materials: HashMap<String, (Handle<StandardMaterial>, AlphaMode)>,
     pub nodes: Vec<Handle<GltfNode>>,
     pub named_nodes: HashMap<String, Handle<GltfNode>>,
     pub default_scene: Option<Handle<Scene>>,
@@ -57,4 +57,5 @@ pub struct GltfMesh {
 pub struct GltfPrimitive {
     pub mesh: Handle<Mesh>,
     pub material: Option<Handle<StandardMaterial>>,
+    pub alpha_mode: AlphaMode,
 }

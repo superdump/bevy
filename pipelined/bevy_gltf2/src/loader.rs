@@ -6,7 +6,7 @@ use bevy_core::Name;
 use bevy_ecs::world::World;
 use bevy_log::warn;
 use bevy_math::Mat4;
-use bevy_pbr2::{PbrBundle, StandardMaterial};
+use bevy_pbr2::{AlphaMode, PbrBundle, StandardMaterial};
 use bevy_render2::{
     camera::{
         Camera, CameraPlugin, CameraProjection, OrthographicProjection, PerspectiveProjection,
@@ -84,11 +84,11 @@ async fn load_gltf<'a, 'b>(
     let mut named_materials = HashMap::new();
     let mut linear_textures = HashSet::new();
     for material in gltf.materials() {
-        let handle = load_material(&material, load_context);
+        let (handle, alpha_mode) = load_material(&material, load_context);
         if let Some(name) = material.name() {
-            named_materials.insert(name.to_string(), handle.clone());
+            named_materials.insert(name.to_string(), (handle.clone(), alpha_mode.clone()));
         }
-        materials.push(handle);
+        materials.push((handle, alpha_mode));
         if let Some(texture) = material.normal_texture() {
             linear_textures.insert(texture.texture().index());
         }
@@ -174,12 +174,19 @@ async fn load_gltf<'a, 'b>(
             }
 
             let mesh = load_context.set_labeled_asset(&primitive_label, LoadedAsset::new(mesh));
+            let (material, alpha_mode) = if let Some((material, alpha_mode)) = primitive
+                .material()
+                .index()
+                .and_then(|i| materials.get(i).cloned())
+            {
+                (Some(material), alpha_mode)
+            } else {
+                (None, AlphaMode::default())
+            };
             primitives.push(super::GltfPrimitive {
                 mesh,
-                material: primitive
-                    .material()
-                    .index()
-                    .and_then(|i| materials.get(i).cloned()),
+                material,
+                alpha_mode,
             });
         }
         let handle = load_context.set_labeled_asset(
@@ -367,7 +374,10 @@ async fn load_texture<'a>(
     Ok((texture, texture_label(&gltf_texture)))
 }
 
-fn load_material(material: &Material, load_context: &mut LoadContext) -> Handle<StandardMaterial> {
+fn load_material(
+    material: &Material,
+    load_context: &mut LoadContext,
+) -> (Handle<StandardMaterial>, AlphaMode) {
     let material_label = material_label(material);
 
     let pbr = material.pbr_metallic_roughness();
@@ -422,22 +432,25 @@ fn load_material(material: &Material, load_context: &mut LoadContext) -> Handle<
         None
     };
 
-    load_context.set_labeled_asset(
-        &material_label,
-        LoadedAsset::new(StandardMaterial {
-            base_color: Color::rgba(color[0], color[1], color[2], color[3]),
-            base_color_texture,
-            perceptual_roughness: pbr.roughness_factor(),
-            metallic: pbr.metallic_factor(),
-            metallic_roughness_texture,
-            // normal_map,
-            double_sided: material.double_sided(),
-            occlusion_texture,
-            emissive: Color::rgba(emissive[0], emissive[1], emissive[2], 1.0),
-            emissive_texture,
-            unlit: material.unlit(),
-            ..Default::default()
-        }),
+    (
+        load_context.set_labeled_asset(
+            &material_label,
+            LoadedAsset::new(StandardMaterial {
+                base_color: Color::rgba(color[0], color[1], color[2], color[3]),
+                base_color_texture,
+                perceptual_roughness: pbr.roughness_factor(),
+                metallic: pbr.metallic_factor(),
+                metallic_roughness_texture,
+                // normal_map,
+                double_sided: material.double_sided(),
+                occlusion_texture,
+                emissive: Color::rgba(emissive[0], emissive[1], emissive[2], 1.0),
+                emissive_texture,
+                unlit: material.unlit(),
+                ..Default::default()
+            }),
+        ),
+        alpha_mode(material),
     )
 }
 
@@ -530,6 +543,7 @@ fn load_node(
                 parent.spawn_bundle(PbrBundle {
                     mesh: load_context.get_handle(mesh_asset_path),
                     material: load_context.get_handle(material_asset_path),
+                    alpha_mode: alpha_mode(&material),
                     ..Default::default()
                 });
             }
@@ -638,6 +652,14 @@ fn get_primitive_topology(mode: Mode) -> Result<PrimitiveTopology, GltfError> {
         Mode::Triangles => Ok(PrimitiveTopology::TriangleList),
         Mode::TriangleStrip => Ok(PrimitiveTopology::TriangleStrip),
         mode => Err(GltfError::UnsupportedPrimitive { mode }),
+    }
+}
+
+fn alpha_mode(material: &Material) -> AlphaMode {
+    match material.alpha_mode() {
+        gltf::material::AlphaMode::Opaque => AlphaMode::Opaque,
+        gltf::material::AlphaMode::Mask => AlphaMode::Mask(material.alpha_cutoff().unwrap_or(0.5)),
+        gltf::material::AlphaMode::Blend => AlphaMode::Blend,
     }
 }
 
