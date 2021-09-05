@@ -1,8 +1,10 @@
+mod alpha;
 mod bundle;
 mod light;
 mod material;
 mod render;
 
+pub use alpha::*;
 pub use bundle::*;
 pub use light::*;
 pub use material::*;
@@ -28,6 +30,7 @@ pub struct PbrPlugin;
 impl Plugin for PbrPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(StandardMaterialPlugin)
+            .add_plugin(AlphaModePlugin)
             .init_resource::<AmbientLight>()
             .init_resource::<DirectionalLightShadowMap>()
             .init_resource::<PointLightShadowMap>();
