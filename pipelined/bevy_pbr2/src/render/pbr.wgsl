@@ -531,11 +531,10 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             if (output_color.a >= alpha_mode.cutoff) {
                 // NOTE: If rendering as masked alpha and >= the cutoff, render as fully opaque
                 output_color.a = 1.0;
-            } else {
-                // NOTE: If rendering as masked alpha and < the cutoff, render as fully transparent
-                //       by discarding the fragment entirely.
-                discard;
             }
+            // NOTE: output_color.a < alpha_mode.cutoff should not reach here as it will not
+            //       be discarded in the depth prepass and we use the 'equals' depth buffer comparison
+            //       function
         }
 
         var N: vec3<f32> = normalize(in.world_normal);

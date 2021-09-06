@@ -1,4 +1,6 @@
+mod depth_prepass;
 mod light;
+pub use depth_prepass::*;
 pub use light::*;
 
 use crate::{
@@ -29,7 +31,8 @@ use wgpu::{
 };
 
 pub struct PbrShaders {
-    pipeline: RenderPipeline,
+    opaque_pipeline: RenderPipeline,
+    transparent_pipeline: RenderPipeline,
     view_layout: BindGroupLayout,
     material_layout: BindGroupLayout,
     mesh_layout: BindGroupLayout,
@@ -256,7 +259,7 @@ impl FromWorld for PbrShaders {
             bind_group_layouts: &[&view_layout, &material_layout, &mesh_layout],
         });
 
-        let pipeline = render_device.create_render_pipeline(&RenderPipelineDescriptor {
+        let opaque_pipeline = render_device.create_render_pipeline(&RenderPipelineDescriptor {
             label: None,
             vertex: VertexState {
                 buffers: &[VertexBufferLayout {
@@ -291,14 +294,16 @@ impl FromWorld for PbrShaders {
                 entry_point: "fragment",
                 targets: &[ColorTargetState {
                     format: TextureFormat::bevy_default(),
-                    blend: Some(BlendState::ALPHA_BLENDING),
+                    blend: Some(BlendState::REPLACE),
                     write_mask: ColorWrite::ALL,
                 }],
             }),
             depth_stencil: Some(DepthStencilState {
                 format: TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::Greater,
+                depth_write_enabled: false,
+                // For the opaque and alpha mask passes, only the fragments at
+                // the depth buffer depth will be shaded
+                depth_compare: CompareFunction::Equal,
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -323,6 +328,76 @@ impl FromWorld for PbrShaders {
                 conservative: false,
             },
         });
+
+        let transparent_pipeline =
+            render_device.create_render_pipeline(&RenderPipelineDescriptor {
+                label: None,
+                vertex: VertexState {
+                    buffers: &[VertexBufferLayout {
+                        array_stride: 32,
+                        step_mode: InputStepMode::Vertex,
+                        attributes: &[
+                            // Position (GOTCHA! Vertex_Position isn't first in the buffer due to how Mesh sorts attributes (alphabetically))
+                            VertexAttribute {
+                                format: VertexFormat::Float32x3,
+                                offset: 12,
+                                shader_location: 0,
+                            },
+                            // Normal
+                            VertexAttribute {
+                                format: VertexFormat::Float32x3,
+                                offset: 0,
+                                shader_location: 1,
+                            },
+                            // Uv
+                            VertexAttribute {
+                                format: VertexFormat::Float32x2,
+                                offset: 24,
+                                shader_location: 2,
+                            },
+                        ],
+                    }],
+                    module: &shader_module,
+                    entry_point: "vertex",
+                },
+                fragment: Some(FragmentState {
+                    module: &shader_module,
+                    entry_point: "fragment",
+                    targets: &[ColorTargetState {
+                        format: TextureFormat::bevy_default(),
+                        blend: Some(BlendState::ALPHA_BLENDING),
+                        write_mask: ColorWrite::ALL,
+                    }],
+                }),
+                depth_stencil: Some(DepthStencilState {
+                    format: TextureFormat::Depth32Float,
+                    depth_write_enabled: false,
+                    // For the transparent pass, fragments that are closer will be alpha blended
+                    depth_compare: CompareFunction::Greater,
+                    stencil: StencilState {
+                        front: StencilFaceState::IGNORE,
+                        back: StencilFaceState::IGNORE,
+                        read_mask: 0,
+                        write_mask: 0,
+                    },
+                    bias: DepthBiasState {
+                        constant: 0,
+                        slope_scale: 0.0,
+                        clamp: 0.0,
+                    },
+                }),
+                layout: Some(&pipeline_layout),
+                multisample: MultisampleState::default(),
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: FrontFace::Ccw,
+                    cull_mode: Some(Face::Back),
+                    polygon_mode: PolygonMode::Fill,
+                    clamp_depth: false,
+                    conservative: false,
+                },
+            });
 
         // A 1x1x1 'all 1.0' texture to use as a dummy texture to use in place of optional StandardMaterial textures
         let dummy_white_gpu_image = {
@@ -365,7 +440,8 @@ impl FromWorld for PbrShaders {
             }
         };
         PbrShaders {
-            pipeline,
+            opaque_pipeline,
+            transparent_pipeline,
             view_layout,
             material_layout,
             mesh_layout,
@@ -526,7 +602,7 @@ pub struct MeshViewBindGroups {
     view: BindGroup,
 }
 
-fn image_handle_to_view_sampler<'a>(
+pub fn image_handle_to_view_sampler<'a>(
     pbr_shaders: &'a PbrShaders,
     gpu_images: &'a RenderAssets<Image>,
     image_option: &Option<Handle<Image>>,
@@ -550,9 +626,14 @@ pub fn queue_meshes(
     mut commands: Commands,
     draw_functions: Res<DrawFunctions>,
     render_device: Res<RenderDevice>,
-    pbr_shaders: Res<PbrShaders>,
-    shadow_shaders: Res<ShadowShaders>,
+    shaders: (
+        Res<DepthPrepassShaders>,
+        Res<PbrShaders>,
+        Res<ShadowShaders>,
+    ),
+    depth_prepass_mesh_meta: ResMut<DepthPrepassMeshMeta>,
     mesh_meta: ResMut<MeshMeta>,
+    mut depth_prepass_meta: ResMut<DepthPrepassMeta>,
     mut light_meta: ResMut<LightMeta>,
     view_meta: Res<ViewMeta>,
     alpha_mode_meta: Res<AlphaModeMeta>,
@@ -563,6 +644,8 @@ pub fn queue_meshes(
         Entity,
         &ExtractedView,
         &ViewLights,
+        &mut RenderPhase<OpaqueDepthPhase>,
+        &mut RenderPhase<AlphaMaskDepthPhase>,
         &mut RenderPhase<Opaque3dPhase>,
         &mut RenderPhase<AlphaMask3dPhase>,
         &mut RenderPhase<Transparent3dPhase>,
@@ -570,11 +653,13 @@ pub fn queue_meshes(
     mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
     alpha_modes: Query<&AlphaModeUniformOffset>,
 ) {
+    let depth_prepass_mesh_meta = depth_prepass_mesh_meta.into_inner();
     let mesh_meta = mesh_meta.into_inner();
 
     if view_meta.uniforms.is_empty() {
         return;
     }
+    let (depth_prepass_shaders, pbr_shaders, shadow_shaders) = shaders;
 
     light_meta.shadow_view_bind_group.get_or_insert_with(|| {
         render_device.create_bind_group(&BindGroupDescriptor {
@@ -584,6 +669,16 @@ pub fn queue_meshes(
             }],
             label: None,
             layout: &shadow_shaders.view_layout,
+        })
+    });
+    depth_prepass_meta.view_bind_group.get_or_insert_with(|| {
+        render_device.create_bind_group(&BindGroupDescriptor {
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: view_meta.uniforms.binding(),
+            }],
+            label: None,
+            layout: &depth_prepass_shaders.view_layout,
         })
     });
     if extracted_meshes.meshes.is_empty() {
@@ -610,6 +705,8 @@ pub fn queue_meshes(
         entity,
         view,
         view_lights,
+        mut opaque_depth_phase,
+        mut alpha_mask_depth_phase,
         mut opaque_phase,
         mut alpha_mask_phase,
         mut transparent_phase,
@@ -655,7 +752,14 @@ pub fn queue_meshes(
             view: view_bind_group,
         });
 
+        let draw_alpha_mask_depth = draw_functions
+            .read()
+            .get_id::<DrawAlphaMaskDepth>()
+            .unwrap();
+        let draw_opaque_depth = draw_functions.read().get_id::<DrawOpaqueDepth>().unwrap();
         let draw_pbr = draw_functions.read().get_id::<DrawPbr>().unwrap();
+        depth_prepass_mesh_meta.mesh_draw_info.clear();
+        depth_prepass_mesh_meta.material_bind_groups.next_frame();
         mesh_meta.mesh_draw_info.clear();
         mesh_meta.material_bind_groups.next_frame();
 
@@ -744,6 +848,39 @@ pub fn queue_meshes(
                             layout: &pbr_shaders.material_layout,
                         })
                     });
+            let depth_prepass_material_bind_group_key = depth_prepass_mesh_meta
+                .material_bind_groups
+                .get_or_insert_with(gpu_material.buffer.id(), || {
+                    let (base_color_texture_view, base_color_sampler) =
+                        image_handle_to_view_sampler(
+                            &pbr_shaders,
+                            &gpu_images,
+                            &gpu_material.base_color_texture,
+                        );
+
+                    render_device.create_bind_group(&BindGroupDescriptor {
+                        entries: &[
+                            BindGroupEntry {
+                                binding: 0,
+                                resource: gpu_material.buffer.as_entire_binding(),
+                            },
+                            BindGroupEntry {
+                                binding: 1,
+                                resource: BindingResource::TextureView(base_color_texture_view),
+                            },
+                            BindGroupEntry {
+                                binding: 2,
+                                resource: BindingResource::Sampler(base_color_sampler),
+                            },
+                            BindGroupEntry {
+                                binding: 3,
+                                resource: alpha_mode_meta.uniforms.binding(),
+                            },
+                        ],
+                        label: None,
+                        layout: &depth_prepass_shaders.material_layout,
+                    })
+                });
 
             let alpha_mode_uniform_offset =
                 if let Ok(alpha_mode_uniform) = alpha_modes.get(mesh.entity) {
@@ -751,6 +888,13 @@ pub fn queue_meshes(
                 } else {
                     0
                 };
+            depth_prepass_mesh_meta
+                .mesh_draw_info
+                .push(DepthPrepassMeshDrawInfo {
+                    material_bind_group_key: depth_prepass_material_bind_group_key,
+                    alpha_mode_uniform_offset,
+                });
+
             mesh_meta.mesh_draw_info.push(MeshDrawInfo {
                 material_bind_group_key,
                 alpha_mode_uniform_offset,
@@ -773,6 +917,11 @@ pub fn queue_meshes(
                     let sort_key = ((((-mesh_z - view.near) * 1000.0) as usize) << 10)
                         | (material_bind_group_key.index() & ((1 << 10) - 1));
                     if mesh.alpha_mode == AlphaMode::Opaque {
+                        opaque_depth_phase.add(Drawable {
+                            draw_function: draw_opaque_depth,
+                            draw_key: i,
+                            sort_key,
+                        });
                         opaque_phase.add(Drawable {
                             draw_function: draw_pbr,
                             draw_key: i,
@@ -780,6 +929,11 @@ pub fn queue_meshes(
                         });
                     } else {
                         // Mask
+                        alpha_mask_depth_phase.add(Drawable {
+                            draw_function: draw_alpha_mask_depth,
+                            draw_key: i,
+                            sort_key,
+                        });
                         alpha_mask_phase.add(Drawable {
                             draw_function: draw_pbr,
                             draw_key: i,
@@ -889,7 +1043,10 @@ impl Draw for DrawPbr {
         let (view_uniforms, view_lights, mesh_view_bind_groups) = views.get(view).unwrap();
         let extracted_mesh = &extracted_meshes.into_inner().meshes[draw_key];
         let mesh_meta = mesh_meta.into_inner();
-        pass.set_render_pipeline(&pbr_shaders.into_inner().pipeline);
+        pass.set_render_pipeline(match extracted_mesh.alpha_mode {
+            AlphaMode::Opaque | AlphaMode::Mask(_) => &pbr_shaders.into_inner().opaque_pipeline,
+            AlphaMode::Blend => &pbr_shaders.into_inner().transparent_pipeline,
+        });
         pass.set_bind_group(
             0,
             &mesh_view_bind_groups.view,

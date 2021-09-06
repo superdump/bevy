@@ -20,6 +20,7 @@ use bevy_render2::{
 
 pub mod draw_3d_graph {
     pub mod node {
+        pub const DEPTH_PREPASS: &str = "depth_prepass";
         pub const SHADOW_PASS: &str = "shadow_pass";
     }
 }
@@ -39,6 +40,7 @@ impl Plugin for PbrPlugin {
         render_app
             .add_system_to_stage(RenderStage::Extract, render::extract_meshes)
             .add_system_to_stage(RenderStage::Extract, render::extract_lights)
+            .add_system_to_stage(RenderStage::Extract, render::extract_depth_phases)
             .add_system_to_stage(RenderStage::Prepare, render::prepare_meshes)
             .add_system_to_stage(
                 RenderStage::Prepare,
@@ -47,19 +49,35 @@ impl Plugin for PbrPlugin {
                 render::prepare_lights.exclusive_system(),
             )
             .add_system_to_stage(RenderStage::Queue, render::queue_meshes)
+            .add_system_to_stage(
+                RenderStage::PhaseSort,
+                sort_phase_system::<OpaqueDepthPhase>,
+            )
+            .add_system_to_stage(
+                RenderStage::PhaseSort,
+                sort_phase_system::<AlphaMaskDepthPhase>,
+            )
             .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<ShadowPhase>)
             // FIXME: Hack to ensure RenderCommandQueue is initialized when PbrShaders is being initialized
             // .init_resource::<RenderCommandQueue>()
             .init_resource::<PbrShaders>()
+            .init_resource::<DepthPrepassShaders>()
             .init_resource::<ShadowShaders>()
+            .init_resource::<DepthPrepassMeta>()
+            .init_resource::<DepthPrepassMeshMeta>()
             .init_resource::<MeshMeta>()
             .init_resource::<LightMeta>();
 
+        let draw_opaque_depth = DrawOpaqueDepth::new(&mut render_app.world);
+        let draw_alpha_mask_depth = DrawAlphaMaskDepth::new(&mut render_app.world);
         let draw_pbr = DrawPbr::new(&mut render_app.world);
         let draw_shadow_mesh = DrawShadowMesh::new(&mut render_app.world);
+        let depth_prepass_node = DepthPrepassNode::new(&mut render_app.world);
         let shadow_pass_node = ShadowPassNode::new(&mut render_app.world);
         let render_world = render_app.world.cell();
         let draw_functions = render_world.get_resource::<DrawFunctions>().unwrap();
+        draw_functions.write().add(draw_opaque_depth);
+        draw_functions.write().add(draw_alpha_mask_depth);
         draw_functions.write().add(draw_pbr);
         draw_functions.write().add(draw_shadow_mesh);
         let mut graph = render_world.get_resource_mut::<RenderGraph>().unwrap();
@@ -71,6 +89,31 @@ impl Plugin for PbrPlugin {
         let draw_3d_graph = graph
             .get_sub_graph_mut(bevy_core_pipeline::draw_3d_graph::NAME)
             .unwrap();
+
+        draw_3d_graph.add_node("depth_prepass", depth_prepass_node);
+        draw_3d_graph
+            .add_node_edge(
+                "depth_prepass",
+                bevy_core_pipeline::draw_3d_graph::node::MAIN_PASS,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_slot_edge(
+                draw_3d_graph.input_node().unwrap().id,
+                bevy_core_pipeline::draw_3d_graph::input::VIEW_ENTITY,
+                draw_3d_graph::node::DEPTH_PREPASS,
+                DepthPrepassNode::IN_VIEW,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_slot_edge(
+                draw_3d_graph.input_node().unwrap().id,
+                bevy_core_pipeline::draw_3d_graph::input::DEPTH,
+                draw_3d_graph::node::DEPTH_PREPASS,
+                DepthPrepassNode::IN_DEPTH,
+            )
+            .unwrap();
+
         draw_3d_graph.add_node(draw_3d_graph::node::SHADOW_PASS, shadow_pass_node);
         draw_3d_graph
             .add_node_edge(
