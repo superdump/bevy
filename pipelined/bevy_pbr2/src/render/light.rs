@@ -62,6 +62,7 @@ pub type ExtractedDirectionalLightShadowMap = DirectionalLightShadowMap;
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuPointLight {
     projection: Mat4,
+    inverse_projection: Mat4,
     color: Vec4,
     position: Vec3,
     inverse_square_range: f32,
@@ -72,14 +73,20 @@ pub struct GpuPointLight {
     shadow_normal_bias: f32,
 }
 
+// Mean solar width ~1919 arc seconds
+// https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html
+const HALF_SUN_ANGLE_RADIANS: f32 = 0.5 * (1919.0 * std::f32::consts::PI / 180.0) / 3600.0;
+
 #[repr(C)]
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuDirectionalLight {
     view_projection: Mat4,
     inverse_view: Mat4,
     projection: Mat4,
+    inverse_projection: Mat4,
     color: Vec4,
     dir_to_light: Vec3,
+    tan_half_light_angle: f32,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
     left: f32,
@@ -568,6 +575,7 @@ pub fn prepare_lights(
 
             gpu_lights.point_lights[light_index] = GpuPointLight {
                 projection,
+                inverse_projection: projection.inverse(),
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: (light.color.as_rgba_linear() * light.intensity).into(),
@@ -618,6 +626,8 @@ pub fn prepare_lights(
                 view_projection: projection * view.inverse(),
                 inverse_view: view.inverse(),
                 projection,
+                inverse_projection: projection.inverse(),
+                tan_half_light_angle: HALF_SUN_ANGLE_RADIANS.tan(),
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
                 left: light.left,
