@@ -481,6 +481,7 @@ fn load_node(
                 node.insert(Camera {
                     name: Some(CameraPlugin::CAMERA_2D.to_owned()),
                     projection_matrix: orthographic_projection.get_projection_matrix(),
+                    far: orthographic.zfar(),
                     ..Default::default()
                 });
                 node.insert(orthographic_projection);
@@ -499,6 +500,7 @@ fn load_node(
                 }
                 node.insert(Camera {
                     name: Some(CameraPlugin::CAMERA_3D.to_owned()),
+                    far: perspective_projection.far,
                     projection_matrix: perspective_projection.get_projection_matrix(),
                     ..Default::default()
                 });

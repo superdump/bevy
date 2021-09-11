@@ -1,5 +1,7 @@
 mod light;
+mod visibility;
 pub use light::*;
+pub use visibility::*;
 
 use crate::{NotShadowCaster, NotShadowReceiver, StandardMaterial, StandardMaterialUniformData};
 use bevy_asset::{Assets, Handle};
@@ -8,6 +10,7 @@ use bevy_ecs::{prelude::*, system::SystemState};
 use bevy_math::Mat4;
 use bevy_render2::{
     mesh::Mesh,
+    primitives::Aabb,
     render_asset::RenderAssets,
     render_graph::{Node, NodeRunError, RenderGraphContext},
     render_phase::{Draw, DrawFunctions, Drawable, RenderPhase, TrackedRenderPass},
@@ -376,6 +379,7 @@ struct ExtractedMesh {
     material_handle: Handle<StandardMaterial>,
     casts_shadows: bool,
     receives_shadows: bool,
+    aabb: Aabb,
 }
 
 pub struct ExtractedMeshes {
@@ -393,6 +397,7 @@ pub fn extract_meshes(
         &Handle<StandardMaterial>,
         Option<&NotShadowCaster>,
         Option<&NotShadowReceiver>,
+        &Aabb,
     )>,
 ) {
     let mut extracted_meshes = Vec::new();
@@ -402,6 +407,7 @@ pub fn extract_meshes(
         material_handle,
         maybe_not_shadow_caster,
         maybe_not_shadow_receiver,
+        aabb,
     ) in query.iter()
     {
         if !meshes.contains(mesh_handle) {
@@ -438,6 +444,8 @@ pub fn extract_meshes(
                 // Not not shadow caster means that this mesh is a shadow caster
                 casts_shadows: maybe_not_shadow_caster.is_none(),
                 receives_shadows: maybe_not_shadow_receiver.is_none(),
+                // FIXME: This will be incorrect if the model has been rotated or scaled!
+                aabb: aabb.translated(transform.translation),
             });
         } else {
             continue;
@@ -550,7 +558,7 @@ pub fn queue_meshes(
         &ViewLights,
         &mut RenderPhase<Transparent3dPhase>,
     )>,
-    mut view_light_shadow_phases: Query<&mut RenderPhase<ShadowPhase>>,
+    mut view_light_shadow_phases: Query<(&ExtractedView, &mut RenderPhase<ShadowPhase>)>,
 ) {
     let mesh_meta = mesh_meta.into_inner();
 
@@ -719,34 +727,43 @@ pub fn queue_meshes(
                 material_bind_group_key,
             });
 
-            // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
-            //       gives the z component of translation of the mesh in view space
-            let mesh_z = view_row_2.dot(mesh.transform.col(3));
-            // FIXME: Switch from usize to u64 for portability and use sort key encoding
-            //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
-            // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
-            let sort_key = (((mesh_z * 1000.0) as usize) << 10)
-                | (material_bind_group_key.index() & ((1 << 10) - 1));
-            // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
-            transparent_phase.add(Drawable {
-                draw_function: draw_pbr,
-                draw_key: i,
-                sort_key,
-            });
+            // FIXME: Because the mesh draw info is indexed by draw key, it has to be pushed onto the vec above regardless
+            if !view.visibility_culling || view.frustum.intersects_aabb(&mesh.aabb) {
+                // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
+                //       gives the z component of translation of the mesh in view space
+                let mesh_z = view_row_2.dot(mesh.transform.col(3));
+                // FIXME: Switch from usize to u64 for portability and use sort key encoding
+                //        similar to https://realtimecollisiondetection.net/blog/?p=86 as appropriate
+                // FIXME: What is the best way to map from view space z to a number of bits of unsigned integer?
+                let sort_key = (((mesh_z * 1000.0) as usize) << 10)
+                    | (material_bind_group_key.index() & ((1 << 10) - 1));
+                // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
+                transparent_phase.add(Drawable {
+                    draw_function: draw_pbr,
+                    draw_key: i,
+                    sort_key,
+                });
+            }
         }
 
         // ultimately lights should check meshes for relevancy (ex: light views can "see" different meshes than the main view can)
         let draw_shadow_mesh = draw_functions.read().get_id::<DrawShadowMesh>().unwrap();
         for view_light_entity in view_lights.lights.iter().copied() {
-            let mut shadow_phase = view_light_shadow_phases.get_mut(view_light_entity).unwrap();
+            let (light_view, mut shadow_phase) =
+                view_light_shadow_phases.get_mut(view_light_entity).unwrap();
             // TODO: this should only queue up meshes that are actually visible by each "light view"
             for (i, mesh) in extracted_meshes.meshes.iter().enumerate() {
                 if mesh.casts_shadows {
-                    shadow_phase.add(Drawable {
-                        draw_function: draw_shadow_mesh,
-                        draw_key: i,
-                        sort_key: 0, // TODO: sort back-to-front
-                    });
+                    // FIXME: Because the mesh draw info is indexed by draw key, it has to be pushed onto the vec above regardless
+                    if !light_view.visibility_culling
+                        || light_view.frustum.intersects_aabb(&mesh.aabb)
+                    {
+                        shadow_phase.add(Drawable {
+                            draw_function: draw_shadow_mesh,
+                            draw_key: i,
+                            sort_key: 0, // TODO: sort back-to-front
+                        });
+                    }
                 }
             }
         }

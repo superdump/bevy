@@ -30,7 +30,8 @@ impl Plugin for PbrPlugin {
         app.add_plugin(StandardMaterialPlugin)
             .init_resource::<AmbientLight>()
             .init_resource::<DirectionalLightShadowMap>()
-            .init_resource::<PointLightShadowMap>();
+            .init_resource::<PointLightShadowMap>()
+            .add_system_to_stage(CoreStage::PostUpdate, calculate_aabbs);
 
         let render_app = app.sub_app(RenderApp);
         render_app

@@ -9,6 +9,7 @@ use bevy_render2::{
     camera::CameraProjection,
     color::Color,
     mesh::Mesh,
+    primitives::Frustum,
     render_asset::RenderAssets,
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
     render_phase::{Draw, DrawFunctions, RenderPhase, TrackedRenderPass},
@@ -47,6 +48,7 @@ pub struct ExtractedDirectionalLight {
     projection: Mat4,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+    far: f32,
 }
 
 pub type ExtractedDirectionalLightShadowMap = DirectionalLightShadowMap;
@@ -289,6 +291,7 @@ pub fn extract_lights(
                 shadow_normal_bias: directional_light.shadow_normal_bias
                     * directional_light_texel_size
                     * std::f32::consts::SQRT_2,
+                far: directional_light.shadow_projection.far,
             });
     }
 }
@@ -460,6 +463,8 @@ pub fn prepare_lights(
                             array_layer_count: NonZeroU32::new(1),
                         });
 
+                let transform = view_translation * view_rotation;
+                let view_projection = projection * transform.compute_matrix().inverse();
                 let view_light_entity = commands
                     .spawn()
                     .insert_bundle((
@@ -474,8 +479,15 @@ pub fn prepare_lights(
                         ExtractedView {
                             width: point_light_shadow_map.size as u32,
                             height: point_light_shadow_map.size as u32,
-                            transform: view_translation * view_rotation,
+                            transform,
                             projection,
+                            frustum: Frustum::from_view_projection(
+                                &view_projection,
+                                &transform.translation,
+                                &transform.back(),
+                                light.range,
+                            ),
+                            visibility_culling: true,
                         },
                         RenderPhase::<ShadowPhase>::default(),
                     ))
@@ -550,6 +562,8 @@ pub fn prepare_lights(
                         array_layer_count: NonZeroU32::new(1),
                     });
 
+            let transform = GlobalTransform::from_matrix(view.inverse());
+            let view_projection = projection * transform.compute_matrix().inverse();
             let view_light_entity = commands
                 .spawn()
                 .insert_bundle((
@@ -560,8 +574,15 @@ pub fn prepare_lights(
                     ExtractedView {
                         width: directional_light_shadow_map.size as u32,
                         height: directional_light_shadow_map.size as u32,
-                        transform: GlobalTransform::from_matrix(view.inverse()),
+                        transform,
                         projection,
+                        frustum: Frustum::from_view_projection(
+                            &view_projection,
+                            &transform.translation,
+                            &transform.back(),
+                            light.far,
+                        ),
+                        visibility_culling: true,
                     },
                     RenderPhase::<ShadowPhase>::default(),
                 ))

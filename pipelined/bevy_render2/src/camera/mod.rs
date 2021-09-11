@@ -12,7 +12,7 @@ pub use bundle::*;
 pub use camera::*;
 pub use projection::*;
 
-use crate::{view::ExtractedView, RenderApp, RenderStage};
+use crate::{primitives::Frustum, view::ExtractedView, RenderApp, RenderStage};
 use bevy_app::{App, CoreStage, Plugin};
 use bevy_ecs::prelude::*;
 
@@ -69,6 +69,8 @@ fn extract_cameras(
         if let Some((entity, camera, transform)) = camera.entity.and_then(|e| query.get(e).ok()) {
             entities.insert(name.clone(), entity);
             if let Some(window) = windows.get(camera.window) {
+                let view_projection =
+                    camera.projection_matrix * transform.compute_matrix().inverse();
                 commands.get_or_spawn(entity).insert_bundle((
                     ExtractedCamera {
                         window_id: camera.window,
@@ -79,6 +81,13 @@ fn extract_cameras(
                         transform: *transform,
                         width: window.physical_width(),
                         height: window.physical_height(),
+                        frustum: Frustum::from_view_projection(
+                            &view_projection,
+                            &transform.translation,
+                            &transform.back(),
+                            camera.far,
+                        ),
+                        visibility_culling: camera.visibility_culling,
                     },
                 ));
             }
