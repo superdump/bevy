@@ -444,8 +444,7 @@ pub fn extract_meshes(
                 // Not not shadow caster means that this mesh is a shadow caster
                 casts_shadows: maybe_not_shadow_caster.is_none(),
                 receives_shadows: maybe_not_shadow_receiver.is_none(),
-                // FIXME: This will be incorrect if the model has been rotated or scaled!
-                aabb: aabb.translated(transform.translation),
+                aabb: aabb.clone(),
             });
         } else {
             continue;
@@ -728,7 +727,8 @@ pub fn queue_meshes(
             });
 
             // FIXME: Because the mesh draw info is indexed by draw key, it has to be pushed onto the vec above regardless
-            if !view.visibility_culling || view.frustum.intersects_aabb(&mesh.aabb) {
+            if !view.visibility_culling || view.frustum.intersects_obb(&mesh.aabb, &mesh.transform)
+            {
                 // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
                 //       gives the z component of translation of the mesh in view space
                 let mesh_z = view_row_2.dot(mesh.transform.col(3));
@@ -756,7 +756,9 @@ pub fn queue_meshes(
                 if mesh.casts_shadows {
                     // FIXME: Because the mesh draw info is indexed by draw key, it has to be pushed onto the vec above regardless
                     if !light_view.visibility_culling
-                        || light_view.frustum.intersects_aabb(&mesh.aabb)
+                        || light_view
+                            .frustum
+                            .intersects_obb(&mesh.aabb, &mesh.transform)
                     {
                         shadow_phase.add(Drawable {
                             draw_function: draw_shadow_mesh,
