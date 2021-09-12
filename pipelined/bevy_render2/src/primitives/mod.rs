@@ -1,13 +1,22 @@
-use bevy_math::{Mat4, Vec3, Vec4, Vec4Swizzles};
+use bevy_math::{Mat4, Vec3, Vec4};
 
 // NOTE: This Aabb implementation mostly just copied from aevyrie's bevy_mod_bounding
 #[derive(Clone, Debug)]
 pub struct Aabb {
-    pub minimum: Vec3,
-    pub maximum: Vec3,
+    pub center: Vec3,
+    pub half_extents: Vec3,
 }
 
 impl Aabb {
+    pub fn from_min_max(minimum: Vec3, maximum: Vec3) -> Self {
+        let center = 0.5 * (maximum + minimum);
+        let half_extents = 0.5 * (maximum - minimum);
+        Self {
+            center,
+            half_extents,
+        }
+    }
+
     pub fn vertices(&self) -> [Vec3; 8] {
         /*
               (2)-----(3)               Y
@@ -18,22 +27,24 @@ impl Aabb {
                  \ |     \ |
                   (5)-----(4)
         */
+        let min = self.center - self.half_extents;
+        let max = self.center + self.half_extents;
         [
-            Vec3::new(self.maximum.x, self.maximum.y, self.maximum.z),
-            Vec3::new(self.minimum.x, self.maximum.y, self.maximum.z),
-            Vec3::new(self.minimum.x, self.maximum.y, self.minimum.z),
-            Vec3::new(self.maximum.x, self.maximum.y, self.minimum.z),
-            Vec3::new(self.maximum.x, self.minimum.y, self.maximum.z),
-            Vec3::new(self.minimum.x, self.minimum.y, self.maximum.z),
-            Vec3::new(self.minimum.x, self.minimum.y, self.minimum.z),
-            Vec3::new(self.maximum.x, self.minimum.y, self.minimum.z),
+            Vec3::new(max.x, max.y, max.z),
+            Vec3::new(min.x, max.y, max.z),
+            Vec3::new(min.x, max.y, min.z),
+            Vec3::new(max.x, max.y, min.z),
+            Vec3::new(max.x, min.y, max.z),
+            Vec3::new(min.x, min.y, max.z),
+            Vec3::new(min.x, min.y, min.z),
+            Vec3::new(max.x, min.y, min.z),
         ]
     }
 
     pub fn translated(&self, translation: Vec3) -> Aabb {
         Aabb {
-            minimum: translation + self.minimum,
-            maximum: translation + self.maximum,
+            center: self.center + translation,
+            half_extents: self.half_extents,
         }
     }
 }
@@ -67,10 +78,13 @@ impl Frustum {
                 row3 + row
             } else {
                 row3 - row
-            }.normalize();
+            }
+            .normalize();
         }
         let far_center = *view_translation - far * *view_backward;
-        planes[5].normal_d = view_backward.extend(-view_backward.dot(far_center)).normalize();
+        planes[5].normal_d = view_backward
+            .extend(-view_backward.dot(far_center))
+            .normalize();
         Self { planes }
     }
 

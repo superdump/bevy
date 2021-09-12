@@ -51,7 +51,7 @@ pub fn mesh_to_aabb(mesh: &Mesh, transform: &GlobalTransform) -> Option<Aabb> {
                 maximum = maximum.max(p);
             }
             if minimum != VEC3_MAX && maximum != VEC3_MIN {
-                return Some(Aabb { minimum, maximum });
+                return Some(Aabb::from_min_max(minimum, maximum));
             }
         }
     }
