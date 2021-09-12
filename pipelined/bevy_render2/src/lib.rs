@@ -14,6 +14,7 @@ pub mod view;
 use std::ops::{Deref, DerefMut};
 
 pub use once_cell;
+use primitives::Aabb;
 use wgpu::BackendBit;
 
 use crate::{
@@ -94,7 +95,8 @@ impl Plugin for RenderPlugin {
                 },
                 &wgpu::DeviceDescriptor::default(),
             ));
-        app.insert_resource(device.clone())
+        app.register_type::<Aabb>()
+            .insert_resource(device.clone())
             .insert_resource(queue.clone())
             .init_resource::<ScratchRenderWorld>();
 

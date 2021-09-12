@@ -1,7 +1,10 @@
+use bevy_ecs::reflect::ReflectComponent;
 use bevy_math::{Mat4, Vec3, Vec4};
+use bevy_reflect::Reflect;
 
 // NOTE: This Aabb implementation mostly just copied from aevyrie's bevy_mod_bounding
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, Reflect)]
+#[reflect(Component)]
 pub struct Aabb {
     pub center: Vec3,
     pub half_extents: Vec3,
