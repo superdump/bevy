@@ -4,6 +4,7 @@ use bevy_transform::components::GlobalTransform;
 pub use window::*;
 
 use crate::{
+    primitives::Frustum,
     render_graph::{Node, NodeRunError, RenderGraph, RenderGraphContext},
     render_resource::DynamicUniformVec,
     renderer::{RenderContext, RenderDevice},
@@ -37,6 +38,8 @@ pub struct ExtractedView {
     pub transform: GlobalTransform,
     pub width: u32,
     pub height: u32,
+    pub frustum: Frustum,
+    pub visibility_culling: bool,
 }
 
 #[derive(Clone, AsStd140)]

@@ -63,16 +63,14 @@ impl Frustum {
         let mut planes = [Plane::default(); 6];
         for i in 0..=4 {
             let row = view_projection.row(i / 2);
-            let v = if i & 1 == 0 && i != 4 {
+            planes[i].normal_d = if (i & 1) == 0 && i != 4 {
                 row3 + row
             } else {
                 row3 - row
-            };
-            planes[i].normal_d = v.xyz().normalize().extend(v.w);
+            }.normalize();
         }
         let far_center = *view_translation - far * *view_backward;
-        planes[5].normal_d = view_backward.extend(-view_backward.dot(far_center));
-
+        planes[5].normal_d = view_backward.extend(-view_backward.dot(far_center)).normalize();
         Self { planes }
     }
 
