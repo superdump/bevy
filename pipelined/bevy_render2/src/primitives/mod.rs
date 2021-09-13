@@ -1,5 +1,5 @@
 use bevy_ecs::reflect::ReflectComponent;
-use bevy_math::{Mat4, Vec3, Vec4, Vec4Swizzles};
+use bevy_math::{Mat4, Vec3, Vec3A, Vec4};
 use bevy_reflect::Reflect;
 
 /// An Axis-Aligned Bounding Box
@@ -18,6 +18,14 @@ impl Aabb {
             center,
             half_extents,
         }
+    }
+
+    /// Calculate the relative radius of the AABB with respect to a plane
+    pub fn relative_radius(&self, p_normal_d: &Vec4, axes: &[Vec3A]) -> f32 {
+        // NOTE: dot products on Vec3A use SIMD and even with the overhead of conversion are net faster than Vec3
+        let p_normal = Vec3A::from(*p_normal_d);
+        let half_extents = Vec3A::from(self.half_extents);
+        Vec3A::new(p_normal.dot(axes[0]), p_normal.dot(axes[1]), p_normal.dot(axes[2])).abs().dot(half_extents)
     }
 }
 
@@ -77,18 +85,16 @@ impl Frustum {
     }
 
     pub fn intersects_obb(&self, aabb: &Aabb, model_to_world: &Mat4) -> bool {
+        let aabb_center_world = *model_to_world * aabb.center.extend(1.0);
+        let axes = [
+            Vec3A::from(model_to_world.x_axis),
+            Vec3A::from(model_to_world.y_axis),
+            Vec3A::from(model_to_world.z_axis),
+        ];
+
         for plane in &self.planes {
-            let relative_radius =
-                (plane.normal_d.xyz().dot(model_to_world.x_axis.xyz()) * aabb.half_extents.x).abs()
-                    + (plane.normal_d.xyz().dot(model_to_world.y_axis.xyz()) * aabb.half_extents.y)
-                        .abs()
-                    + (plane.normal_d.xyz().dot(model_to_world.z_axis.xyz()) * aabb.half_extents.z)
-                        .abs();
-            let sphere = Sphere {
-                center: Vec3::from(*model_to_world * aabb.center.extend(1.0)),
-                radius: relative_radius,
-            };
-            if plane.normal_d.dot(sphere.center.extend(1.0)) + sphere.radius <= 0.0 {
+            let relative_radius = aabb.relative_radius(&plane.normal_d, &axes);
+            if plane.normal_d.dot(aabb_center_world) + relative_radius <= 0.0 {
                 return false;
             }
         }
