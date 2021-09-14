@@ -18,7 +18,7 @@ use bevy_render2::{
     renderer::{RenderContext, RenderDevice},
     shader::Shader,
     texture::{BevyDefault, Image},
-    view::{ComputedVisibility, ViewUniformOffset, ViewUniforms},
+    view::{ComputedVisibility, ViewUniformOffset, ViewUniforms, VisibleEntities},
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::HashMap;
@@ -343,8 +343,8 @@ pub fn queue_sprites(
     sprite_shaders: Res<SpriteShaders>,
     mut image_bind_groups: ResMut<ImageBindGroups>,
     gpu_images: Res<RenderAssets<Image>>,
-    mut extracted_sprites: Query<(Entity, &ExtractedSprite)>,
-    mut views: Query<&mut RenderPhase<Transparent2d>>,
+    extracted_sprites: Query<&ExtractedSprite>,
+    mut views: Query<(&VisibleEntities, &mut RenderPhase<Transparent2d>)>,
 ) {
     if let Some(view_binding) = view_uniforms.uniforms.binding() {
         sprite_meta.view_bind_group = Some(render_device.create_bind_group(&BindGroupDescriptor {
@@ -356,33 +356,37 @@ pub fn queue_sprites(
             layout: &sprite_shaders.view_layout,
         }));
         let draw_sprite_function = draw_functions.read().get_id::<DrawSprite>().unwrap();
-        for mut transparent_phase in views.iter_mut() {
-            for (entity, sprite) in extracted_sprites.iter_mut() {
-                image_bind_groups
-                    .values
-                    .entry(sprite.handle.clone_weak())
-                    .or_insert_with(|| {
-                        let gpu_image = gpu_images.get(&sprite.handle).unwrap();
-                        render_device.create_bind_group(&BindGroupDescriptor {
-                            entries: &[
-                                BindGroupEntry {
-                                    binding: 0,
-                                    resource: BindingResource::TextureView(&gpu_image.texture_view),
-                                },
-                                BindGroupEntry {
-                                    binding: 1,
-                                    resource: BindingResource::Sampler(&gpu_image.sampler),
-                                },
-                            ],
-                            label: None,
-                            layout: &sprite_shaders.material_layout,
-                        })
+        for (visible_entities, mut transparent_phase) in views.iter_mut() {
+            for visible_entity in visible_entities.iter() {
+                if let Ok(sprite) = extracted_sprites.get(visible_entity.entity) {
+                    image_bind_groups
+                        .values
+                        .entry(sprite.handle.clone_weak())
+                        .or_insert_with(|| {
+                            let gpu_image = gpu_images.get(&sprite.handle).unwrap();
+                            render_device.create_bind_group(&BindGroupDescriptor {
+                                entries: &[
+                                    BindGroupEntry {
+                                        binding: 0,
+                                        resource: BindingResource::TextureView(
+                                            &gpu_image.texture_view,
+                                        ),
+                                    },
+                                    BindGroupEntry {
+                                        binding: 1,
+                                        resource: BindingResource::Sampler(&gpu_image.sampler),
+                                    },
+                                ],
+                                label: None,
+                                layout: &sprite_shaders.material_layout,
+                            })
+                        });
+                    transparent_phase.add(Transparent2d {
+                        draw_function: draw_sprite_function,
+                        entity: visible_entity.entity,
+                        sort_key: sprite.handle.clone_weak(),
                     });
-                transparent_phase.add(Transparent2d {
-                    draw_function: draw_sprite_function,
-                    entity,
-                    sort_key: sprite.handle.clone_weak(),
-                });
+                }
             }
         }
     }
