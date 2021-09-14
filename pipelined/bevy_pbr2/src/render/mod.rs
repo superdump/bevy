@@ -19,7 +19,7 @@ use bevy_render2::{
     renderer::{RenderDevice, RenderQueue},
     shader::Shader,
     texture::{BevyDefault, GpuImage, Image, TextureFormatPixelInfo},
-    view::{ComputedVisibility, ExtractedView, ViewUniformOffset, ViewUniforms},
+    view::{ComputedVisibility, ExtractedView, ViewUniformOffset, ViewUniforms, VisibleEntities},
 };
 use bevy_transform::components::GlobalTransform;
 use crevice::std140::AsStd140;
@@ -505,14 +505,12 @@ pub fn queue_meshes(
     light_meta: Res<LightMeta>,
     view_uniforms: Res<ViewUniforms>,
     render_materials: Res<RenderAssets<StandardMaterial>>,
-    standard_material_meshes: Query<
-        (Entity, &Handle<StandardMaterial>, &MeshUniform),
-        With<Handle<Mesh>>,
-    >,
+    standard_material_meshes: Query<(&Handle<StandardMaterial>, &MeshUniform), With<Handle<Mesh>>>,
     mut views: Query<(
         Entity,
         &ExtractedView,
         &ViewLights,
+        &VisibleEntities,
         &mut RenderPhase<Transparent3d>,
     )>,
 ) {
@@ -520,7 +518,8 @@ pub fn queue_meshes(
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
     ) {
-        for (entity, view, view_lights, mut transparent_phase) in views.iter_mut() {
+        for (entity, view, view_lights, visible_entities, mut transparent_phase) in views.iter_mut()
+        {
             let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 entries: &[
                     BindGroupEntry {
@@ -570,19 +569,23 @@ pub fn queue_meshes(
             let view_matrix = view.transform.compute_matrix();
             let view_row_2 = view_matrix.row(2);
 
-            for (entity, material_handle, mesh_uniform) in standard_material_meshes.iter() {
-                if !render_materials.contains_key(material_handle) {
-                    continue;
+            for visible_entity in &visible_entities.entities {
+                if let Ok((material_handle, mesh_uniform)) =
+                    standard_material_meshes.get(visible_entity.entity)
+                {
+                    if !render_materials.contains_key(material_handle) {
+                        continue;
+                    }
+                    // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
+                    //       gives the z component of translation of the mesh in view space
+                    let mesh_z = view_row_2.dot(mesh_uniform.transform.col(3));
+                    // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
+                    transparent_phase.add(Transparent3d {
+                        entity: visible_entity.entity,
+                        draw_function: draw_pbr,
+                        distance: mesh_z,
+                    });
                 }
-                // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
-                //       gives the z component of translation of the mesh in view space
-                let mesh_z = view_row_2.dot(mesh_uniform.transform.col(3));
-                // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
-                transparent_phase.add(Transparent3d {
-                    entity,
-                    draw_function: draw_pbr,
-                    distance: mesh_z,
-                });
             }
         }
     }
