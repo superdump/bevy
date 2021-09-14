@@ -19,7 +19,7 @@ use bevy_render2::{
     renderer::{RenderDevice, RenderQueue},
     shader::Shader,
     texture::{BevyDefault, GpuImage, Image, TextureFormatPixelInfo},
-    view::{ExtractedView, ViewUniformOffset, ViewUniforms},
+    view::{ComputedVisibility, ExtractedView, ViewUniformOffset, ViewUniforms},
 };
 use bevy_transform::components::GlobalTransform;
 use crevice::std140::AsStd140;
@@ -52,6 +52,7 @@ pub fn extract_meshes(
     caster_query: Query<
         (
             Entity,
+            &ComputedVisibility,
             &GlobalTransform,
             &Handle<Mesh>,
             Option<&NotShadowReceiver>,
@@ -61,6 +62,7 @@ pub fn extract_meshes(
     not_caster_query: Query<
         (
             Entity,
+            &ComputedVisibility,
             &GlobalTransform,
             &Handle<Mesh>,
             Option<&NotShadowReceiver>,
@@ -69,7 +71,10 @@ pub fn extract_meshes(
     >,
 ) {
     let mut caster_values = Vec::with_capacity(*previous_caster_len);
-    for (entity, transform, handle, not_receiver) in caster_query.iter() {
+    for (entity, computed_visibility, transform, handle, not_receiver) in caster_query.iter() {
+        if !computed_visibility.is_visible {
+            continue;
+        }
         let transform = transform.compute_matrix();
         caster_values.push((
             entity,
@@ -91,7 +96,10 @@ pub fn extract_meshes(
     commands.insert_or_spawn_batch(caster_values);
 
     let mut not_caster_values = Vec::with_capacity(*previous_not_caster_len);
-    for (entity, transform, handle, not_receiver) in not_caster_query.iter() {
+    for (entity, computed_visibility, transform, handle, not_receiver) in not_caster_query.iter() {
+        if !computed_visibility.is_visible {
+            continue;
+        }
         let transform = transform.compute_matrix();
         not_caster_values.push((
             entity,
