@@ -17,7 +17,7 @@ use bevy_render2::{
     renderer::{RenderDevice, RenderQueue},
     shader::Shader,
     texture::{BevyDefault, Image},
-    view::{ViewUniformOffset, ViewUniforms},
+    view::{ComputedVisibility, ViewUniformOffset, ViewUniforms},
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::HashMap;
@@ -160,13 +160,20 @@ pub fn extract_atlases(
     texture_atlases: Res<Assets<TextureAtlas>>,
     atlas_query: Query<(
         Entity,
+        &ComputedVisibility,
         &TextureAtlasSprite,
         &GlobalTransform,
         &Handle<TextureAtlas>,
     )>,
 ) {
     let mut sprites = Vec::new();
-    for (entity, atlas_sprite, transform, texture_atlas_handle) in atlas_query.iter() {
+    for (entity, computed_visibility, atlas_sprite, transform, texture_atlas_handle) in
+        atlas_query.iter()
+    {
+        if !computed_visibility.is_visible || !texture_atlases.contains(texture_atlas_handle) {
+            continue;
+        }
+
         if let Some(texture_atlas) = texture_atlases.get(texture_atlas_handle) {
             let rect = texture_atlas.textures[atlas_sprite.index as usize];
             sprites.push((
@@ -187,10 +194,19 @@ pub fn extract_atlases(
 pub fn extract_sprites(
     mut commands: Commands,
     images: Res<Assets<Image>>,
-    sprite_query: Query<(Entity, &Sprite, &GlobalTransform, &Handle<Image>)>,
+    sprite_query: Query<(
+        Entity,
+        &ComputedVisibility,
+        &Sprite,
+        &GlobalTransform,
+        &Handle<Image>,
+    )>,
 ) {
     let mut sprites = Vec::new();
-    for (entity, sprite, transform, handle) in sprite_query.iter() {
+    for (entity, computed_visibility, sprite, transform, handle) in sprite_query.iter() {
+        if !computed_visibility.is_visible {
+            continue;
+        }
         if let Some(image) = images.get(handle) {
             let size = image.texture_descriptor.size;
 
