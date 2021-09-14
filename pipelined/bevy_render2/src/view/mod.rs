@@ -19,6 +19,8 @@ pub struct ViewPlugin;
 
 impl Plugin for ViewPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugin(VisibilityPlugin);
+
         app.sub_app(RenderApp)
             .init_resource::<ViewUniforms>()
             .add_system_to_stage(RenderStage::Prepare, prepare_views);
