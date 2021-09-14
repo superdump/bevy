@@ -1,5 +1,7 @@
+pub mod visibility;
 pub mod window;
 
+pub use visibility::*;
 pub use window::*;
 
 use crate::{
