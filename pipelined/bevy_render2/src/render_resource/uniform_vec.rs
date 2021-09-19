@@ -6,20 +6,22 @@ use crevice::std140::{self, AsStd140, DynamicUniform, Std140};
 use std::num::NonZeroU64;
 use wgpu::{BindingResource, BufferBinding, BufferDescriptor, BufferUsage};
 
-pub struct UniformVec<T: AsStd140> {
+pub struct AlignedBufferVec<T: AsStd140> {
     values: Vec<T>,
     scratch: Vec<u8>,
-    uniform_buffer: Option<Buffer>,
+    buffer_usage: BufferUsage,
+    buffer: Option<Buffer>,
     capacity: usize,
     item_size: usize,
 }
 
-impl<T: AsStd140> Default for UniformVec<T> {
+impl<T: AsStd140> Default for AlignedBufferVec<T> {
     fn default() -> Self {
         Self {
             values: Vec::new(),
             scratch: Vec::new(),
-            uniform_buffer: None,
+            buffer_usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+            buffer: None,
             capacity: 0,
             item_size: (T::std140_size_static() + <T as AsStd140>::Std140Type::ALIGNMENT - 1)
                 & !(<T as AsStd140>::Std140Type::ALIGNMENT - 1),
@@ -27,16 +29,23 @@ impl<T: AsStd140> Default for UniformVec<T> {
     }
 }
 
-impl<T: AsStd140> UniformVec<T> {
+impl<T: AsStd140> AlignedBufferVec<T> {
+    pub fn new(buffer_usage: BufferUsage) -> Self {
+        Self {
+            buffer_usage,
+            ..Default::default()
+        }
+    }
+
     #[inline]
-    pub fn uniform_buffer(&self) -> Option<&Buffer> {
-        self.uniform_buffer.as_ref()
+    pub fn buffer(&self) -> Option<&Buffer> {
+        self.buffer.as_ref()
     }
 
     #[inline]
     pub fn binding(&self) -> Option<BindingResource> {
         Some(BindingResource::Buffer(BufferBinding {
-            buffer: self.uniform_buffer()?,
+            buffer: self.buffer()?,
             offset: 0,
             size: Some(NonZeroU64::new(self.item_size as u64).unwrap()),
         }))
@@ -75,10 +84,10 @@ impl<T: AsStd140> UniformVec<T> {
             self.capacity = capacity;
             let size = self.item_size * capacity;
             self.scratch.resize(size, 0);
-            self.uniform_buffer = Some(device.create_buffer(&BufferDescriptor {
+            self.buffer = Some(device.create_buffer(&BufferDescriptor {
                 label: None,
                 size: size as wgpu::BufferAddress,
-                usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+                usage: BufferUsage::COPY_DST | self.buffer_usage,
                 mapped_at_creation: false,
             }));
         }
@@ -90,11 +99,11 @@ impl<T: AsStd140> UniformVec<T> {
     }
 
     pub fn write_buffer(&mut self, queue: &RenderQueue) {
-        if let Some(uniform_buffer) = &self.uniform_buffer {
+        if let Some(buffer) = &self.buffer {
             let range = 0..self.item_size * self.values.len();
             let mut writer = std140::Writer::new(&mut self.scratch[range.clone()]);
             writer.write(self.values.as_slice()).unwrap();
-            queue.write_buffer(uniform_buffer, 0, &self.scratch[range]);
+            queue.write_buffer(buffer, 0, &self.scratch[range]);
         }
     }
 
@@ -104,7 +113,7 @@ impl<T: AsStd140> UniformVec<T> {
 }
 
 pub struct DynamicUniformVec<T: AsStd140> {
-    uniform_vec: UniformVec<DynamicUniform<T>>,
+    uniform_vec: AlignedBufferVec<DynamicUniform<T>>,
 }
 
 impl<T: AsStd140> Default for DynamicUniformVec<T> {
@@ -118,7 +127,7 @@ impl<T: AsStd140> Default for DynamicUniformVec<T> {
 impl<T: AsStd140> DynamicUniformVec<T> {
     #[inline]
     pub fn uniform_buffer(&self) -> Option<&Buffer> {
-        self.uniform_vec.uniform_buffer()
+        self.uniform_vec.buffer()
     }
 
     #[inline]

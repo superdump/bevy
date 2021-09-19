@@ -124,19 +124,25 @@ struct DirectionalLight {
 };
 
 [[block]]
-struct Lights {
-    // NOTE: this array size must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
-    // TODO: this can be removed if we move to storage buffers for light arrays
-    point_lights: array<PointLight, 10>;
+struct GlobalLights {
+    // // NOTE: this array size must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
+    // // TODO: this can be removed if we move to storage buffers for light arrays
+    // point_lights: array<PointLight, 10>;
     directional_lights: array<DirectionalLight, 1>;
     ambient_color: vec4<f32>;
+    point_light_index_offset: u32;
     n_point_lights: u32;
     n_directional_lights: u32;
 };
 
+[[block]]
+struct PointLights {
+    data: array<PointLight>;
+};
+
 
 [[group(0), binding(1)]]
-var lights: Lights;
+var global_lights: GlobalLights;
 [[group(0), binding(2)]]
 var point_shadow_textures: texture_depth_cube_array;
 [[group(0), binding(3)]]
@@ -145,6 +151,10 @@ var point_shadow_textures_sampler: sampler_comparison;
 var directional_shadow_textures: texture_depth_2d_array;
 [[group(0), binding(5)]]
 var directional_shadow_textures_sampler: sampler_comparison;
+// NOTE: [[access(read)]] is needed with wgpu 0.9 and its naga version but this
+//       notation will change with newer wgpu/naga
+[[group(0), binding(6)]]
+var<storage> point_lights: [[access(read)]] PointLights;
 
 [[group(1), binding(0)]]
 var material: StandardMaterial;
@@ -392,7 +402,7 @@ fn directional_light(light: DirectionalLight, roughness: f32, NdotV: f32, normal
 }
 
 fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
-    let light = lights.point_lights[light_id];
+    let light = point_lights.data[i32(global_lights.point_light_index_offset) + light_id];
 
     // because the shadow maps align with the axes and the frustum planes are at 45 degrees
     // we can get the worldspace depth by taking the largest absolute axis
@@ -440,7 +450,7 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
 }
 
 fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
-    let light = lights.directional_lights[light_id];
+    let light = global_lights.directional_lights[light_id];
 
     // The normal bias is scaled to the texel size.
     let normal_offset = light.shadow_normal_bias * surface_normal.xyz;
@@ -556,10 +566,10 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
         // accumulate color
         var light_accum: vec3<f32> = vec3<f32>(0.0);
-        let n_point_lights = i32(lights.n_point_lights);
-        let n_directional_lights = i32(lights.n_directional_lights);
+        let n_point_lights = i32(global_lights.n_point_lights);
+        let n_directional_lights = i32(global_lights.n_directional_lights);
         for (var i: i32 = 0; i < n_point_lights; i = i + 1) {
-            let light = lights.point_lights[i];
+            let light = point_lights.data[i32(global_lights.point_light_index_offset) + i];
             var shadow: f32;
             if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u) {
                 shadow = fetch_point_shadow(i, in.world_position, in.world_normal);
@@ -570,7 +580,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             light_accum = light_accum + light_contrib * shadow;
         }
         for (var i: i32 = 0; i < n_directional_lights; i = i + 1) {
-            let light = lights.directional_lights[i];
+            let light = global_lights.directional_lights[i];
             var shadow: f32;
             if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u) {
                 shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
@@ -586,7 +596,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
         output_color = vec4<f32>(
             light_accum +
-                (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb * occlusion +
+                (diffuse_ambient + specular_ambient) * global_lights.ambient_color.rgb * occlusion +
                 emissive.rgb * output_color.a,
             output_color.a);
 

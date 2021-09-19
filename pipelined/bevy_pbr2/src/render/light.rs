@@ -99,11 +99,10 @@ pub struct GpuDirectionalLight {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, AsStd140)]
-pub struct GpuLights {
-    // TODO: this comes first to work around a WGSL alignment issue. We need to solve this issue before releasing the renderer rework
-    point_lights: [GpuPointLight; MAX_POINT_LIGHTS],
+pub struct GpuGlobalLights {
     directional_lights: [GpuDirectionalLight; MAX_DIRECTIONAL_LIGHTS],
     ambient_color: Vec4,
+    point_light_index_offset: u32,
     n_point_lights: u32,
     n_directional_lights: u32,
 }
@@ -565,12 +564,13 @@ pub struct ViewLights {
     pub directional_light_depth_texture: Texture,
     pub directional_light_depth_texture_view: TextureView,
     pub lights: Vec<Entity>,
-    pub gpu_light_binding_index: u32,
+    pub gpu_global_light_binding_index: u32,
 }
 
 #[derive(Default)]
 pub struct LightMeta {
-    pub view_gpu_lights: DynamicUniformVec<GpuLights>,
+    pub view_gpu_global_lights: DynamicUniformVec<GpuGlobalLights>,
+    pub view_gpu_point_lights: AlignedBufferVec<GpuPointLight>,
     pub shadow_view_bind_group: Option<BindGroup>,
 }
 
@@ -594,9 +594,13 @@ pub fn prepare_lights(
     directional_lights: Query<(Entity, &ExtractedDirectionalLight)>,
 ) {
     // PERF: view.iter().count() could be views.iter().len() if we implemented ExactSizeIterator for archetype-only filters
+    let n_views = views.iter().count();
     light_meta
-        .view_gpu_lights
-        .reserve_and_clear(views.iter().count(), &render_device);
+        .view_gpu_global_lights
+        .reserve_and_clear(n_views, &render_device);
+    light_meta
+        .view_gpu_point_lights
+        .reserve_and_clear(n_views * point_lights.iter().count(), &render_device);
 
     let ambient_color = ambient_light.color.as_rgba_linear() * ambient_light.brightness;
     // Pre-calculate for PointLights
@@ -643,12 +647,12 @@ pub fn prepare_lights(
         );
         let mut view_lights = Vec::new();
 
-        let mut gpu_lights = GpuLights {
+        let mut gpu_global_lights = GpuGlobalLights {
             ambient_color: ambient_color.into(),
             n_point_lights: point_lights.iter().len() as u32,
             n_directional_lights: directional_lights.iter().len() as u32,
-            point_lights: [GpuPointLight::default(); MAX_POINT_LIGHTS],
             directional_lights: [GpuDirectionalLight::default(); MAX_DIRECTIONAL_LIGHTS],
+            point_light_index_offset: light_meta.view_gpu_point_lights.len() as u32,
         };
 
         // TODO: this should select lights based on relevance to the view instead of the first ones that show up in a query
@@ -699,7 +703,7 @@ pub fn prepare_lights(
                 view_lights.push(view_light_entity);
             }
 
-            gpu_lights.point_lights[light_index] = GpuPointLight {
+            light_meta.view_gpu_point_lights.push(GpuPointLight {
                 projection: cube_face_projection,
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
@@ -711,7 +715,7 @@ pub fn prepare_lights(
                 far: light.range,
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
-            };
+            });
         }
 
         for (i, (light_entity, light)) in directional_lights
@@ -741,7 +745,7 @@ pub fn prepare_lights(
             // NOTE: This orthographic projection defines the volume within which shadows from a directional light can be cast
             let projection = light.projection;
 
-            gpu_lights.directional_lights[i] = GpuDirectionalLight {
+            gpu_global_lights.directional_lights[i] = GpuDirectionalLight {
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: (light.color.as_rgba_linear() * intensity).into(),
@@ -817,11 +821,16 @@ pub fn prepare_lights(
             directional_light_depth_texture: directional_light_depth_texture.texture,
             directional_light_depth_texture_view,
             lights: view_lights,
-            gpu_light_binding_index: light_meta.view_gpu_lights.push(gpu_lights),
+            gpu_global_light_binding_index: light_meta
+                .view_gpu_global_lights
+                .push(gpu_global_lights),
         });
     }
 
-    light_meta.view_gpu_lights.write_buffer(&render_queue);
+    light_meta
+        .view_gpu_global_lights
+        .write_buffer(&render_queue);
+    light_meta.view_gpu_point_lights.write_buffer(&render_queue);
 }
 
 pub fn queue_shadow_view_bind_group(

@@ -154,7 +154,7 @@ impl FromWorld for PbrShaders {
                     },
                     count: None,
                 },
-                // Lights
+                // GlobalLights
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStage::FRAGMENT,
@@ -163,7 +163,7 @@ impl FromWorld for PbrShaders {
                         has_dynamic_offset: true,
                         // TODO: change this to GpuLights::std140_size_static once crevice fixes this!
                         // Context: https://github.com/LPGhatguy/crevice/issues/29
-                        min_binding_size: BufferSize::new(1424),
+                        min_binding_size: BufferSize::new(256),
                     },
                     count: None,
                 },
@@ -206,6 +206,19 @@ impl FromWorld for PbrShaders {
                     ty: BindingType::Sampler {
                         comparison: true,
                         filtering: true,
+                    },
+                    count: None,
+                },
+                // PointLights
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        // NOTE: This can be 0 because if there are no point lights then the buffer
+                        //       will be empty
+                        min_binding_size: BufferSize::new(0),
                     },
                     count: None,
                 },
@@ -514,9 +527,10 @@ pub fn queue_meshes(
         &mut RenderPhase<Transparent3d>,
     )>,
 ) {
-    if let (Some(view_binding), Some(light_binding)) = (
+    if let (Some(view_binding), Some(global_light_binding), Some(point_light_binding)) = (
         view_uniforms.uniforms.binding(),
-        light_meta.view_gpu_lights.binding(),
+        light_meta.view_gpu_global_lights.binding(),
+        light_meta.view_gpu_point_lights.binding(),
     ) {
         for (entity, view, view_lights, visible_entities, mut transparent_phase) in views.iter_mut()
         {
@@ -528,7 +542,7 @@ pub fn queue_meshes(
                     },
                     BindGroupEntry {
                         binding: 1,
-                        resource: light_binding.clone(),
+                        resource: global_light_binding.clone(),
                     },
                     BindGroupEntry {
                         binding: 2,
@@ -551,6 +565,10 @@ pub fn queue_meshes(
                         resource: BindingResource::Sampler(
                             &shadow_shaders.directional_light_sampler,
                         ),
+                    },
+                    BindGroupEntry {
+                        binding: 6,
+                        resource: point_light_binding.clone(),
                     },
                 ],
                 label: None,
@@ -631,7 +649,10 @@ impl<const I: usize> RenderCommand<Transparent3d> for SetMeshViewBindGroup<I> {
         pass.set_bind_group(
             I,
             &pbr_view_bind_group.value,
-            &[view_uniform.offset, view_lights.gpu_light_binding_index],
+            &[
+                view_uniform.offset,
+                view_lights.gpu_global_light_binding_index,
+            ],
         );
     }
 }
