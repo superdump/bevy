@@ -187,7 +187,7 @@ impl FromWorld for PbrPipeline {
                         has_dynamic_offset: true,
                         // TODO: change this to ViewUniform::std140_size_static once crevice fixes this!
                         // Context: https://github.com/LPGhatguy/crevice/issues/29
-                        min_binding_size: BufferSize::new(144),
+                        min_binding_size: BufferSize::new(224),
                     },
                     count: None,
                 },
@@ -243,6 +243,42 @@ impl FromWorld for PbrPipeline {
                     ty: BindingType::Sampler {
                         comparison: true,
                         filtering: true,
+                    },
+                    count: None,
+                },
+                // PointLights
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        // NOTE: 0 if no point lights?
+                        min_binding_size: BufferSize::new(0),
+                    },
+                    count: None,
+                },
+                // ClusteredLightIndexLists
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        // NOTE: 0 if no point lights?
+                        min_binding_size: BufferSize::new(0),
+                    },
+                    count: None,
+                },
+                // ClusterOffsetsAndCounts
+                BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        // NOTE: number of clusters * u32, so minimum clusters = 1 => 4
+                        min_binding_size: BufferSize::new(4),
                     },
                     count: None,
                 },
