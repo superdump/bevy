@@ -14,7 +14,9 @@ use bevy_render2::{
     camera::{ActiveCameras, CameraPlugin},
     color::Color,
     render_graph::{EmptyNode, RenderGraph, SlotInfo, SlotType},
-    render_phase::{sort_phase_system, DrawFunctionId, DrawFunctions, PhaseItem, RenderPhase},
+    render_phase::{
+        sort_phase_system, DrawFunctionId, DrawFunctions, EntityPhaseItem, PhaseItem, RenderPhase,
+    },
     render_resource::*,
     renderer::RenderDevice,
     texture::{Image, TextureCache},
@@ -76,11 +78,15 @@ impl Plugin for CorePipelinePlugin {
         let render_app = app.sub_app(RenderApp);
         render_app
             .init_resource::<DrawFunctions<Transparent2d>>()
+            .init_resource::<DrawFunctions<Opaque3d>>()
+            .init_resource::<DrawFunctions<AlphaMask3d>>()
             .init_resource::<DrawFunctions<Transparent3d>>()
             .add_system_to_stage(RenderStage::Extract, extract_clear_color)
             .add_system_to_stage(RenderStage::Extract, extract_core_pipeline_camera_phases)
             .add_system_to_stage(RenderStage::Prepare, prepare_core_views_system)
             .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Transparent2d>)
+            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Opaque3d>)
+            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<AlphaMask3d>)
             .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Transparent3d>);
 
         let pass_node_2d = MainPass2dNode::new(&mut render_app.world);
@@ -172,6 +178,60 @@ impl PhaseItem for Transparent2d {
     }
 }
 
+pub struct Opaque3d {
+    pub distance: f32,
+    pub entity: Entity,
+    pub draw_function: DrawFunctionId,
+}
+
+impl PhaseItem for Opaque3d {
+    type SortKey = FloatOrd;
+
+    #[inline]
+    fn sort_key(&self) -> Self::SortKey {
+        FloatOrd(self.distance)
+    }
+
+    #[inline]
+    fn draw_function(&self) -> DrawFunctionId {
+        self.draw_function
+    }
+}
+
+impl EntityPhaseItem for Opaque3d {
+    #[inline]
+    fn entity(&self) -> Entity {
+        self.entity
+    }
+}
+
+pub struct AlphaMask3d {
+    pub distance: f32,
+    pub entity: Entity,
+    pub draw_function: DrawFunctionId,
+}
+
+impl PhaseItem for AlphaMask3d {
+    type SortKey = FloatOrd;
+
+    #[inline]
+    fn sort_key(&self) -> Self::SortKey {
+        FloatOrd(self.distance)
+    }
+
+    #[inline]
+    fn draw_function(&self) -> DrawFunctionId {
+        self.draw_function
+    }
+}
+
+impl EntityPhaseItem for AlphaMask3d {
+    #[inline]
+    fn entity(&self) -> Entity {
+        self.entity
+    }
+}
+
 pub struct Transparent3d {
     pub distance: f32,
     pub entity: Entity,
@@ -189,6 +249,13 @@ impl PhaseItem for Transparent3d {
     #[inline]
     fn draw_function(&self) -> DrawFunctionId {
         self.draw_function
+    }
+}
+
+impl EntityPhaseItem for Transparent3d {
+    #[inline]
+    fn entity(&self) -> Entity {
+        self.entity
     }
 }
 
@@ -218,9 +285,11 @@ pub fn extract_core_pipeline_camera_phases(
     }
     if let Some(camera_3d) = active_cameras.get(CameraPlugin::CAMERA_3D) {
         if let Some(entity) = camera_3d.entity {
-            commands
-                .get_or_spawn(entity)
-                .insert(RenderPhase::<Transparent3d>::default());
+            commands.get_or_spawn(entity).insert_bundle((
+                RenderPhase::<Opaque3d>::default(),
+                RenderPhase::<AlphaMask3d>::default(),
+                RenderPhase::<Transparent3d>::default(),
+            ));
         }
     }
 }
@@ -229,7 +298,14 @@ pub fn prepare_core_views_system(
     mut commands: Commands,
     mut texture_cache: ResMut<TextureCache>,
     render_device: Res<RenderDevice>,
-    views: Query<(Entity, &ExtractedView), With<RenderPhase<Transparent3d>>>,
+    views: Query<
+        (Entity, &ExtractedView),
+        (
+            With<RenderPhase<Opaque3d>>,
+            With<RenderPhase<AlphaMask3d>>,
+            With<RenderPhase<Transparent3d>>,
+        ),
+    >,
 ) {
     for (entity, view) in views.iter() {
         let cached_texture = texture_cache.get(
