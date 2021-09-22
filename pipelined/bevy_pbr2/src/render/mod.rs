@@ -221,9 +221,9 @@ impl FromWorld for PbrShaders {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(
-                            StandardMaterialUniformData::std140_size_static() as u64,
-                        ),
+                        // TODO: change this to StandardMaterialUniformData::std140_size_static once crevice fixes this!
+                        // Context: https://github.com/LPGhatguy/crevice/issues/29
+                        min_binding_size: BufferSize::new(64),
                     },
                     count: None,
                 },

@@ -15,7 +15,7 @@ use bevy_render2::{
 use crevice::std140::{AsStd140, Std140};
 use wgpu::{BindGroupDescriptor, BindGroupEntry, BindingResource};
 
-use crate::PbrShaders;
+use crate::{AlphaMode, PbrShaders};
 
 // NOTE: These must match the bit flags in bevy_pbr2/src/render/pbr.frag!
 bitflags::bitflags! {
@@ -27,6 +27,9 @@ bitflags::bitflags! {
         const OCCLUSION_TEXTURE          = (1 << 3);
         const DOUBLE_SIDED               = (1 << 4);
         const UNLIT                      = (1 << 5);
+        const ALPHA_MODE_OPAQUE          = (1 << 6);
+        const ALPHA_MODE_MASK            = (1 << 7);
+        const ALPHA_MODE_BLEND           = (1 << 8);
         const NONE                       = 0;
         const UNINITIALIZED              = 0xFFFF;
     }
@@ -62,6 +65,7 @@ pub struct StandardMaterial {
     pub occlusion_texture: Option<Handle<Image>>,
     pub double_sided: bool,
     pub unlit: bool,
+    pub alpha_mode: AlphaMode,
 }
 
 impl Default for StandardMaterial {
@@ -87,6 +91,7 @@ impl Default for StandardMaterial {
             occlusion_texture: None,
             double_sided: false,
             unlit: false,
+            alpha_mode: AlphaMode::Opaque,
         }
     }
 }
@@ -109,7 +114,7 @@ impl From<Handle<Image>> for StandardMaterial {
     }
 }
 
-#[derive(Clone, AsStd140)]
+#[derive(Clone, Default, AsStd140)]
 pub struct StandardMaterialUniformData {
     /// Doubles as diffuse albedo for non-metallic, specular for metallic and a mix for everything
     /// in between.
@@ -126,6 +131,13 @@ pub struct StandardMaterialUniformData {
     /// defaults to 0.5 which is mapped to 4% reflectance in the shader
     pub reflectance: f32,
     pub flags: u32,
+    /// When the alpha mode mask flag is set, any base color alpha above this cutoff means fully opaque,
+    /// and any below means fully transparent.
+    pub alpha_cutoff: f32,
+    // NOTE: Pad up to 16-byte alignment for WGSL
+    pub _padding0: f32,
+    pub _padding1: f32,
+    pub _padding2: f32,
 }
 
 pub struct StandardMaterialPlugin;
@@ -141,6 +153,8 @@ impl Plugin for StandardMaterialPlugin {
 pub struct GpuStandardMaterial {
     pub buffer: Buffer,
     pub bind_group: BindGroup,
+    pub base_color_texture: Option<Handle<Image>>,
+    pub alpha_mode: AlphaMode,
 }
 
 impl RenderAsset for StandardMaterial {
@@ -212,6 +226,17 @@ impl RenderAsset for StandardMaterial {
         if material.unlit {
             flags |= StandardMaterialFlags::UNLIT;
         }
+        // NOTE: 0.5 is from the glTF default - do we want this?
+        let mut alpha_cutoff = 0.5;
+        match material.alpha_mode {
+            AlphaMode::Opaque => flags |= StandardMaterialFlags::ALPHA_MODE_OPAQUE,
+            AlphaMode::Mask(c) => {
+                alpha_cutoff = c;
+                flags |= StandardMaterialFlags::ALPHA_MODE_MASK
+            }
+            AlphaMode::Blend => flags |= StandardMaterialFlags::ALPHA_MODE_BLEND,
+        };
+
         let value = StandardMaterialUniformData {
             base_color: material.base_color.as_rgba_linear().into(),
             emissive: material.emissive.into(),
@@ -219,6 +244,8 @@ impl RenderAsset for StandardMaterial {
             metallic: material.metallic,
             reflectance: material.reflectance,
             flags: flags.bits,
+            alpha_cutoff,
+            ..Default::default()
         };
         let value_std140 = value.as_std140();
 
@@ -270,7 +297,12 @@ impl RenderAsset for StandardMaterial {
             layout: &pbr_shaders.material_layout,
         });
 
-        Ok(GpuStandardMaterial { buffer, bind_group })
+        Ok(GpuStandardMaterial {
+            buffer,
+            bind_group,
+            base_color_texture: material.base_color_texture,
+            alpha_mode: material.alpha_mode,
+        })
     }
 }
 
