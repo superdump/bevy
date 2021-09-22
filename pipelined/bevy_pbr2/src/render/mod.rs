@@ -1,13 +1,12 @@
+mod depth_prepass;
 mod light;
 
+pub use depth_prepass::*;
 pub use light::*;
 
-use crate::{
-    NotShadowCaster, NotShadowReceiver, StandardMaterial, StandardMaterialUniformData,
-    PBR_SHADER_HANDLE,
-};
+use crate::{AlphaMode, NotShadowCaster, NotShadowReceiver, StandardMaterial, PBR_SHADER_HANDLE};
 use bevy_asset::Handle;
-use bevy_core_pipeline::{SetItemPipeline, Transparent3d};
+use bevy_core_pipeline::{AlphaMask3d, Opaque3d, SetItemPipeline, Transparent3d};
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemParamItem},
@@ -17,7 +16,9 @@ use bevy_render2::{
     mesh::Mesh,
     render_asset::RenderAssets,
     render_component::{ComponentUniforms, DynamicUniformIndex},
-    render_phase::{DrawFunctions, RenderCommand, RenderPhase, TrackedRenderPass},
+    render_phase::{
+        DrawFunctions, EntityPhaseItem, PhaseItem, RenderCommand, RenderPhase, TrackedRenderPass,
+    },
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
     texture::{BevyDefault, GpuImage, Image, TextureFormatPixelInfo},
@@ -426,6 +427,9 @@ bitflags::bitflags! {
         const NONE                        = 0;
         const VERTEX_TANGENTS             = (1 << 0);
         const STANDARDMATERIAL_NORMAL_MAP = (1 << 1);
+        const OPAQUE_MAIN_PASS            = (1 << 2);
+        const ALPHA_MASK_MAIN_PASS        = (1 << 3);
+        const TRANSPARENT_MAIN_PASS       = (1 << 4);
         const MSAA_RESERVED_BITS          = PbrPipelineKey::MSAA_MASK_BITS << PbrPipelineKey::MSAA_SHIFT_BITS;
     }
 }
@@ -511,6 +515,22 @@ impl SpecializedPipeline for PbrPipeline {
         if key.contains(PbrPipelineKey::STANDARDMATERIAL_NORMAL_MAP) {
             shader_defs.push(String::from("STANDARDMATERIAL_NORMAL_MAP"));
         }
+        let (label, blend, depth_compare) = if key.contains(PbrPipelineKey::TRANSPARENT_MAIN_PASS) {
+            (
+                Some("transparent_pbr_pipeline".into()),
+                Some(BlendState::ALPHA_BLENDING),
+                // For the transparent pass, fragments that are closer will be alpha blended
+                CompareFunction::Greater,
+            )
+        } else {
+            (
+                Some("opaque_pbr_pipeline".into()),
+                Some(BlendState::REPLACE),
+                // For the opaque and alpha mask passes, only the fragments at
+                // the depth buffer depth will be shaded
+                CompareFunction::Equal,
+            )
+        };
         RenderPipelineDescriptor {
             vertex: VertexState {
                 shader: PBR_SHADER_HANDLE.typed::<Shader>(),
@@ -528,18 +548,7 @@ impl SpecializedPipeline for PbrPipeline {
                 entry_point: "fragment".into(),
                 targets: vec![ColorTargetState {
                     format: TextureFormat::bevy_default(),
-                    blend: Some(BlendState {
-                        color: BlendComponent {
-                            src_factor: BlendFactor::SrcAlpha,
-                            dst_factor: BlendFactor::OneMinusSrcAlpha,
-                            operation: BlendOperation::Add,
-                        },
-                        alpha: BlendComponent {
-                            src_factor: BlendFactor::One,
-                            dst_factor: BlendFactor::One,
-                            operation: BlendOperation::Add,
-                        },
-                    }),
+                    blend,
                     write_mask: ColorWrites::ALL,
                 }],
             }),
@@ -559,8 +568,8 @@ impl SpecializedPipeline for PbrPipeline {
             },
             depth_stencil: Some(DepthStencilState {
                 format: TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::Greater,
+                depth_write_enabled: false,
+                depth_compare,
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -578,7 +587,7 @@ impl SpecializedPipeline for PbrPipeline {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            label: Some("pbr_pipeline".into()),
+            label,
         }
     }
 }
@@ -614,7 +623,9 @@ pub struct PbrViewBindGroup {
 #[allow(clippy::too_many_arguments)]
 pub fn queue_meshes(
     mut commands: Commands,
-    transparent_3d_draw_functions: Res<DrawFunctions<Transparent3d>>,
+    opaque_draw_functions: Res<DrawFunctions<Opaque3d>>,
+    alpha_mask_draw_functions: Res<DrawFunctions<AlphaMask3d>>,
+    transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
     render_device: Res<RenderDevice>,
     pbr_pipeline: Res<PbrPipeline>,
     shadow_pipeline: Res<ShadowPipeline>,
@@ -631,6 +642,8 @@ pub fn queue_meshes(
         &ExtractedView,
         &ViewLights,
         &VisibleEntities,
+        &mut RenderPhase<Opaque3d>,
+        &mut RenderPhase<AlphaMask3d>,
         &mut RenderPhase<Transparent3d>,
     )>,
 ) {
@@ -638,7 +651,15 @@ pub fn queue_meshes(
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
     ) {
-        for (entity, view, view_lights, visible_entities, mut transparent_phase) in views.iter_mut()
+        for (
+            entity,
+            view,
+            view_lights,
+            visible_entities,
+            mut opaque_phase,
+            mut alpha_mask_phase,
+            mut transparent_phase,
+        ) in views.iter_mut()
         {
             let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 entries: &[
@@ -681,43 +702,87 @@ pub fn queue_meshes(
                 value: view_bind_group,
             });
 
-            let draw_pbr = transparent_3d_draw_functions
-                .read()
-                .get_id::<DrawPbr>()
-                .unwrap();
+            let (draw_opaque_pbr, draw_alpha_mask_pbr, draw_transparent_pbr) = (
+                opaque_draw_functions.read().get_id::<DrawPbr>().unwrap(),
+                alpha_mask_draw_functions
+                    .read()
+                    .get_id::<DrawPbr>()
+                    .unwrap(),
+                transparent_draw_functions
+                    .read()
+                    .get_id::<DrawPbr>()
+                    .unwrap(),
+            );
 
-            let view_matrix = view.transform.compute_matrix();
-            let view_row_2 = view_matrix.row(2);
+            let inverse_view_matrix = view.transform.compute_matrix().inverse();
+            let inverse_view_row_2 = inverse_view_matrix.row(2);
 
             for visible_entity in &visible_entities.entities {
                 if let Ok((material_handle, mesh_handle, mesh_uniform)) =
                     standard_material_meshes.get(visible_entity.entity)
                 {
                     let mut key = PbrPipelineKey::from_msaa_samples(msaa.samples);
-                    if let Some(material) = render_materials.get(material_handle) {
+                    let alpha_mode = if let Some(material) = render_materials.get(material_handle) {
                         if material.has_normal_map {
                             key |= PbrPipelineKey::STANDARDMATERIAL_NORMAL_MAP;
                         }
+                        material.alpha_mode.clone()
                     } else {
                         continue;
-                    }
+                    };
                     if let Some(mesh) = render_meshes.get(mesh_handle) {
                         if mesh.has_tangents {
                             key |= PbrPipelineKey::VERTEX_TANGENTS;
                         }
                     }
+                    key |= match alpha_mode {
+                        AlphaMode::Opaque => PbrPipelineKey::OPAQUE_MAIN_PASS,
+                        AlphaMode::Mask(_) => PbrPipelineKey::ALPHA_MASK_MAIN_PASS,
+                        AlphaMode::Blend => PbrPipelineKey::TRANSPARENT_MAIN_PASS,
+                    };
                     let pipeline_id = pipelines.specialize(&mut pipeline_cache, &pbr_pipeline, key);
 
-                    // NOTE: row 2 of the view matrix dotted with column 3 of the model matrix
+                    // NOTE: row 2 of the inverse view matrix dotted with column 3 of the model matrix
                     // gives the z component of translation of the mesh in view space
-                    let mesh_z = view_row_2.dot(mesh_uniform.transform.col(3));
-                    // TODO: currently there is only "transparent phase". this should pick transparent vs opaque according to the mesh material
-                    transparent_phase.add(Transparent3d {
-                        entity: visible_entity.entity,
-                        draw_function: draw_pbr,
-                        pipeline: pipeline_id,
-                        distance: mesh_z,
-                    });
+                    let mesh_z = inverse_view_row_2.dot(mesh_uniform.transform.col(3));
+                    match alpha_mode {
+                        AlphaMode::Opaque => {
+                            opaque_phase.add(Opaque3d {
+                                entity: visible_entity.entity,
+                                draw_function: draw_opaque_pbr,
+                                pipeline: pipeline_id,
+                                // NOTE: Front-to-back ordering for opaque with ascending sort means near should have the
+                                //       lowest sort key and getting further away should increase. As we have
+                                //       -z in front of the camera, values in view space decrease away from the
+                                //       camera. Flipping the sign of mesh_z results in the correct front-to-back ordering
+                                distance: -mesh_z,
+                            });
+                        }
+                        AlphaMode::Mask(_) => {
+                            alpha_mask_phase.add(AlphaMask3d {
+                                entity: visible_entity.entity,
+                                draw_function: draw_alpha_mask_pbr,
+                                pipeline: pipeline_id,
+                                // NOTE: Front-to-back ordering for alpha mask with ascending sort means near should have the
+                                //       lowest sort key and getting further away should increase. As we have
+                                //       -z in front of the camera, values in view space decrease away from the
+                                //       camera. Flipping the sign of mesh_z results in the correct front-to-back ordering
+                                distance: -mesh_z,
+                            });
+                        }
+                        AlphaMode::Blend => {
+                            transparent_phase.add(Transparent3d {
+                                entity: visible_entity.entity,
+                                draw_function: draw_transparent_pbr,
+                                pipeline: pipeline_id,
+                                // NOTE: Back-to-front ordering for transparent with ascending sort means far should have the
+                                //       lowest sort key and getting closer should increase. As we have
+                                //       -z in front of the camera, the largest distance is -far with values increasing toward the
+                                //       camera. As such we can just use mesh_z as the distance
+                                distance: mesh_z,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -733,7 +798,7 @@ pub type DrawPbr = (
 );
 
 pub struct SetMeshViewBindGroup<const I: usize>;
-impl<const I: usize> RenderCommand<Transparent3d> for SetMeshViewBindGroup<I> {
+impl<T: PhaseItem, const I: usize> RenderCommand<T> for SetMeshViewBindGroup<I> {
     type Param = SQuery<(
         Read<ViewUniformOffset>,
         Read<ViewLights>,
@@ -742,7 +807,7 @@ impl<const I: usize> RenderCommand<Transparent3d> for SetMeshViewBindGroup<I> {
     #[inline]
     fn render<'w>(
         view: Entity,
-        _item: &Transparent3d,
+        _item: &T,
         view_query: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) {
@@ -756,7 +821,7 @@ impl<const I: usize> RenderCommand<Transparent3d> for SetMeshViewBindGroup<I> {
 }
 
 pub struct SetTransformBindGroup<const I: usize>;
-impl<const I: usize> RenderCommand<Transparent3d> for SetTransformBindGroup<I> {
+impl<T: EntityPhaseItem + PhaseItem, const I: usize> RenderCommand<T> for SetTransformBindGroup<I> {
     type Param = (
         SRes<TransformBindGroup>,
         SQuery<Read<DynamicUniformIndex<MeshUniform>>>,
@@ -764,11 +829,11 @@ impl<const I: usize> RenderCommand<Transparent3d> for SetTransformBindGroup<I> {
     #[inline]
     fn render<'w>(
         _view: Entity,
-        item: &Transparent3d,
+        item: &T,
         (transform_bind_group, mesh_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) {
-        let transform_index = mesh_query.get(item.entity).unwrap();
+        let transform_index = mesh_query.get(item.entity()).unwrap();
         pass.set_bind_group(
             I,
             &transform_bind_group.into_inner().value,
@@ -778,7 +843,9 @@ impl<const I: usize> RenderCommand<Transparent3d> for SetTransformBindGroup<I> {
 }
 
 pub struct SetStandardMaterialBindGroup<const I: usize>;
-impl<const I: usize> RenderCommand<Transparent3d> for SetStandardMaterialBindGroup<I> {
+impl<T: EntityPhaseItem + PhaseItem, const I: usize> RenderCommand<T>
+    for SetStandardMaterialBindGroup<I>
+{
     type Param = (
         SRes<RenderAssets<StandardMaterial>>,
         SQuery<Read<Handle<StandardMaterial>>>,
@@ -786,11 +853,11 @@ impl<const I: usize> RenderCommand<Transparent3d> for SetStandardMaterialBindGro
     #[inline]
     fn render<'w>(
         _view: Entity,
-        item: &Transparent3d,
+        item: &T,
         (materials, handle_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) {
-        let handle = handle_query.get(item.entity).unwrap();
+        let handle = handle_query.get(item.entity()).unwrap();
         let materials = materials.into_inner();
         let material = materials.get(handle).unwrap();
 
@@ -799,16 +866,16 @@ impl<const I: usize> RenderCommand<Transparent3d> for SetStandardMaterialBindGro
 }
 
 pub struct DrawMesh;
-impl RenderCommand<Transparent3d> for DrawMesh {
+impl<T: EntityPhaseItem + PhaseItem> RenderCommand<T> for DrawMesh {
     type Param = (SRes<RenderAssets<Mesh>>, SQuery<Read<Handle<Mesh>>>);
     #[inline]
     fn render<'w>(
         _view: Entity,
-        item: &Transparent3d,
+        item: &T,
         (meshes, mesh_query): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) {
-        let mesh_handle = mesh_query.get(item.entity).unwrap();
+        let mesh_handle = mesh_query.get(item.entity()).unwrap();
         let gpu_mesh = meshes.into_inner().get(mesh_handle).unwrap();
         pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
         if let Some(index_info) = &gpu_mesh.index_info {

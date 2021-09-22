@@ -26,6 +26,10 @@ pub trait PhaseItem: Send + Sync + 'static {
     fn draw_function(&self) -> DrawFunctionId;
 }
 
+pub trait EntityPhaseItem: Send + Sync + 'static {
+    fn entity(&self) -> Entity;
+}
+
 // TODO: make this generic?
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DrawFunctionId(usize);
