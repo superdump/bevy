@@ -304,7 +304,7 @@ impl RenderAsset for StandardMaterial {
     }
 }
 
-fn image_handle_to_view_sampler<'a>(
+pub fn image_handle_to_view_sampler<'a>(
     pbr_pipeline: &'a PbrShaders,
     gpu_images: &'a RenderAssets<Image>,
     handle_option: &Option<Handle<Image>>,
