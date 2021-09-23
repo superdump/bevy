@@ -23,6 +23,7 @@ pub struct PointLight {
     pub intensity: f32,
     pub range: f32,
     pub radius: f32,
+    pub shadows_enabled: bool,
     pub shadow_depth_bias: f32,
     /// A bias applied along the direction of the fragment's surface normal. It is scaled to the
     /// shadow map's texel size so that it can be small close to the camera and gets larger further
@@ -38,6 +39,7 @@ impl Default for PointLight {
             intensity: 800.0, // Roughly a 60W non-halogen incandescent bulb
             range: 20.0,
             radius: 0.0,
+            shadows_enabled: true,
             shadow_depth_bias: Self::DEFAULT_SHADOW_DEPTH_BIAS,
             shadow_normal_bias: Self::DEFAULT_SHADOW_NORMAL_BIAS,
         }
@@ -91,6 +93,7 @@ pub struct DirectionalLight {
     pub color: Color,
     /// Illuminance in lux
     pub illuminance: f32,
+    pub shadows_enabled: bool,
     pub shadow_projection: OrthographicProjection,
     pub shadow_depth_bias: f32,
     /// A bias applied along the direction of the fragment's surface normal. It is scaled to the
@@ -104,6 +107,7 @@ impl Default for DirectionalLight {
         DirectionalLight {
             color: Color::rgb(1.0, 1.0, 1.0),
             illuminance: 100000.0,
+            shadows_enabled: true,
             shadow_projection: OrthographicProjection {
                 left: -size,
                 right: size,

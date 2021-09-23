@@ -579,7 +579,7 @@ pub fn queue_meshes(
     mut views: Query<(
         Entity,
         &ExtractedView,
-        &ViewLights,
+        &ViewShadowBindings,
         &VisibleEntities,
         &mut RenderPhase<Opaque3d>,
         &mut RenderPhase<AlphaMask3d>,
@@ -593,7 +593,7 @@ pub fn queue_meshes(
         for (
             entity,
             view,
-            view_lights,
+            view_shadow_bindings,
             visible_entities,
             mut opaque_phase,
             mut alpha_mask_phase,
@@ -613,7 +613,7 @@ pub fn queue_meshes(
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::TextureView(
-                            &view_lights.point_light_depth_texture_view,
+                            &view_shadow_bindings.point_light_depth_texture_view,
                         ),
                     },
                     BindGroupEntry {
@@ -623,7 +623,7 @@ pub fn queue_meshes(
                     BindGroupEntry {
                         binding: 4,
                         resource: BindingResource::TextureView(
-                            &view_lights.directional_light_depth_texture_view,
+                            &view_shadow_bindings.directional_light_depth_texture_view,
                         ),
                     },
                     BindGroupEntry {
@@ -757,7 +757,7 @@ pub struct SetMeshViewBindGroup<const I: usize>;
 impl<T: PhaseItem, const I: usize> RenderCommand<T> for SetMeshViewBindGroup<I> {
     type Param = SQuery<(
         Read<ViewUniformOffset>,
-        Read<ViewLights>,
+        Read<ViewLightsUniformOffset>,
         Read<PbrViewBindGroup>,
     )>;
     #[inline]
@@ -771,7 +771,7 @@ impl<T: PhaseItem, const I: usize> RenderCommand<T> for SetMeshViewBindGroup<I> 
         pass.set_bind_group(
             I,
             &pbr_view_bind_group.value,
-            &[view_uniform.offset, view_lights.gpu_light_binding_index],
+            &[view_uniform.offset, view_lights.offset],
         );
     }
 }
