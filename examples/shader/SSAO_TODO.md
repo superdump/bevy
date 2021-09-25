@@ -1,0 +1,30 @@
+# SSAO TODO
+
+- [DONE] Check uniform names for textures and samplers
+- [DONE] Check that only render targets are listed as colour attachments
+- Depth / normal pre-pass
+  - [DONE] Add support for normal maps
+  - [DONE] Make _not_ a fullscreen pass node! 
+  - [DONE] Add this as a specific DepthNormalPrepass and add that component to all meshes to be Ssao:d
+  - [DONE] Needs to render all main pass meshes!
+  - [DONE] Add ViewInv3
+  - [DONE] Add ModelInvTrans3
+- SSAO pass
+  - Simplify inverse projections where possible to avoid mat4 * vec4 in inner-loop
+  - Generalise inverse projection to support any projection?
+  - [DONE] Add CameraProjection, InverseProjection
+  - [P1] Add texture width and height
+  - [DONE] Add calculation of a view ray
+  - [DONE] Finish calculating fragment view position from fragment coordinates and sampling the depth buffer
+  - [IN PROGRESS] Rotation noise
+    - [DONE] Generate random vectors in the shader
+    - Add rotation noise texture. 4x4 of vec2s for rotations about z in tangent space. Wrapping to repeat, nearest filtering.
+    - Pull in GlobalRenderResourcesNode and add support for textures. Follow the RenderResourcesNode or AssetRenderResourcesNode.
+  - [DONE] Move sample kernel to a uniform array
+- New main pass
+  - [DONE] Need to run main pass over same meshes but with different shaders
+  - [DONE] SSAO texture as uniform texture and sampler
+  - [P1] Load depth texture as depth stencil attachment, load, no store, equals, and a bias
+- [P1] Blur
+  - Use 2 passes based on x,y step in uniform
+  - [P2] Add tweaks to avoid blurring around corners / across large depth changes, i.e. discontinuities in depth or normal

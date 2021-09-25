@@ -1,0 +1,62 @@
+# TODO
+
+- regular and irregular (blue noise) percentage closer filtering for sampling shadow maps
+  - configurable kernel size / radius
+  - irregular sampling using tiled blue noise texture, r2 noise sample selection time-based offsetting (also for SSAO - make common somehow?)
+    - tiled 64x64 blue noise texture
+      - address mode repeat
+      - base noise texture uv for fragment = fragment uv * noise texture size / screen texture size
+    - noise texture sampling offset for sample M of N = R2(M)
+    - blue noise sampling position for sample M = base noise texture uv + noise texture sampling offset for sample M
+    - blueNoiseValue = fract(blueNoiseValue + (frameNumber % 64) * 0.618033988749895f);
+    - why take uv * texture size and cast to int? why isn't float uv and nearest sampling sufficient?
+  - PCF offsets are in shadow map texels
+- port bevy physical sky
+- fog stuff
+- pipelined-gltf pr
+  - try out sponza with a directional light that shines down the length of the open annex
+- add projection far to mesh_z for sorting
+- visibility
+  - bounding primitives
+  - frustum culling
+- directional shadows
+  - This article has details about how to identify the bounds of the orthographic projection https://docs.microsoft.com/en-gb/windows/win32/dxtecharts/common-techniques-to-improve-shadow-depth-maps
+  - cascade shadow maps
+    - https://docs.microsoft.com/en-us/windows/win32/dxtecharts/cascaded-shadow-maps
+    - FGED2
+    - configurable number of splits and manual split distances
+    - automatic splits using Sample Distribution Shadow Maps: https://software.intel.com/content/dam/develop/external/us/en/documents/sampledistributionshadowmaps-siggraph2010-notes-181237.pdf
+      - would work best with indirect draw calls generated on the GPU
+- percentage closer soft shadows
+  - add an area light?
+  - point light has radius already, use it
+  - directional light - could add radius and distance, e.g. sun radius and sun distance? but why not use a point light
+  - blocker search in shadow map space
+- [WAIT] fix point shadow cube map face orientations
+  - wait until biases and infinite reverse projection merged
+- [WAIT] constant and slope-scale bias configurable per-light and updateable
+  - waiting for now to not add complexity
+  - pipeline caching may be desirable for this because it's part of the pipeline configuration
+
+- ssao cached bind groups?
+- custom shader material
+  - shaders from assets
+  - [convenience] automatically reflect the shader layout
+  - [convenience] construct pipeline layout from vertex/fragment layouts
+  - manually configure the vertex buffer descriptors (why? doesn't reflection work? offsets hard-coded)
+  - manually configure properties of bindings that cannot be reflected
+  - [moved] [convenience] create the shader modules
+  - [convenience] configure the render pipeline descriptor with the depth stencil, color targets (hard-coded) and the pipeline layout and shader stages
+  - [convenience] create the pipeline from the pipeline descriptor
+  - initialise a dummy white texture for dummy bindings
+    - resource in render ecs?
+- have a look at modularity and implementing render feature plugins
+  - load shaders as assets
+  - how to handle shader to pipeline mapping and using a pipeline for a mesh?
+- discuss with cart about sorting and maybe implement it
+- colour tint
+  - copy of pbr shader that just multiplies in a per-object colour from an additional binding from a component
+
+## DONE
+- [DONE] SsaoConfig resource to uniform
+- [DONE] Blue noise texture
