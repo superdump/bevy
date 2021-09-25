@@ -249,7 +249,7 @@ impl FromWorld for PbrPipeline {
                 // PointLights
                 BindGroupLayoutEntry {
                     binding: 6,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -261,7 +261,7 @@ impl FromWorld for PbrPipeline {
                 // ClusteredLightIndexLists
                 BindGroupLayoutEntry {
                     binding: 7,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -273,7 +273,7 @@ impl FromWorld for PbrPipeline {
                 // ClusterOffsetsAndCounts
                 BindGroupLayoutEntry {
                     binding: 8,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -677,9 +677,11 @@ pub struct PbrViewBindGroup {
 #[allow(clippy::too_many_arguments)]
 pub fn queue_meshes(
     mut commands: Commands,
-    opaque_draw_functions: Res<DrawFunctions<Opaque3d>>,
-    alpha_mask_draw_functions: Res<DrawFunctions<AlphaMask3d>>,
-    transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
+    draw_functions: (
+        Res<DrawFunctions<Opaque3d>>,
+        Res<DrawFunctions<AlphaMask3d>>,
+        Res<DrawFunctions<Transparent3d>>,
+    ),
     render_device: Res<RenderDevice>,
     pbr_pipeline: Res<PbrPipeline>,
     shadow_pipeline: Res<ShadowPipeline>,
@@ -687,6 +689,7 @@ pub fn queue_meshes(
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     light_meta: Res<LightMeta>,
     msaa: Res<Msaa>,
+    global_light_meta: Res<GlobalLightMeta>,
     view_uniforms: Res<ViewUniforms>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderAssets<StandardMaterial>>,
@@ -695,20 +698,23 @@ pub fn queue_meshes(
         Entity,
         &ExtractedView,
         &ViewShadowBindings,
+        &ViewClusterBindings,
         &VisibleEntities,
         &mut RenderPhase<Opaque3d>,
         &mut RenderPhase<AlphaMask3d>,
         &mut RenderPhase<Transparent3d>,
     )>,
 ) {
-    if let (Some(view_binding), Some(light_binding)) = (
+    if let (Some(view_binding), Some(light_binding), Some(point_light_binding)) = (
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
+        global_light_meta.gpu_point_lights.binding(),
     ) {
         for (
             entity,
             view,
             view_shadow_bindings,
+            view_cluster_bindings,
             visible_entities,
             mut opaque_phase,
             mut alpha_mask_phase,
@@ -747,6 +753,24 @@ pub fn queue_meshes(
                             &shadow_pipeline.directional_light_sampler,
                         ),
                     },
+                    BindGroupEntry {
+                        binding: 6,
+                        resource: point_light_binding.clone(),
+                    },
+                    BindGroupEntry {
+                        binding: 7,
+                        resource: view_cluster_bindings
+                            .cluster_light_index_lists
+                            .binding()
+                            .unwrap(),
+                    },
+                    BindGroupEntry {
+                        binding: 8,
+                        resource: view_cluster_bindings
+                            .cluster_offsets_and_counts
+                            .binding()
+                            .unwrap(),
+                    },
                 ],
                 label: Some("pbr_view_bind_group"),
                 layout: &pbr_pipeline.view_layout,
@@ -756,22 +780,16 @@ pub fn queue_meshes(
                 value: view_bind_group,
             });
 
-            let draw_opaque_pbr = opaque_draw_functions.read().get_id::<DrawPbr>().unwrap();
-            let draw_alpha_mask_pbr = alpha_mask_draw_functions
-                .read()
-                .get_id::<DrawPbr>()
-                .unwrap();
-            let draw_transparent_pbr = transparent_draw_functions
-                .read()
-                .get_id::<DrawPbr>()
-                .unwrap();
+            let draw_opaque_pbr = draw_functions.0.read().get_id::<DrawPbr>().unwrap();
+            let draw_alpha_mask_pbr = draw_functions.1.read().get_id::<DrawPbr>().unwrap();
+            let draw_transparent_pbr = draw_functions.2.read().get_id::<DrawPbr>().unwrap();
 
             let inverse_view_matrix = view.transform.compute_matrix().inverse();
             let inverse_view_row_2 = inverse_view_matrix.row(2);
 
-            for visible_entity in &visible_entities.entities {
+            for visible_entity in visible_entities.entities.iter().copied() {
                 if let Ok((material_handle, mesh_handle, mesh_uniform)) =
-                    standard_material_meshes.get(visible_entity.entity)
+                    standard_material_meshes.get(visible_entity)
                 {
                     let mut key = PbrPipelineKey::from_msaa_samples(msaa.samples);
                     let alpha_mode = if let Some(material) = render_materials.get(material_handle) {
@@ -800,7 +818,7 @@ pub fn queue_meshes(
                     match alpha_mode {
                         AlphaMode::Opaque => {
                             opaque_phase.add(Opaque3d {
-                                entity: visible_entity.entity,
+                                entity: visible_entity,
                                 draw_function: draw_opaque_pbr,
                                 pipeline: pipeline_id,
                                 // NOTE: Front-to-back ordering for opaque with ascending sort means near should have the
@@ -812,7 +830,7 @@ pub fn queue_meshes(
                         }
                         AlphaMode::Mask(_) => {
                             alpha_mask_phase.add(AlphaMask3d {
-                                entity: visible_entity.entity,
+                                entity: visible_entity,
                                 draw_function: draw_alpha_mask_pbr,
                                 pipeline: pipeline_id,
                                 // NOTE: Front-to-back ordering for alpha mask with ascending sort means near should have the
@@ -824,7 +842,7 @@ pub fn queue_meshes(
                         }
                         AlphaMode::Blend => {
                             transparent_phase.add(Transparent3d {
-                                entity: visible_entity.entity,
+                                entity: visible_entity,
                                 draw_function: draw_transparent_pbr,
                                 pipeline: pipeline_id,
                                 // NOTE: Back-to-front ordering for transparent with ascending sort means far should have the

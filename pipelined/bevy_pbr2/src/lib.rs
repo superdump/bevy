@@ -50,7 +50,7 @@ impl Plugin for PbrPlugin {
         app.add_plugin(StandardMaterialPlugin)
             .add_plugin(ExtractComponentPlugin::<Handle<StandardMaterial>>::default())
             .add_plugin(UniformComponentPlugin::<MeshUniform>::default())
-            .init_resource::<AmbientLight>()
+            .init_resource::<VisiblePointLights>()
             .init_resource::<DirectionalLightShadowMap>()
             .init_resource::<PointLightShadowMap>()
             .init_resource::<AmbientLight>()
@@ -68,7 +68,7 @@ impl Plugin for PbrPlugin {
             )
             .add_system_to_stage(
                 CoreStage::PostUpdate,
-                check_light_visibility
+                check_light_mesh_visibility
                     .label(SimulationLightSystems::CheckLightVisibility)
                     .after(TransformSystem::TransformPropagate)
                     .after(VisibilitySystems::CalculateBounds)
@@ -107,6 +107,7 @@ impl Plugin for PbrPlugin {
                 .init_resource::<PbrPipeline>()
                 .init_resource::<ShadowPipeline>()
                 .init_resource::<DrawFunctions<Shadow>>()
+                .init_resource::<GlobalLightMeta>()
                 .init_resource::<LightMeta>()
                 .init_resource::<SpecializedPipelines<PbrPipeline>>()
                 .init_resource::<SpecializedPipelines<ShadowPipeline>>();
