@@ -608,6 +608,7 @@ pub fn queue_meshes(
     pbr_shaders: Res<PbrShaders>,
     shadow_shaders: Res<ShadowShaders>,
     light_meta: Res<LightMeta>,
+    global_light_meta: Res<GlobalLightMeta>,
     view_uniforms: Res<ViewUniforms>,
     render_materials: Res<RenderAssets<StandardMaterial>>,
     standard_material_meshes: Query<(&Handle<StandardMaterial>, &MeshUniform), With<Handle<Mesh>>>,
@@ -615,20 +616,23 @@ pub fn queue_meshes(
         Entity,
         &ExtractedView,
         &ViewShadowBindings,
+        &ViewClusterBindings,
         &VisibleEntities,
         &mut RenderPhase<Opaque3d>,
         &mut RenderPhase<AlphaMask3d>,
         &mut RenderPhase<Transparent3d>,
     )>,
 ) {
-    if let (Some(view_binding), Some(light_binding)) = (
+    if let (Some(view_binding), Some(light_binding), Some(point_light_binding)) = (
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
+        global_light_meta.gpu_point_lights.binding(),
     ) {
         for (
             entity,
             view,
             view_shadow_bindings,
+            view_cluster_bindings,
             visible_entities,
             mut opaque_phase,
             mut alpha_mask_phase,
@@ -667,6 +671,24 @@ pub fn queue_meshes(
                             &shadow_shaders.directional_light_sampler,
                         ),
                     },
+                    BindGroupEntry {
+                        binding: 6,
+                        resource: point_light_binding.clone(),
+                    },
+                    BindGroupEntry {
+                        binding: 7,
+                        resource: view_cluster_bindings
+                            .cluster_light_index_lists
+                            .binding()
+                            .unwrap(),
+                    },
+                    BindGroupEntry {
+                        binding: 8,
+                        resource: view_cluster_bindings
+                            .cluster_offsets_and_counts
+                            .binding()
+                            .unwrap(),
+                    },
                 ],
                 label: None,
                 layout: &pbr_shaders.view_layout,
@@ -691,9 +713,9 @@ pub fn queue_meshes(
             let inverse_view_matrix = view.transform.compute_matrix().inverse();
             let inverse_view_row_2 = inverse_view_matrix.row(2);
 
-            for visible_entity in &visible_entities.entities {
+            for visible_entity in visible_entities.entities.iter().copied() {
                 if let Ok((material_handle, mesh_uniform)) =
-                    standard_material_meshes.get(visible_entity.entity)
+                    standard_material_meshes.get(visible_entity)
                 {
                     if let Some(material) = render_materials.get(material_handle) {
                         // NOTE: row 2 of the inverse view matrix dotted with column 3 of the model matrix
@@ -710,14 +732,14 @@ pub fn queue_meshes(
                                 if material.alpha_mode == AlphaMode::Opaque {
                                     opaque_phase.add(Opaque3d {
                                         distance,
-                                        entity: visible_entity.entity,
+                                        entity: visible_entity,
                                         draw_function: draw_opaque_pbr,
                                     });
                                 } else {
                                     // Mask
                                     alpha_mask_phase.add(AlphaMask3d {
                                         distance,
-                                        entity: visible_entity.entity,
+                                        entity: visible_entity,
                                         draw_function: draw_alpha_mask_pbr,
                                     });
                                 }
@@ -730,7 +752,7 @@ pub fn queue_meshes(
                                 let distance = mesh_z;
                                 transparent_phase.add(Transparent3d {
                                     distance,
-                                    entity: visible_entity.entity,
+                                    entity: visible_entity,
                                     draw_function: draw_transparent_pbr,
                                 });
                             }

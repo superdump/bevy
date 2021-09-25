@@ -70,6 +70,10 @@ impl<T: AsStd140> UniformVec<T> {
         }
     }
 
+    pub fn get_mut(&mut self, index: usize) -> &mut T {
+        &mut self.values[index]
+    }
+
     pub fn reserve(&mut self, capacity: usize, device: &RenderDevice) {
         if capacity > self.capacity {
             self.capacity = capacity;
