@@ -685,7 +685,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             output_color.a);
 
         // Cluster allocation debug (using 'over' alpha blending)
-        let cluster_debug_mode = 2;
+        let cluster_debug_mode = 0;
         let cluster_overlay_alpha = 0.05;
         if (cluster_debug_mode == 1) {
             var z_slice: u32 = view_z_to_z_slice(view_z);
@@ -705,8 +705,8 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
                 + cluster_overlay_alpha * (1.0 - smoothStep(0.0, 16.0, f32(offset_and_count.count)));
         }
 
-        // tone_mapping
-        output_color = vec4<f32>(reinhard_luminance(output_color.rgb), output_color.a);
+        // tone_mapping (done later in the pipeline)
+        // output_color = vec4<f32>(reinhard_luminance(output_color.rgb), output_color.a);
         // Gamma correction.
         // Not needed with sRGB buffer
         // output_color.rgb = pow(output_color.rgb, vec3(1.0 / 2.2));

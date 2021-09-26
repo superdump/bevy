@@ -4,9 +4,7 @@ use bevy_ecs::prelude::World;
 use bevy_render2::{
     camera::{CameraPlugin, ExtractedCamera, ExtractedCameraNames},
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
-    render_resource::{
-        Extent3d, TextureDescriptor, TextureDimension, TextureUsage, TextureView,
-    },
+    render_resource::{Extent3d, TextureDescriptor, TextureDimension, TextureUsage, TextureView},
     renderer::RenderContext,
     view::ExtractedWindows,
 };
@@ -28,12 +26,13 @@ impl HdrTexture {
                 depth_or_array_layers: 1,
             },
             format: crate::HDR_FORMAT,
-            dimension: TextureDimension::D2, 
+            dimension: TextureDimension::D2,
             sample_count: 1,
             mip_level_count: 1,
             usage: TextureUsage::COPY_SRC
                 | TextureUsage::COPY_DST
-                | TextureUsage::RENDER_ATTACHMENT,
+                | TextureUsage::RENDER_ATTACHMENT
+				| TextureUsage::SAMPLED,
         });
 
         HdrTexture {
