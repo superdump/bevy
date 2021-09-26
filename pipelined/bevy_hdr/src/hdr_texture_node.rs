@@ -5,7 +5,7 @@ use bevy_render2::{
     camera::{CameraPlugin, ExtractedCamera, ExtractedCameraNames},
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
     render_resource::{
-        Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsage, TextureView,
+        Extent3d, TextureDescriptor, TextureDimension, TextureUsage, TextureView,
     },
     renderer::RenderContext,
     view::ExtractedWindows,
@@ -27,7 +27,7 @@ impl HdrTexture {
                 height,
                 depth_or_array_layers: 1,
             },
-            format: TextureFormat::Rgba16Float,
+            format: crate::HDR_FORMAT,
             dimension: TextureDimension::D2, 
             sample_count: 1,
             mip_level_count: 1,

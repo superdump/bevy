@@ -417,7 +417,7 @@ impl FromWorld for PbrShaders {
                 module: &shader_module,
                 entry_point: "fragment",
                 targets: &[ColorTargetState {
-                    format: TextureFormat::bevy_default(),
+                    format: bevy_hdr::HDR_FORMAT,
                     blend: Some(BlendState::REPLACE),
                     write_mask: ColorWrite::ALL,
                 }],
@@ -488,7 +488,7 @@ impl FromWorld for PbrShaders {
                     module: &shader_module,
                     entry_point: "fragment",
                     targets: &[ColorTargetState {
-                        format: TextureFormat::bevy_default(),
+                        format: bevy_hdr::HDR_FORMAT,
                         blend: Some(BlendState::ALPHA_BLENDING),
                         write_mask: ColorWrite::ALL,
                     }],
