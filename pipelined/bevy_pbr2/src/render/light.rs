@@ -4,13 +4,13 @@ use crate::{
 };
 use bevy_asset::Handle;
 use bevy_core::FloatOrd;
-use bevy_core_pipeline::Transparent3d;
+use bevy_core_pipeline::{Opaque3d, Transparent3d};
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemState},
 };
 use bevy_math::{
-    const_vec3, Mat4, UVec2, UVec3, UVec4, Vec2, Vec3, Vec3A, Vec3Swizzles, Vec4, Vec4Swizzles,
+    const_vec3, Mat4, UVec2, UVec3, UVec4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles,
 };
 use bevy_render2::{
     camera::{Camera, CameraProjection},
@@ -40,10 +40,15 @@ use std::{collections::HashSet, num::NonZeroU32};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum LightSystems {
+    AddClusters,
+    UpdateClusters,
+    AssignLightsToClusters,
     UpdateDirectionalLightFrusta,
     UpdatePointLightFrusta,
     CheckLightVisibility,
+    ExtractClusters,
     ExtractLights,
+    PrepareClusters,
     PrepareLights,
     QueueShadows,
 }
@@ -273,12 +278,18 @@ impl FromWorld for ShadowShaders {
     }
 }
 
+pub struct ExtractedClusterConfig {
+    /// Tile size
+    tile_size: UVec2,
+    /// Number of clusters in x / y / z in the view frustum
+    axis_slices: UVec3,
+}
+
 pub struct Clusters {
     /// Tile size
     tile_size: UVec2,
     /// Number of clusters in x / y / z in the view frustum
-    dimensions: UVec3,
-    // FIXME: Do we need to store these?
+    axis_slices: UVec3,
     aabbs: Vec<Aabb>,
     lights: Vec<VisiblePointLights>,
 }
@@ -287,7 +298,7 @@ impl Clusters {
     fn new(tile_size: UVec2, screen_size: UVec2, z_slices: u32) -> Self {
         let mut clusters = Self {
             tile_size,
-            dimensions: Default::default(),
+            axis_slices: Default::default(),
             aabbs: Default::default(),
             lights: Default::default(),
         };
@@ -297,7 +308,7 @@ impl Clusters {
 
     fn update(&mut self, tile_size: UVec2, screen_size: UVec2, z_slices: u32) {
         self.tile_size = tile_size;
-        self.dimensions = UVec3::new(
+        self.axis_slices = UVec3::new(
             (screen_size.x + 1) / tile_size.x,
             (screen_size.y + 1) / tile_size.y,
             z_slices,
@@ -364,13 +375,12 @@ fn compute_aabb_for_cluster(
 pub fn add_clusters(
     mut commands: Commands,
     windows: Res<Windows>,
-    cameras: Query<(Entity, &Camera), Without<Clusters>>,
+    cameras: Query<(Entity, &Camera), (With<Opaque3d>, Without<Clusters>)>,
 ) {
     for (entity, camera) in cameras.iter() {
         let window = windows.get(camera.window).unwrap();
-        // FIXME: Make clusters configurable? People can add the Clusters component manually I suppose.
         commands.entity(entity).insert(Clusters::new(
-            UVec2::splat(1920 / 16),
+            UVec2::splat(window.physical_width() / 16),
             UVec2::new(window.physical_width(), window.physical_height()),
             24,
         ));
@@ -385,11 +395,11 @@ pub fn update_clusters(windows: Res<Windows>, mut views: Query<(&Camera, &mut Cl
         let screen_size = screen_size_u32.as_f32();
         let tile_size_u32 = clusters.tile_size;
         let tile_size = tile_size_u32.as_f32();
-        let z_slices = clusters.dimensions.z;
+        let z_slices = clusters.axis_slices.z;
         clusters.update(tile_size_u32, screen_size_u32, z_slices);
         println!(
             "Cluster configuration: {:?} {:?}",
-            clusters.tile_size, clusters.dimensions
+            clusters.tile_size, clusters.axis_slices
         );
 
         // Calculate view space AABBs
@@ -398,11 +408,11 @@ pub fn update_clusters(windows: Res<Windows>, mut views: Query<(&Camera, &mut Cl
         // I choose to scan along rows of tiles in x,y, and for each tile then scan
         // along z
         let mut aabbs = Vec::with_capacity(
-            (clusters.dimensions.y * clusters.dimensions.x * clusters.dimensions.z) as usize,
+            (clusters.axis_slices.y * clusters.axis_slices.x * clusters.axis_slices.z) as usize,
         );
-        for y in 0..clusters.dimensions.y {
-            for x in 0..clusters.dimensions.x {
-                for z in 0..clusters.dimensions.z {
+        for y in 0..clusters.axis_slices.y {
+            for x in 0..clusters.axis_slices.x {
+                for z in 0..clusters.axis_slices.z {
                     // FIXME: Make independent of screen size by dropping tile size and just using i / dim.x?
                     aabbs.push(compute_aabb_for_cluster(
                         camera.near,
@@ -410,7 +420,7 @@ pub fn update_clusters(windows: Res<Windows>, mut views: Query<(&Camera, &mut Cl
                         tile_size,
                         screen_size,
                         inverse_projection,
-                        clusters.dimensions,
+                        clusters.axis_slices,
                         UVec3::new(x, y, z),
                     ));
                 }
@@ -681,7 +691,10 @@ pub fn check_light_mesh_visibility(
 pub type ExtractedClustersPointLights = Vec<VisiblePointLights>;
 pub fn extract_clusters(mut commands: Commands, views: Query<(Entity, &Clusters), With<Camera>>) {
     for (entity, clusters) in views.iter() {
-        commands.entity(entity).insert(clusters.lights.clone());
+        commands.entity(entity).insert_bundle((
+            clusters.lights.clone(),
+            ExtractedClusterConfig { tile_size: clusters.tile_size, axis_slices: clusters.axis_slices },
+        ));
     }
 }
 
@@ -969,7 +982,7 @@ pub fn prepare_lights(
         let mut gpu_lights = GpuLights {
             directional_lights: [GpuDirectionalLight::default(); MAX_DIRECTIONAL_LIGHTS],
             ambient_color: ambient_color.into(),
-            cluster_dimensions: clusters.dimensions.extend(0),
+            cluster_dimensions: clusters.axis_slices.extend(0),
             n_directional_lights: directional_lights.iter().len() as u32,
         };
 
@@ -1211,19 +1224,19 @@ pub fn prepare_clusters(
     render_queue: Res<RenderQueue>,
     global_light_meta: Res<GlobalLightMeta>,
     views: Query<
-        (Entity, &Clusters, &ExtractedClustersPointLights),
+        (Entity, &ExtractedClusterConfig, &ExtractedClustersPointLights),
         With<RenderPhase<Transparent3d>>,
     >,
 ) {
-    for (entity, clusters, extracted_clusters) in views.iter() {
+    for (entity, cluster_config, extracted_clusters) in views.iter() {
         let mut view_clusters_bindings = ViewClusterBindings::default();
 
         let mut cluster_index = 0;
-        for y in 0..clusters.dimensions.y {
-            for x in 0..clusters.dimensions.x {
-                for z in 0..clusters.dimensions.z {
+        for y in 0..cluster_config.axis_slices.y {
+            for x in 0..cluster_config.axis_slices.x {
+                for z in 0..cluster_config.axis_slices.z {
                     let offset = view_clusters_bindings.n_indices();
-                    let cluster_lights = &clusters.lights[cluster_index];
+                    let cluster_lights = &extracted_clusters[cluster_index];
                     let count = cluster_lights.len();
                     view_clusters_bindings.push_offset_and_count(offset, count);
 
