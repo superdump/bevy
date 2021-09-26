@@ -9,9 +9,13 @@ use bevy_render2::{
 
 pub struct MainPassDriverNode;
 
+impl MainPassDriverNode {
+    pub const HDR_TARGET: &'static str = "hdr_target";
+}
+
 impl Node for MainPassDriverNode {
     fn input(&self) -> Vec<SlotInfo> {
-        vec![SlotInfo::new("hdr_target", SlotType::TextureView)]
+        vec![SlotInfo::new(Self::HDR_TARGET, SlotType::TextureView)]
     }
 
     fn run(
@@ -42,7 +46,7 @@ impl Node for MainPassDriverNode {
 
         if let Some(camera_3d) = extracted_cameras.entities.get(CameraPlugin::CAMERA_3D) {
             let depth_texture = world.entity(*camera_3d).get::<ViewDepthTexture>().unwrap();
-            let hdr_target = graph.get_input_texture("hdr_target").unwrap().clone();
+            let hdr_target = graph.get_input_texture(Self::HDR_TARGET).unwrap().clone();
             graph.run_sub_graph(
                 crate::draw_3d_graph::NAME,
                 vec![
