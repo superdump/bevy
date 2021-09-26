@@ -1,7 +1,7 @@
 use crate::{
     AmbientLight, Clusters, CubemapVisibleEntities, DirectionalLight, DirectionalLightShadowMap,
-    ExtractedClustersPointLights, MeshUniform, NotShadowCaster, PbrPipeline, PointLight,
-    PointLightShadowMap, TransformBindGroup, VisiblePointLights, SHADOW_SHADER_HANDLE,
+    MeshUniform, NotShadowCaster, PbrPipeline, PointLight, PointLightShadowMap, TransformBindGroup,
+    VisiblePointLights, SHADOW_SHADER_HANDLE,
 };
 use bevy_asset::Handle;
 use bevy_core::FloatOrd;
@@ -10,9 +10,9 @@ use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemState},
 };
-use bevy_math::{const_vec3, Mat4, UVec4, Vec3, Vec4};
+use bevy_math::{const_vec3, Mat4, UVec2, UVec3, UVec4, Vec3, Vec4};
 use bevy_render2::{
-    camera::CameraProjection,
+    camera::{Camera, CameraProjection},
     color::Color,
     mesh::Mesh,
     render_asset::RenderAssets,
@@ -33,7 +33,9 @@ use std::num::NonZeroU32;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum RenderLightSystems {
+    ExtractClusters,
     ExtractLights,
+    PrepareClusters,
     PrepareLights,
     QueueShadows,
 }
@@ -304,6 +306,26 @@ impl SpecializedPipeline for ShadowPipeline {
             multisample: MultisampleState::default(),
             label: Some("shadow_pipeline".into()),
         }
+    }
+}
+
+pub struct ExtractedClusterConfig {
+    /// Tile size
+    tile_size: UVec2,
+    /// Number of clusters in x / y / z in the view frustum
+    axis_slices: UVec3,
+}
+
+pub type ExtractedClustersPointLights = Vec<VisiblePointLights>;
+pub fn extract_clusters(mut commands: Commands, views: Query<(Entity, &Clusters), With<Camera>>) {
+    for (entity, clusters) in views.iter() {
+        commands.entity(entity).insert_bundle((
+            clusters.lights.clone(),
+            ExtractedClusterConfig {
+                tile_size: clusters.tile_size,
+                axis_slices: clusters.axis_slices,
+            },
+        ));
     }
 }
 
@@ -595,7 +617,7 @@ pub fn prepare_lights(
         let mut gpu_lights = GpuLights {
             directional_lights: [GpuDirectionalLight::default(); MAX_DIRECTIONAL_LIGHTS],
             ambient_color: ambient_color.into(),
-            cluster_dimensions: clusters.dimensions.extend(0),
+            cluster_dimensions: clusters.axis_slices.extend(0),
             n_directional_lights: directional_lights.iter().len() as u32,
         };
 
@@ -844,19 +866,23 @@ pub fn prepare_clusters(
     render_queue: Res<RenderQueue>,
     global_light_meta: Res<GlobalLightMeta>,
     views: Query<
-        (Entity, &Clusters, &ExtractedClustersPointLights),
+        (
+            Entity,
+            &ExtractedClusterConfig,
+            &ExtractedClustersPointLights,
+        ),
         With<RenderPhase<Transparent3d>>,
     >,
 ) {
-    for (entity, clusters, extracted_clusters) in views.iter() {
+    for (entity, cluster_config, extracted_clusters) in views.iter() {
         let mut view_clusters_bindings = ViewClusterBindings::default();
 
         let mut cluster_index = 0;
-        for y in 0..clusters.dimensions.y {
-            for x in 0..clusters.dimensions.x {
-                for z in 0..clusters.dimensions.z {
+        for _y in 0..cluster_config.axis_slices.y {
+            for _x in 0..cluster_config.axis_slices.x {
+                for _z in 0..cluster_config.axis_slices.z {
                     let offset = view_clusters_bindings.n_indices();
-                    let cluster_lights = &clusters.lights[cluster_index];
+                    let cluster_lights = &extracted_clusters[cluster_index];
                     let count = cluster_lights.len();
                     view_clusters_bindings.push_offset_and_count(offset, count);
 
