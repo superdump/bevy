@@ -26,27 +26,60 @@ var hdr_target: texture_2d<f32>;
 [[group(0), binding(1)]]
 var hdr_target_sampler: sampler;
 
-// luminance coefficients from Rec. 709.
-// https://en.wikipedia.org/wiki/Rec._709
-fn luminance(v: vec3<f32>) -> f32 {
-    return dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
+fn tonemap_aces(x: f32) -> f32 {
+    // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
+    let a = 2.51;
+    let b = 0.03; 
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return (x * (a * x + b)) / (x * (c * x + d) + e);
+} 
+
+let RGBTOXYZ: mat3x3<f32> = mat3x3<f32>(
+	vec3<f32>(0.4124564, 0.2126729, 0.0193339),
+	vec3<f32>(0.3575761, 0.7151522, 0.1191920),
+	vec3<f32>(0.1804375, 0.0721750, 0.9503041),
+);
+
+let XYZTORGB: mat3x3<f32> = mat3x3<f32>(
+	vec3<f32>(3.2404542, -0.9692660, 0.0556434),
+	vec3<f32>(-1.5371385, 1.8760108, -0.2040259),
+	vec3<f32>(-0.4985314, 0.0415560, 1.0572252),
+);
+
+fn rgb_to_yxy(rgb: vec3<f32>) -> vec3<f32> {
+	let xyz = RGBTOXYZ * rgb;
+
+	let x = xyz.r / (xyz.r + xyz.g + xyz.b);
+	let y = xyz.g / (xyz.r + xyz.g + xyz.b);
+
+	return vec3<f32>(xyz.g, x, y);
 }
 
-fn change_luminance(c_in: vec3<f32>, l_out: f32) -> vec3<f32> {
-    let l_in = luminance(c_in);
-    return c_in * (l_out / l_in);
+fn yxy_to_rgb(yxy: vec3<f32>) -> vec3<f32> {
+	let xyz = vec3<f32>(
+		yxy.r * yxy.g / yxy.b,
+		yxy.r,
+		(1.0 - yxy.g -  yxy.b) * (yxy.r / yxy.b),
+	);
+
+	return XYZTORGB * xyz;
 }
 
-fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
-    let l_old = luminance(color);
-    let l_new = l_old / (1.0f + l_old);
-    return change_luminance(color, l_new);
+fn gamma_correct(rgb: vec3<f32>) -> vec3<f32> {
+	return pow(rgb, vec3<f32>(1.0/2.2));
 }
 
 [[stage(fragment)]]
 fn main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 	let color = textureSample(hdr_target, hdr_target_sampler, in.uv);
 
-	return vec4<f32>(reinhard_luminance(color.rgb), color.a);
-	//return color;
+	var yxy: vec3<f32> = rgb_to_yxy(color.rgb);
+
+	yxy = vec3<f32>(tonemap_aces(yxy.r), yxy.gb);
+
+	let rgb = yxy_to_rgb(yxy);
+
+	return vec4<f32>(rgb, color.a);
 }

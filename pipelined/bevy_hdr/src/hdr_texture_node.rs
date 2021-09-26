@@ -32,7 +32,7 @@ impl HdrTexture {
             usage: TextureUsage::COPY_SRC
                 | TextureUsage::COPY_DST
                 | TextureUsage::RENDER_ATTACHMENT
-				| TextureUsage::SAMPLED,
+                | TextureUsage::SAMPLED,
         });
 
         HdrTexture {
@@ -81,7 +81,7 @@ impl Node for HdrTextureNode {
                 )
             });
 
-            if hdr_texture.width != extracted_window.physical_height
+            if hdr_texture.width != extracted_window.physical_width
                 || hdr_texture.height != extracted_window.physical_height
             {
                 *hdr_texture = HdrTexture::new(

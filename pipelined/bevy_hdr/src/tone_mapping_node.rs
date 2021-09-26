@@ -161,7 +161,7 @@ impl Node for ToneMappingNode {
                         ],
                     },
                 ));
-            } 
+            }
 
             let mut render_pass =
                 render_context
