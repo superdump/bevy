@@ -434,9 +434,9 @@ pub fn queue_depth_prepass_meshes(
             let inverse_view_matrix = view.transform.compute_matrix().inverse();
             let inverse_view_row_2 = inverse_view_matrix.row(2);
 
-            for visible_entity in &visible_entities.entities {
+            for visible_entity in visible_entities.entities.iter().copied() {
                 if let Ok((material_handle, mesh_uniform)) =
-                    standard_material_meshes.get(visible_entity.entity)
+                    standard_material_meshes.get(visible_entity)
                 {
                     if let Some(material) = render_materials.get(material_handle) {
                         if !depth_prepass_material_meta.contains_key(material_handle) {
@@ -488,14 +488,14 @@ pub fn queue_depth_prepass_meshes(
                             AlphaMode::Opaque => {
                                 opaque_depth_phase.add(OpaqueDepth3d {
                                     distance,
-                                    entity: visible_entity.entity,
+                                    entity: visible_entity,
                                     draw_function: draw_opaque_depth,
                                 });
                             }
                             AlphaMode::Mask(_) => {
                                 alpha_mask_depth_phase.add(AlphaMaskDepth3d {
                                     distance,
-                                    entity: visible_entity.entity,
+                                    entity: visible_entity,
                                     draw_function: draw_alpha_mask_depth,
                                 });
                             }

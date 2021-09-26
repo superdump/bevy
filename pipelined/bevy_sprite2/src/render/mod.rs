@@ -349,8 +349,8 @@ pub fn queue_sprites(
         }));
         let draw_sprite_function = draw_functions.read().get_id::<DrawSprite>().unwrap();
         for (visible_entities, mut transparent_phase) in views.iter_mut() {
-            for visible_entity in visible_entities.iter() {
-                if let Ok(sprite) = extracted_sprites.get(visible_entity.entity) {
+            for visible_entity in visible_entities.iter().copied() {
+                if let Ok(sprite) = extracted_sprites.get(visible_entity) {
                     image_bind_groups
                         .values
                         .entry(sprite.handle.clone_weak())
@@ -375,7 +375,7 @@ pub fn queue_sprites(
                         });
                     transparent_phase.add(Transparent2d {
                         draw_function: draw_sprite_function,
-                        entity: visible_entity.entity,
+                        entity: visible_entity,
                         sort_key: sprite.handle.clone_weak(),
                     });
                 }
