@@ -98,6 +98,7 @@ Example | File | Description
 --- | --- | ---
 `3d_scene` | [`3d/3d_scene.rs`](./3d/3d_scene.rs) | Simple 3D scene with basic shapes and lighting
 `3d_scene_pipelined` | [`3d/3d_scene_pipelined.rs`](./3d/3d_scene_pipelined.rs) | Simple 3D scene with basic shapes and lighting
+`3d_scene_pipelined_bloom` | [`3d/3d_scene_pipelined_bloom.rs`](./3d/3d_scene_pipelined_bloom.rs) | Simple 3D scene with emissive objects and bloom
 `cornell_box_pipelined` | [`3d/cornell_box_pipelined.rs`](./3d/cornell_box_pipelined.rs) | Re-production of the cornell box
 `load_gltf` | [`3d/load_gltf.rs`](./3d/load_gltf.rs) | Loads and renders a gltf file as a scene
 `load_gltf_pipelined` | [`3d/load_gltf_pipelined.rs`](./3d/load_gltf_pipelined.rs) | Loads and renders a gltf file as a scene
