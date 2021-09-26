@@ -31,7 +31,8 @@ impl HdrTexture {
             mip_level_count: 1,
             usage: TextureUsages::COPY_SRC
                 | TextureUsages::COPY_DST
-                | TextureUsages::RENDER_ATTACHMENT,
+                | TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING,
         });
 
         HdrTexture {

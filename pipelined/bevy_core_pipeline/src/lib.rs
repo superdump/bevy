@@ -2,7 +2,7 @@ mod main_pass_2d;
 mod main_pass_3d;
 mod main_pass_driver;
 
-use bevy_hdr::HdrTextureNode;
+use bevy_hdr::{HdrTextureNode, ToneMappingNode};
 pub use main_pass_2d::*;
 pub use main_pass_3d::*;
 pub use main_pass_driver::*;
@@ -45,6 +45,7 @@ pub mod node {
     pub const MAIN_PASS_DRIVER: &str = "main_pass_driver";
     pub const VIEW: &str = "view";
     pub const HDR_TEXTURE: &str = "hdr_texture";
+    pub const TONE_MAPPING: &str = "tone_mapping";
 }
 
 pub mod draw_2d_graph {
@@ -164,6 +165,16 @@ impl Plugin for CorePipelinePlugin {
                 HdrTextureNode::HDR_TARGET,
                 node::MAIN_PASS_DRIVER,
                 MainPassDriverNode::HDR_TARGET,
+            )
+            .unwrap();
+
+        graph.add_node(node::TONE_MAPPING, ToneMappingNode::default());
+        graph
+            .add_slot_edge(
+                node::HDR_TEXTURE,
+                HdrTextureNode::HDR_TARGET,
+                node::TONE_MAPPING,
+                ToneMappingNode::HDR_TARGET,
             )
             .unwrap();
     }
