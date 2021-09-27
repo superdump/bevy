@@ -162,3 +162,4 @@ fn up_sample_final(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 
 	return vec4<f32>(s.rgb / 16.0, 1.0);
 }
+
