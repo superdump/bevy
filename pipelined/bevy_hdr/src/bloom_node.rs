@@ -5,14 +5,15 @@ use bevy_render2::{
     camera::{CameraPlugin, ExtractedCamera, ExtractedCameraNames},
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
     render_resource::{
-        BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-        BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferBindingType,
-        BufferUsage, ColorTargetState, ColorWrite, Extent3d, Face,
-        FilterMode, FragmentState, LoadOp, Operations, PipelineLayoutDescriptor, PrimitiveState,
-        RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor,
-        Sampler, SamplerDescriptor, ShaderModule, ShaderStage, Texture, TextureDescriptor,
-        TextureDimension, TextureSampleType, TextureUsage, TextureView, TextureViewDescriptor,
-        TextureViewDimension, TextureViewId, VertexState, AddressMode, BlendComponent, BlendFactor, BlendOperation, BlendState
+        AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
+        BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
+        BlendComponent, BlendFactor, BlendOperation, BlendState, Buffer, BufferBindingType,
+        BufferUsage, ColorTargetState, ColorWrite, Extent3d, Face, FilterMode, FragmentState,
+        LoadOp, Operations, PipelineLayoutDescriptor, PrimitiveState, RenderPassColorAttachment,
+        RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerDescriptor,
+        ShaderModule, ShaderStage, Texture, TextureDescriptor, TextureDimension, TextureSampleType,
+        TextureUsage, TextureView, TextureViewDescriptor, TextureViewDimension, TextureViewId,
+        VertexState,
     },
     renderer::{RenderContext, RenderDevice, RenderQueue},
     shader::Shader,
@@ -380,7 +381,7 @@ impl MipChain {
         let mut up_sampling_bind_groups = Vec::new();
 
         for mip in 1..mips {
-			let up = tex_a.create_view(&TextureViewDescriptor {
+            let up = tex_a.create_view(&TextureViewDescriptor {
                 label: None,
                 base_mip_level: mip - 1,
                 mip_level_count: Some(unsafe { NonZeroU32::new_unchecked(1) }),
@@ -394,7 +395,7 @@ impl MipChain {
                 base_mip_level: mip,
                 mip_level_count: Some(unsafe { NonZeroU32::new_unchecked(1) }),
                 ..Default::default()
-            }); 
+            });
 
             let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 label: Some("bloom_up_sampling_bind_group"),
@@ -473,22 +474,22 @@ struct Uniforms {
 
 #[derive(Clone, Debug)]
 pub struct BloomSettings {
-	pub enabled: bool,
-	pub threshold: f32,
-	pub knee: f32,
-	pub up_sample_scale: f32,
+    pub enabled: bool,
+    pub threshold: f32,
+    pub knee: f32,
+    pub up_sample_scale: f32,
 }
 
 impl Default for BloomSettings {
-	#[inline]
-	fn default() -> Self {
-		Self {
-			enabled: true,
-			threshold: 1.0,
-			knee: 0.1,
-			up_sample_scale: 1.0,
-		}	
-	}
+    #[inline]
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            threshold: 1.0,
+            knee: 0.1,
+            up_sample_scale: 1.0,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -512,7 +513,7 @@ impl Node for BloomNode {
             world.insert_resource(bloom_shaders);
         }
 
-		world.get_resource_or_insert_with(BloomSettings::default);
+        world.get_resource_or_insert_with(BloomSettings::default);
 
         if self.uniforms_buffer.is_none() {
             let render_device = world.get_resource::<RenderDevice>().unwrap();
@@ -520,9 +521,9 @@ impl Node for BloomNode {
             let buffer = render_device.create_buffer(&BufferDescriptor {
                 label: Some("bloom_uniforms_buffer"),
                 size: std::mem::size_of::<Uniforms>() as u64,
-				mapped_at_creation: false,
+                mapped_at_creation: false,
                 usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
-            }); 
+            });
 
             self.uniforms_buffer = Some(buffer);
         }
@@ -543,11 +544,11 @@ impl Node for BloomNode {
             let extracted_window = extracted_windows.get(&extracted_camera.window_id).unwrap();
 
             let render_queue = world.get_resource::<RenderQueue>().unwrap();
-			let settings = world.get_resource::<BloomSettings>().unwrap();
+            let settings = world.get_resource::<BloomSettings>().unwrap();
 
-			if !settings.enabled {
-				return Ok(());
-			}
+            if !settings.enabled {
+                return Ok(());
+            }
 
             let hdr_target = graph.get_input_texture(Self::HDR_TARGET)?;
 
@@ -587,7 +588,7 @@ impl Node for BloomNode {
 
             let uniforms = Uniforms {
                 threshold: settings.threshold,
-                knee: settings.knee, 
+                knee: settings.knee,
                 scale: settings.up_sample_scale * mip_chain.scale,
             };
 

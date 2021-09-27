@@ -3,10 +3,7 @@ use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     ecs::prelude::*,
     math::Vec3,
-    pbr2::{
-        PbrBundle,
-        StandardMaterial,
-    },
+    pbr2::{PbrBundle, StandardMaterial},
     prelude::{App, Assets, Transform},
     render2::{
         camera::PerspectiveCameraBundle,
