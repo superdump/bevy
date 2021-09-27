@@ -42,6 +42,7 @@ impl Plugin for PbrPlugin {
             .init_resource::<DirectionalLightShadowMap>()
             .init_resource::<PointLightShadowMap>()
             .init_resource::<AmbientLight>()
+            .init_resource::<VisiblePointLights>()
             .add_system_to_stage(
                 CoreStage::PostUpdate,
                 render::add_clusters
@@ -129,7 +130,8 @@ impl Plugin for PbrPlugin {
                 .init_resource::<PbrShaders>()
                 .init_resource::<ShadowShaders>()
                 .init_resource::<DrawFunctions<Shadow>>()
-                .init_resource::<LightMeta>();
+                .init_resource::<LightMeta>()
+                .init_resource::<GlobalLightMeta>();
 
             let draw_shadow_mesh = DrawShadowMesh::new(&mut render_app.world);
             let shadow_pass_node = ShadowPassNode::new(&mut render_app.world);

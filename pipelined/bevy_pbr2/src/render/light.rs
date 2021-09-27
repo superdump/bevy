@@ -143,7 +143,7 @@ pub struct GpuLights {
 }
 
 // NOTE: this must be kept in sync with the same constants in pbr.frag
-pub const MAX_POINT_LIGHTS: usize = 10;
+pub const MAX_POINT_LIGHTS: usize = 128;
 pub const MAX_DIRECTIONAL_LIGHTS: usize = 1;
 pub const POINT_SHADOW_LAYERS: u32 = (6 * MAX_POINT_LIGHTS) as u32;
 pub const DIRECTIONAL_SHADOW_LAYERS: u32 = MAX_DIRECTIONAL_LIGHTS as u32;
@@ -541,7 +541,9 @@ pub fn update_point_light_frusta(
 }
 
 pub fn check_light_mesh_visibility(
-    visible_point_lights: Query<&VisiblePointLights>,
+    // NOTE: VisiblePointLights is an alias for VisibleEntities so the Without<DirectionalLight>
+    //       is needed to avoid an unnecessary QuerySet
+    visible_point_lights: Query<&VisiblePointLights, Without<DirectionalLight>>,
     mut point_lights: Query<(
         &PointLight,
         &GlobalTransform,
@@ -693,7 +695,10 @@ pub fn extract_clusters(mut commands: Commands, views: Query<(Entity, &Clusters)
     for (entity, clusters) in views.iter() {
         commands.entity(entity).insert_bundle((
             clusters.lights.clone(),
-            ExtractedClusterConfig { tile_size: clusters.tile_size, axis_slices: clusters.axis_slices },
+            ExtractedClusterConfig {
+                tile_size: clusters.tile_size,
+                axis_slices: clusters.axis_slices,
+            },
         ));
     }
 }
@@ -865,6 +870,7 @@ pub struct ViewLightsUniformOffset {
     pub offset: u32,
 }
 
+#[derive(Default)]
 pub struct GlobalLightMeta {
     pub gpu_point_lights: UniformVec<GpuPointLight>,
     pub entity_to_index: HashMap<Entity, usize>,
@@ -910,10 +916,12 @@ pub fn prepare_lights(
         .map(|CubeMapFace { target, up }| GlobalTransform::identity().looking_at(*target, *up))
         .collect::<Vec<_>>();
 
-    let n_point_lights = point_lights.iter().count();
+    // NOTE: Because gpu_point_lights is a uniform buffer and we can have _up to_ MAX_POINT_LIGHTS
+    //       but we don't know how many we will have, the buffer must always be MAX_POINT_LIGHTS large
     global_light_meta
         .gpu_point_lights
-        .reserve_and_clear(n_point_lights, &render_device);
+        .reserve_and_clear(MAX_POINT_LIGHTS, &render_device);
+    let n_point_lights = point_lights.iter().count();
     global_light_meta.entity_to_index.clear();
     if global_light_meta.entity_to_index.capacity() < n_point_lights {
         global_light_meta.entity_to_index.reserve(n_point_lights);
@@ -938,6 +946,11 @@ pub fn prepare_lights(
             shadow_normal_bias: light.shadow_normal_bias,
         });
         global_light_meta.entity_to_index.insert(entity, index);
+    }
+    for _ in n_point_lights..MAX_POINT_LIGHTS {
+        global_light_meta
+            .gpu_point_lights
+            .push(GpuPointLight::default());
     }
     global_light_meta
         .gpu_point_lights
@@ -1191,8 +1204,12 @@ pub struct ViewClusterBindings {
 }
 
 impl ViewClusterBindings {
+    const MAX_CLUSTER_LIGHT_INDEX_LISTS_ITEMS: usize = 16384 / 4;
+    const MAX_CLUSTERS: usize = 4096;
+
     pub fn push_offset_and_count(&mut self, offset: usize, count: usize) -> usize {
-        self.cluster_offsets_and_counts.push(pack_offset_and_count(offset, count))
+        self.cluster_offsets_and_counts
+            .push(pack_offset_and_count(offset, count))
     }
 
     pub fn n_indices(&self) -> usize {
@@ -1217,6 +1234,20 @@ impl ViewClusterBindings {
 
         self.n_indices += 1;
     }
+
+    pub fn pad_uniform_buffers(&mut self) {
+        // NOTE: We want to allow 'up to' MAX_CLUSTER_LIGHT_INDEX_LISTS_ITEMS * 4
+        //       light indices and MAX_CLUSTERS clusters and we must always use
+        //       full bindings
+        for _ in self.cluster_light_index_lists.len()
+            ..ViewClusterBindings::MAX_CLUSTER_LIGHT_INDEX_LISTS_ITEMS
+        {
+            self.cluster_light_index_lists.push(0);
+        }
+        for _ in self.cluster_light_index_lists.len()..ViewClusterBindings::MAX_CLUSTERS {
+            self.cluster_offsets_and_counts.push(0);
+        }
+    }
 }
 
 pub fn prepare_clusters(
@@ -1224,7 +1255,11 @@ pub fn prepare_clusters(
     render_queue: Res<RenderQueue>,
     global_light_meta: Res<GlobalLightMeta>,
     views: Query<
-        (Entity, &ExtractedClusterConfig, &ExtractedClustersPointLights),
+        (
+            Entity,
+            &ExtractedClusterConfig,
+            &ExtractedClustersPointLights,
+        ),
         With<RenderPhase<Transparent3d>>,
     >,
 ) {
@@ -1232,9 +1267,9 @@ pub fn prepare_clusters(
         let mut view_clusters_bindings = ViewClusterBindings::default();
 
         let mut cluster_index = 0;
-        for y in 0..cluster_config.axis_slices.y {
-            for x in 0..cluster_config.axis_slices.x {
-                for z in 0..cluster_config.axis_slices.z {
+        for _y in 0..cluster_config.axis_slices.y {
+            for _x in 0..cluster_config.axis_slices.x {
+                for _z in 0..cluster_config.axis_slices.z {
                     let offset = view_clusters_bindings.n_indices();
                     let cluster_lights = &extracted_clusters[cluster_index];
                     let count = cluster_lights.len();
@@ -1250,8 +1285,15 @@ pub fn prepare_clusters(
             }
         }
 
-        view_clusters_bindings.cluster_light_index_lists.write_buffer(&render_queue);
-        view_clusters_bindings.cluster_offsets_and_counts.write_buffer(&render_queue);
+        // NOTE: Because cluster_light_index_lists and cluster_offsets_and_counts are uniform buffers,
+        //       they must be a fixed size so we pad them up to the binding sizes.
+        view_clusters_bindings.pad_uniform_buffers();
+        view_clusters_bindings
+            .cluster_light_index_lists
+            .write_buffer(&render_queue);
+        view_clusters_bindings
+            .cluster_offsets_and_counts
+            .write_buffer(&render_queue);
 
         commands.entity(entity).insert(view_clusters_bindings);
     }
