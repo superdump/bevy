@@ -9,6 +9,7 @@ var vertices: array<vec2<f32>, 3> = array<vec2<f32>, 3>(
 	vec2<f32>(-1.0, 3.0),
 );
 
+// fullscreen triangle vertex shader.
 [[stage(vertex)]]
 fn main([[builtin(vertex_index)]] idx: u32) -> VertexOutput {
 	var out: VertexOutput;

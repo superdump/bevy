@@ -9,6 +9,7 @@ var vertices: array<vec2<f32>, 3> = array<vec2<f32>, 3>(
 	vec2<f32>(-1.0, 3.0),
 );
 
+// full screen triangle vertex shader
 [[stage(vertex)]]
 fn vertex([[builtin(vertex_index)]] idx: u32) -> VertexOutput {
 	var out: VertexOutput;
@@ -48,25 +49,34 @@ fn quadratic_threshold(color: vec4<f32>, threshold: f32, curve: vec3<f32>) -> ve
 	return color * max(rq, br - threshold) / max(br, 0.0001); 
 }
 
-[[stage(fragment)]]
-fn down_sample_pre_filter(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-	let texel_size = 1.0 / vec2<f32>(textureDimensions(org));
-
-	let scale = texel_size;
-
-	let a = textureSample(org, sampler, in.uv + vec2<f32>(-1.0, -1.0) * scale);
-	let b = textureSample(org, sampler, in.uv + vec2<f32>( 0.0, -1.0) * scale);
-	let c = textureSample(org, sampler, in.uv + vec2<f32>( 1.0, -1.0) * scale);
-	let d = textureSample(org, sampler, in.uv + vec2<f32>(-0.5, -0.5) * scale);
-	let e = textureSample(org, sampler, in.uv + vec2<f32>( 0.5, -0.5) * scale);
-	let f = textureSample(org, sampler, in.uv + vec2<f32>(-1.0,  0.0) * scale);
-	let g = textureSample(org, sampler, in.uv + vec2<f32>( 0.0,  0.0) * scale);
-	let h = textureSample(org, sampler, in.uv + vec2<f32>( 1.0,  0.0) * scale);
-	let i = textureSample(org, sampler, in.uv + vec2<f32>(-0.5,  0.5) * scale);
-	let j = textureSample(org, sampler, in.uv + vec2<f32>( 0.5,  0.5) * scale);
-	let k = textureSample(org, sampler, in.uv + vec2<f32>(-1.0,  1.0) * scale);
-	let l = textureSample(org, sampler, in.uv + vec2<f32>( 0.0,  1.0) * scale);
-	let m = textureSample(org, sampler, in.uv + vec2<f32>( 1.0,  1.0) * scale); 
+// samples org around the supplied uv using a filter
+//
+// o   o   o
+//   o   o
+// o   o   o
+//   o   o
+// o   o   o
+//
+// this is used because it has a number of advantages that
+// outway the cost of 13 samples that basically boil down
+// to it looking better
+//
+// these advantages are outlined in a youtube video by the Cherno: 
+//   https://www.youtube.com/watch?v=tI70-HIc5ro
+fn sample_13_tap(uv: vec2<f32>, scale: vec2<f32>) -> vec4<f32> {
+	let a = textureSample(org, sampler, uv + vec2<f32>(-1.0, -1.0) * scale);
+	let b = textureSample(org, sampler, uv + vec2<f32>( 0.0, -1.0) * scale);
+	let c = textureSample(org, sampler, uv + vec2<f32>( 1.0, -1.0) * scale);
+	let d = textureSample(org, sampler, uv + vec2<f32>(-0.5, -0.5) * scale);
+	let e = textureSample(org, sampler, uv + vec2<f32>( 0.5, -0.5) * scale);
+	let f = textureSample(org, sampler, uv + vec2<f32>(-1.0,  0.0) * scale);
+	let g = textureSample(org, sampler, uv + vec2<f32>( 0.0,  0.0) * scale);
+	let h = textureSample(org, sampler, uv + vec2<f32>( 1.0,  0.0) * scale);
+	let i = textureSample(org, sampler, uv + vec2<f32>(-0.5,  0.5) * scale);
+	let j = textureSample(org, sampler, uv + vec2<f32>( 0.5,  0.5) * scale);
+	let k = textureSample(org, sampler, uv + vec2<f32>(-1.0,  1.0) * scale);
+	let l = textureSample(org, sampler, uv + vec2<f32>( 0.0,  1.0) * scale);
+	let m = textureSample(org, sampler, uv + vec2<f32>( 1.0,  1.0) * scale); 
 
 	let div = (1.0 / 4.0) * vec2<f32>(0.5, 0.125);
 
@@ -76,11 +86,43 @@ fn down_sample_pre_filter(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 	o = o + (f + g + l + k) * div.y;
 	o = o + (g + h + m + l) * div.y;
 
+	return o;
+}
+
+// samples org using a 3x3 tent filter
+//
+// NOTE: use a 2x2 filter for better perf, but 3x3 looks better
+fn sample_3x3_tent(uv: vec2<f32>, scale: vec2<f32>) -> vec4<f32> {
+	let d = vec4<f32>(1.0, 1.0, -1.0, 0.0);
+
+	var s: vec4<f32> = textureSample(org, sampler, uv - d.xy * scale);
+	s = s + textureSample(org, sampler, uv - d.wy * scale) * 2.0;
+	s = s + textureSample(org, sampler, uv - d.zy * scale);
+
+	s = s + textureSample(org, sampler, uv + d.zw * scale) * 2.0;
+	s = s + textureSample(org, sampler, uv       			 ) * 4.0;
+	s = s + textureSample(org, sampler, uv + d.xw * scale) * 2.0;
+
+	s = s + textureSample(org, sampler, uv + d.zy * scale);
+	s = s + textureSample(org, sampler, uv + d.wy * scale) * 2.0;
+	s = s + textureSample(org, sampler, uv + d.xy * scale);
+
+	return s / 16.0;
+}
+
+[[stage(fragment)]]
+fn down_sample_pre_filter(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+	let texel_size = 1.0 / vec2<f32>(textureDimensions(org));
+
+	let scale = texel_size;
+
 	let curve = vec3<f32>(
 		uniforms.threshold - uniforms.knee,
 		uniforms.knee * 2.0,
 		0.25 / uniforms.knee,
 	);
+
+	var o: vec4<f32> = sample_13_tap(in.uv, scale);
 
 	o = quadratic_threshold(o, uniforms.threshold, curve);
 	o = max(o, vec4<f32>(0.00001));
@@ -94,72 +136,26 @@ fn down_sample(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 
 	let scale = texel_size;
 
-	let a = textureSample(org, sampler, in.uv + vec2<f32>(-1.0, -1.0) * scale);
-	let b = textureSample(org, sampler, in.uv + vec2<f32>( 0.0, -1.0) * scale);
-	let c = textureSample(org, sampler, in.uv + vec2<f32>( 1.0, -1.0) * scale);
-	let d = textureSample(org, sampler, in.uv + vec2<f32>(-0.5, -0.5) * scale);
-	let e = textureSample(org, sampler, in.uv + vec2<f32>( 0.5, -0.5) * scale);
-	let f = textureSample(org, sampler, in.uv + vec2<f32>(-1.0,  0.0) * scale);
-	let g = textureSample(org, sampler, in.uv + vec2<f32>( 0.0,  0.0) * scale);
-	let h = textureSample(org, sampler, in.uv + vec2<f32>( 1.0,  0.0) * scale);
-	let i = textureSample(org, sampler, in.uv + vec2<f32>(-0.5,  0.5) * scale);
-	let j = textureSample(org, sampler, in.uv + vec2<f32>( 0.5,  0.5) * scale);
-	let k = textureSample(org, sampler, in.uv + vec2<f32>(-1.0,  1.0) * scale);
-	let l = textureSample(org, sampler, in.uv + vec2<f32>( 0.0,  1.0) * scale);
-	let m = textureSample(org, sampler, in.uv + vec2<f32>( 1.0,  1.0) * scale); 
-
-	let div = (1.0 / 4.0) * vec2<f32>(0.5, 0.125);
-
-	var o: vec4<f32> = (d + e + i + j) * div.x;
-	o = o + (a + b + g + f) * div.y;
-	o = o + (b + c + h + g) * div.y;
-	o = o + (f + g + l + k) * div.y;
-	o = o + (g + h + m + l) * div.y;
-
-	return o;
+	return sample_13_tap(in.uv, scale);
 }
-
 
 [[stage(fragment)]]
 fn up_sample(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-	let texel_size = 1.0 / vec2<f32>(textureDimensions(org)) * uniforms.scale;
-	let d = vec4<f32>(1.0, 1.0, -1.0, 0.0);
-
-	var s: vec4<f32> = textureSample(org, sampler, in.uv - d.xy * texel_size);
-	s = s + textureSample(org, sampler, in.uv - d.wy * texel_size) * 2.0;
-	s = s + textureSample(org, sampler, in.uv - d.zy * texel_size);
-
-	s = s + textureSample(org, sampler, in.uv + d.zw * texel_size) * 2.0;
-	s = s + textureSample(org, sampler, in.uv       			 ) * 4.0;
-	s = s + textureSample(org, sampler, in.uv + d.xw * texel_size) * 2.0;
-
-	s = s + textureSample(org, sampler, in.uv + d.zy * texel_size);
-	s = s + textureSample(org, sampler, in.uv + d.wy * texel_size) * 2.0;
-	s = s + textureSample(org, sampler, in.uv + d.xy * texel_size);
+	let texel_size = 1.0 / vec2<f32>(textureDimensions(org));	
 	
+	let up_sample = sample_3x3_tent(in.uv, texel_size * uniforms.scale);
 	var color: vec4<f32> = textureSample(up, sampler, in.uv);
-	color = vec4<f32>(color.rgb + s.rgb / 16.0, color.a);
+	color = vec4<f32>(color.rgb + up_sample.rgb, up_sample.a);
 
 	return color;
 }
 
 [[stage(fragment)]]
 fn up_sample_final(in: VertexOutput) -> [[location(0)]] vec4<f32> {
-	let texel_size = 1.0 / vec2<f32>(textureDimensions(org)) * uniforms.scale;
-	let d = vec4<f32>(1.0, 1.0, -1.0, 0.0);
+	let texel_size = 1.0 / vec2<f32>(textureDimensions(org));
 
-	var s: vec4<f32> = textureSample(org, sampler, in.uv - d.xy * texel_size);
-	s = s + textureSample(org, sampler, in.uv - d.wy * texel_size) * 2.0;
-	s = s + textureSample(org, sampler, in.uv - d.zy * texel_size);
+	let up_sample = sample_3x3_tent(in.uv, texel_size * uniforms.scale);
 
-	s = s + textureSample(org, sampler, in.uv + d.zw * texel_size) * 2.0;
-	s = s + textureSample(org, sampler, in.uv       		     ) * 4.0;
-	s = s + textureSample(org, sampler, in.uv + d.xw * texel_size) * 2.0;
-
-	s = s + textureSample(org, sampler, in.uv + d.zy * texel_size);
-	s = s + textureSample(org, sampler, in.uv + d.wy * texel_size) * 2.0;
-	s = s + textureSample(org, sampler, in.uv + d.xy * texel_size);
-
-	return vec4<f32>(s.rgb / 16.0, 1.0);
+	return up_sample;
 }
 
