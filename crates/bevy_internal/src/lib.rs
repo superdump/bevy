@@ -105,6 +105,12 @@ pub mod gltf2 {
     pub use bevy_gltf2::*;
 }
 
+#[cfg(feature = "bevy_hdr")]
+pub mod hdr {
+    //! HDR 3d pipeline.
+    pub use bevy_hdr::*;
+}
+
 #[cfg(feature = "bevy_pbr")]
 pub mod pbr {
     //! Physically based rendering.

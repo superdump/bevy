@@ -485,7 +485,7 @@ impl Default for BloomSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            threshold: 1.0,
+            threshold: 10.0,
             knee: 0.1,
             up_sample_scale: 1.0,
         }
