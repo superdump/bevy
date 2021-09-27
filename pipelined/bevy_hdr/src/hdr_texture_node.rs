@@ -40,6 +40,8 @@ impl HdrTexture {
     }
 }
 
+/// Outputs an HDR texture with size equal to the window
+/// currently targeted by the [`CameraPlugin::CAMERA_3D`].
 #[derive(Default)]
 pub struct HdrTextureNode {
     // NOTE: it might not be worth it cache the textures

@@ -8,4 +8,5 @@ pub use tone_mapping_node::*;
 
 use bevy_render2::render_resource::TextureFormat;
 
+/// Default HDR format.
 pub const HDR_FORMAT: TextureFormat = TextureFormat::Rgba16Float;

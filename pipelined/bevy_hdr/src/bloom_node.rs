@@ -23,6 +23,7 @@ use bevy_render2::{
 use crevice::std140::{AsStd140, Std140};
 use wgpu::{BufferDescriptor, Color};
 
+/// Resources used by [`BloomNode`].
 pub struct BloomShaders {
     pub down_sampling_pipeline: RenderPipeline,
     pub down_sampling_pre_filter_pipeline: RenderPipeline,
@@ -472,11 +473,16 @@ struct Uniforms {
     scale: f32,
 }
 
+/// Settings for bloom.
 #[derive(Clone, Debug)]
 pub struct BloomSettings {
+    /// Enables bloom.
     pub enabled: bool,
+    /// Threshold for for bloom to apply.
     pub threshold: f32,
+    /// Adjusts the threshold curve.
     pub knee: f32,
+    /// Scale used when up sampling.
     pub up_sample_scale: f32,
 }
 
@@ -492,6 +498,9 @@ impl Default for BloomSettings {
     }
 }
 
+/// Applies bloom effect to the input texture.
+///
+/// Use [`BloomSettings`] to configure the effect at runtime.
 #[derive(Default)]
 pub struct BloomNode {
     uniforms_buffer: Option<Buffer>,

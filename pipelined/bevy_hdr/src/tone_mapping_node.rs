@@ -20,6 +20,7 @@ use bevy_render2::{
 };
 use wgpu::Color;
 
+/// Resources used by [`ToneMappingNode`].
 pub struct ToneMappingShaders {
     pub pipeline: RenderPipeline,
     pub shader_module: ShaderModule,
@@ -108,6 +109,8 @@ impl FromWorld for ToneMappingShaders {
     }
 }
 
+/// Applies tone mapping to input HDR texture and combines it additively with
+/// the swap chain texture of the window targeted by [`CameraPlugin::CAMERA_3D`].
 #[derive(Default)]
 pub struct ToneMappingNode {
     hdr_target_id: Mutex<Option<TextureViewId>>,
