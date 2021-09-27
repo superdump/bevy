@@ -2,6 +2,7 @@ use bevy::{
     core::Time,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     ecs::prelude::*,
+    hdr::BloomSettings,
     math::Vec3,
     pbr2::{PbrBundle, StandardMaterial},
     prelude::{App, Assets, Transform},
@@ -28,9 +29,12 @@ struct Bouncing;
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
+    mut bloom_settings: ResMut<BloomSettings>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    bloom_settings.threshold = 1.0;
+
     let mesh = meshes.add(
         shape::Icosphere {
             radius: 0.5,
