@@ -6,17 +6,19 @@ use bevy_render2::{
     render_graph::{Node, RenderGraphContext, SlotInfo, SlotType},
     render_resource::{
         BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-        BindGroupLayoutEntry, BindingResource, BindingType, BlendState, ColorTargetState,
-        ColorWrites, Face, FragmentState, LoadOp, Operations, PipelineLayoutDescriptor,
-        PrimitiveState, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
-        RenderPipelineDescriptor, Sampler, ShaderModule, ShaderStages, TextureFormat,
-        TextureSampleType, TextureViewDimension, TextureViewId, VertexState,
+        BindGroupLayoutEntry, BindingResource, BindingType, BlendComponent, BlendFactor,
+        BlendOperation, BlendState, ColorTargetState, ColorWrites, Face, FragmentState, LoadOp,
+        Operations, PipelineLayoutDescriptor, PrimitiveState, RenderPassColorAttachment,
+        RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, Sampler, ShaderModule,
+        ShaderStages, TextureFormat, TextureSampleType, TextureViewDimension, TextureViewId,
+        VertexState,
     },
     renderer::{RenderContext, RenderDevice},
     shader::Shader,
     texture::BevyDefault,
     view::ExtractedWindows,
 };
+use wgpu::Color;
 
 pub struct ToneMappingShaders {
     pub pipeline: RenderPipeline,
@@ -76,7 +78,14 @@ impl FromWorld for ToneMappingShaders {
                 entry_point: "main",
                 targets: &[ColorTargetState {
                     format: TextureFormat::bevy_default(),
-                    blend: Some(BlendState::ALPHA_BLENDING),
+                    blend: Some(BlendState {
+                        color: BlendComponent {
+                            src_factor: BlendFactor::One,
+                            dst_factor: BlendFactor::One,
+                            operation: BlendOperation::Add,
+                        },
+                        alpha: BlendComponent::REPLACE,
+                    }),
                     write_mask: ColorWrites::ALL,
                 }],
             }),
@@ -163,6 +172,15 @@ impl Node for ToneMappingNode {
                 ));
             }
 
+            let load_op = if extracted_cameras
+                .entities
+                .contains_key(CameraPlugin::CAMERA_2D)
+            {
+                LoadOp::Load
+            } else {
+                LoadOp::Clear(Color::TRANSPARENT)
+            };
+
             let mut render_pass =
                 render_context
                     .command_encoder
@@ -172,7 +190,7 @@ impl Node for ToneMappingNode {
                             view: &swap_chain_texture,
                             resolve_target: None,
                             ops: Operations {
-                                load: LoadOp::Load,
+                                load: load_op,
                                 store: true,
                             },
                         }],
