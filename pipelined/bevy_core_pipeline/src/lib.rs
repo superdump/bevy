@@ -302,7 +302,10 @@ pub struct ViewDepthTexture {
     pub view: TextureView,
 }
 
-pub fn extract_bloom_settings(bloom_settings: Res<BloomSettings>, mut render_world: ResMut<RenderWorld>) {
+pub fn extract_bloom_settings(
+    bloom_settings: Res<BloomSettings>,
+    mut render_world: ResMut<RenderWorld>,
+) {
     // If bloom settings has changed
     if bloom_settings.is_changed() {
         // Update the bloom settings in the render world
