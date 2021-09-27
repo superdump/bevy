@@ -5,7 +5,7 @@ use bevy_render2::{
     camera::{CameraPlugin, ExtractedCamera, ExtractedCameraNames},
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
     render_resource::{Extent3d, TextureDescriptor, TextureDimension, TextureUsages, TextureView},
-    renderer::RenderContext,
+    renderer::{RenderContext, RenderDevice},
     view::ExtractedWindows,
 };
 use bevy_window::WindowId;
@@ -29,10 +29,7 @@ impl HdrTexture {
             dimension: TextureDimension::D2,
             sample_count: 1,
             mip_level_count: 1,
-            usage: TextureUsages::COPY_SRC
-                | TextureUsages::COPY_DST
-                | TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
         });
 
         HdrTexture {
@@ -47,6 +44,7 @@ impl HdrTexture {
 pub struct HdrTextureNode {
     // NOTE: it might not be worth it cache the textures
     textures: Mutex<HashMap<WindowId, HdrTexture>>,
+    empty_texture: Option<TextureView>,
 }
 
 impl HdrTextureNode {
@@ -56,6 +54,28 @@ impl HdrTextureNode {
 impl Node for HdrTextureNode {
     fn output(&self) -> Vec<SlotInfo> {
         vec![SlotInfo::new(Self::HDR_TARGET, SlotType::TextureView)]
+    }
+
+    fn update(&mut self, world: &mut World) {
+        if self.empty_texture.is_none() {
+            let render_device = world.get_resource::<RenderDevice>().unwrap();
+
+            let texture = render_device.create_texture(&TextureDescriptor {
+                label: None,
+                size: Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                format: crate::HDR_FORMAT,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            });
+
+            self.empty_texture = Some(texture.create_view(&Default::default()));
+        }
     }
 
     fn run(
@@ -91,9 +111,9 @@ impl Node for HdrTextureNode {
                 );
             }
 
-            graph
-                .set_output(Self::HDR_TARGET, hdr_texture.view.clone())
-                .unwrap();
+            graph.set_output(Self::HDR_TARGET, hdr_texture.view.clone())?;
+        } else {
+            graph.set_output(Self::HDR_TARGET, self.empty_texture.clone().unwrap())?;
         }
 
         Ok(())
