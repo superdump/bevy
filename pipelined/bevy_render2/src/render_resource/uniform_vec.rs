@@ -95,6 +95,9 @@ impl<T: AsStd140> UniformVec<T> {
 
     pub fn write_buffer(&mut self, queue: &RenderQueue) {
         if let Some(uniform_buffer) = &self.uniform_buffer {
+            if self.item_size * self.values.len() == 128 {
+                panic!("ARGH");
+            }
             let range = 0..self.item_size * self.values.len();
             let mut writer = std140::Writer::new(&mut self.scratch[range.clone()]);
             writer.write(self.values.as_slice()).unwrap();
@@ -104,6 +107,10 @@ impl<T: AsStd140> UniformVec<T> {
 
     pub fn clear(&mut self) {
         self.values.clear();
+    }
+
+    pub fn values(&self) -> &[T] {
+        &self.values
     }
 }
 
