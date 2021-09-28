@@ -200,7 +200,7 @@ impl FromWorld for PbrPipeline {
                         has_dynamic_offset: true,
                         // TODO: change this to GpuLights::std140_size_static once crevice fixes this!
                         // Context: https://github.com/LPGhatguy/crevice/issues/29
-                        min_binding_size: BufferSize::new(1424),
+                        min_binding_size: BufferSize::new(256),
                     },
                     count: None,
                 },
@@ -254,7 +254,7 @@ impl FromWorld for PbrPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         // NOTE: 0 if no point lights?
-                        min_binding_size: BufferSize::new(16384),
+                        min_binding_size: BufferSize::new(0),
                     },
                     count: None,
                 },
@@ -266,7 +266,7 @@ impl FromWorld for PbrPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         // NOTE: 0 if no point lights?
-                        min_binding_size: BufferSize::new(16384),
+                        min_binding_size: BufferSize::new(0),
                     },
                     count: None,
                 },
@@ -278,7 +278,7 @@ impl FromWorld for PbrPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         // NOTE: number of clusters * u32, so minimum clusters = 1 => 4
-                        min_binding_size: BufferSize::new(16384),
+                        min_binding_size: BufferSize::new(0),
                     },
                     count: None,
                 },
@@ -705,6 +705,9 @@ pub fn queue_meshes(
         &mut RenderPhase<Transparent3d>,
     )>,
 ) {
+    // dbg!(view_uniforms.uniforms.binding());
+    // dbg!(light_meta.view_gpu_lights.binding());
+    // dbg!(global_light_meta.gpu_point_lights.binding());
     if let (Some(view_binding), Some(light_binding), Some(point_light_binding)) = (
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
@@ -721,6 +724,15 @@ pub fn queue_meshes(
             mut transparent_phase,
         ) in views.iter_mut()
         {
+            // dbg!(&point_light_binding);
+            // dbg!(&view_cluster_bindings
+            //     .cluster_light_index_lists
+            //     .binding()
+            //     .unwrap());
+            // dbg!(&view_cluster_bindings
+            //     .cluster_offsets_and_counts
+            //     .binding()
+            //     .unwrap());
             let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 entries: &[
                     BindGroupEntry {
