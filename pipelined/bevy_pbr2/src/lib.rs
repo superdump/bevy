@@ -43,8 +43,10 @@ impl Plugin for PbrPlugin {
             .init_resource::<PointLightShadowMap>()
             .init_resource::<AmbientLight>()
             .init_resource::<VisiblePointLights>()
+            // NOTE: Clusters need to have been added before update_clusters is run so
+            //       run in the stage before...
             .add_system_to_stage(
-                CoreStage::PostUpdate,
+                CoreStage::Update,
                 render::add_clusters
                     .label(LightSystems::AddClusters)
                     .after(TransformSystem::TransformPropagate),
@@ -104,20 +106,21 @@ impl Plugin for PbrPlugin {
                 )
                 .add_system_to_stage(
                     RenderStage::Prepare,
-                    // FIXME: Is this true?
-                    // this is added as an exclusive system because it contributes new views. it must run (and have Commands applied)
-                    // _before_ the `prepare_views()` system is run. ideally this becomes a normal system when "stageless" features come out
-                    render::prepare_clusters
-                        .exclusive_system()
-                        .label(LightSystems::PrepareClusters),
-                )
-                .add_system_to_stage(
-                    RenderStage::Prepare,
                     // this is added as an exclusive system because it contributes new views. it must run (and have Commands applied)
                     // _before_ the `prepare_views()` system is run. ideally this becomes a normal system when "stageless" features come out
                     render::prepare_lights
                         .exclusive_system()
                         .label(LightSystems::PrepareLights),
+                )
+                .add_system_to_stage(
+                    RenderStage::Prepare,
+                    // FIXME: Is this true?
+                    // this is added as an exclusive system because it contributes new views. it must run (and have Commands applied)
+                    // _before_ the `prepare_views()` system is run. ideally this becomes a normal system when "stageless" features come out
+                    render::prepare_clusters
+                        .exclusive_system()
+                        .label(LightSystems::PrepareClusters)
+                        .after(LightSystems::PrepareLights),
                 )
                 .add_system_to_stage(RenderStage::Queue, render::queue_meshes)
                 .add_system_to_stage(
