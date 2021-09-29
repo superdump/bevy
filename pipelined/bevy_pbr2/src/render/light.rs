@@ -543,7 +543,7 @@ pub fn update_point_light_frusta(
     global_lights: Res<VisiblePointLights>,
     mut views: Query<(Entity, &GlobalTransform, &PointLight, &mut CubemapFrusta)>,
 ) {
-    let projection = Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1);
+    let projection = Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, POINT_LIGHT_NEAR_Z);
     let view_rotations = CUBE_MAP_FACES
         .iter()
         .map(|CubeMapFace { target, up }| GlobalTransform::identity().looking_at(*target, *up))
