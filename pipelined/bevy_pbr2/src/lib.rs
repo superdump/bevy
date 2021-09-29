@@ -43,11 +43,12 @@ impl Plugin for PbrPlugin {
             .init_resource::<PointLightShadowMap>()
             .init_resource::<AmbientLight>()
             .init_resource::<VisiblePointLights>()
-            // NOTE: Clusters need to have been added before update_clusters is run so
-            //       run in the stage before...
             .add_system_to_stage(
-                CoreStage::Update,
+                CoreStage::PostUpdate,
+                // NOTE: Clusters need to have been added before update_clusters is run so
+                //       add as an exclusive system
                 render::add_clusters
+                    .exclusive_system()
                     .label(LightSystems::AddClusters)
                     .after(TransformSystem::TransformPropagate),
             )
