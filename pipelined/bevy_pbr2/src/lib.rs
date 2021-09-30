@@ -49,15 +49,14 @@ impl Plugin for PbrPlugin {
                 //       add as an exclusive system
                 render::add_clusters
                     .exclusive_system()
-                    .label(LightSystems::AddClusters)
-                    .after(TransformSystem::TransformPropagate),
+                    .label(LightSystems::AddClusters),
             )
             .add_system_to_stage(
                 CoreStage::PostUpdate,
+                // NOTE: Must come after add_clusters!
                 render::update_clusters
                     .label(LightSystems::UpdateClusters)
-                    .after(TransformSystem::TransformPropagate)
-                    .after(LightSystems::AddClusters),
+                    .after(TransformSystem::TransformPropagate),
             )
             .add_system_to_stage(
                 CoreStage::PostUpdate,
