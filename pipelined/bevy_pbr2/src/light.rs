@@ -206,6 +206,10 @@ impl Clusters {
         clusters
     }
 
+    fn update_tile_size(&mut self, screen_size: UVec2) {
+        self.tile_size = (screen_size + UVec2::ONE) / self.axis_slices.xy();
+    }
+
     fn update(&mut self, tile_size: UVec2, screen_size: UVec2, z_slices: u32) {
         self.tile_size = tile_size;
         self.axis_slices = UVec3::new(
@@ -310,11 +314,10 @@ pub fn update_clusters(windows: Res<Windows>, mut views: Query<(&Camera, &mut Cl
         let inverse_projection = camera.projection_matrix.inverse();
         let window = windows.get(camera.window).unwrap();
         let screen_size_u32 = UVec2::new(window.physical_width(), window.physical_height());
+        clusters.update_tile_size(screen_size_u32);
         let screen_size = screen_size_u32.as_f32();
         let tile_size_u32 = clusters.tile_size;
         let tile_size = tile_size_u32.as_f32();
-        let z_slices = clusters.axis_slices.z;
-        clusters.update(tile_size_u32, screen_size_u32, z_slices);
 
         // Calculate view space AABBs
         // NOTE: It is important that these are iterated in a specific order
