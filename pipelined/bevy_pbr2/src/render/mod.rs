@@ -592,7 +592,7 @@ pub fn queue_transform_bind_group(
                     binding: 0,
                     resource: binding,
                 }],
-                label: None,
+                label: Some("transform_bind_group"),
                 layout: &pbr_shaders.mesh_layout,
             }),
         });
@@ -707,7 +707,7 @@ pub fn queue_meshes(
                             .unwrap(),
                     },
                 ],
-                label: None,
+                label: Some("pbr_view_bind_group"),
                 layout: &pbr_shaders.view_layout,
             });
 
