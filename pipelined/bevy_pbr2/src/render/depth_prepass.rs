@@ -74,7 +74,7 @@ impl FromWorld for DepthPrepassShaders {
                     count: None,
                 },
             ],
-            label: None,
+            label: Some("depth_prepass_view_layout"),
         });
 
         let material_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -113,19 +113,19 @@ impl FromWorld for DepthPrepassShaders {
                     count: None,
                 },
             ],
-            label: None,
+            label: Some("depth_prepass_material_layout"),
         });
 
         let opaque_prepass_pipeline_layout =
             render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: None,
+                label: Some("opaque_depth_prepass_pipeline_layout"),
                 push_constant_ranges: &[],
                 bind_group_layouts: &[&view_layout, &material_layout, &pbr_shaders.mesh_layout],
             });
 
         let opaque_prepass_pipeline =
             render_device.create_render_pipeline(&RenderPipelineDescriptor {
-                label: None,
+                label: Some("opaque_depth_prepass_pipeline"),
                 vertex: VertexState {
                     buffers: &[VertexBufferLayout {
                         array_stride: 32,
@@ -174,14 +174,14 @@ impl FromWorld for DepthPrepassShaders {
 
         let alpha_mask_prepass_pipeline_layout =
             render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: None,
+                label: Some("alpha_mask_depth_prepass_pipeline_layout"),
                 push_constant_ranges: &[],
                 bind_group_layouts: &[&view_layout, &material_layout, &pbr_shaders.mesh_layout],
             });
 
         let alpha_mask_prepass_pipeline =
             render_device.create_render_pipeline(&RenderPipelineDescriptor {
-                label: None,
+                label: Some("alpha_mask_depth_prepass_pipeline"),
                 vertex: VertexState {
                     buffers: &[VertexBufferLayout {
                         array_stride: 32,
@@ -412,7 +412,7 @@ pub fn queue_depth_prepass_meshes(
                     binding: 0,
                     resource: view_binding.clone(),
                 }],
-                label: None,
+                label: Some("depth_prepass_view_bind_group"),
                 layout: &depth_prepass_shaders.view_layout,
             });
 
@@ -467,7 +467,7 @@ pub fn queue_depth_prepass_meshes(
                                                 ),
                                             },
                                         ],
-                                        label: None,
+                                        label: Some("depth_prepass_material_bind_group"),
                                         layout: &depth_prepass_shaders.material_layout,
                                     });
                                 depth_prepass_material_meta
