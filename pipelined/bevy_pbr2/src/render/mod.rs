@@ -256,7 +256,7 @@ impl FromWorld for PbrShaders {
                     count: None,
                 },
             ],
-            label: None,
+            label: Some("pbr_view_layout"),
         });
 
         let material_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -358,7 +358,7 @@ impl FromWorld for PbrShaders {
                     count: None,
                 },
             ],
-            label: None,
+            label: Some("pbr_material_layout"),
         });
 
         let mesh_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -374,17 +374,17 @@ impl FromWorld for PbrShaders {
                 },
                 count: None,
             }],
-            label: None,
+            label: Some("pbr_mesh_layout"),
         });
 
         let pipeline_layout = render_device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: None,
+            label: Some("pbr_pipeline_layout"),
             push_constant_ranges: &[],
             bind_group_layouts: &[&view_layout, &material_layout, &mesh_layout],
         });
 
         let opaque_pipeline = render_device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: None,
+            label: Some("pbr_opaque_pipeline"),
             vertex: VertexState {
                 buffers: &[VertexBufferLayout {
                     array_stride: 32,
@@ -455,7 +455,7 @@ impl FromWorld for PbrShaders {
 
         let transparent_pipeline =
             render_device.create_render_pipeline(&RenderPipelineDescriptor {
-                label: None,
+                label: Some("pbr_transparent_pipeline"),
                 vertex: VertexState {
                     buffers: &[VertexBufferLayout {
                         array_stride: 32,
