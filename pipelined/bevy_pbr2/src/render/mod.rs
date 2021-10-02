@@ -384,7 +384,7 @@ impl FromWorld for PbrShaders {
         });
 
         let opaque_pipeline = render_device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("opaque_pbr_pipeline"),
+            label: Some("pbr_opaque_pipeline"),
             vertex: VertexState {
                 buffers: &[VertexBufferLayout {
                     array_stride: 32,
@@ -455,7 +455,7 @@ impl FromWorld for PbrShaders {
 
         let transparent_pipeline =
             render_device.create_render_pipeline(&RenderPipelineDescriptor {
-                label: Some("transparent_pbr_pipeline"),
+                label: Some("pbr_transparent_pipeline"),
                 vertex: VertexState {
                     buffers: &[VertexBufferLayout {
                         array_stride: 32,
