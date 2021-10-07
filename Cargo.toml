@@ -116,7 +116,7 @@ crevice = {path = "crates/crevice"}
 
 
 [patch.crates-io]
-wgpu = {path = "../../wgpu/wgpu"}
+wgpu = { git = "https://github.com/katharostech/wgpu", branch = "webgl-backend" }
 
 [[example]]
 name = "hello_world"

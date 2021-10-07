@@ -14,11 +14,17 @@ use bevy::{
         color::Color,
         mesh::{shape, Mesh},
     },
+    window::WindowDescriptor,
     PipelinedDefaultPlugins,
 };
 
 fn main() {
     App::new()
+        .insert_resource(WindowDescriptor {
+            width: 640.0,
+            height: 360.0,
+            ..Default::default()
+        })
         .add_plugins(PipelinedDefaultPlugins)
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(LogDiagnosticsPlugin::default())

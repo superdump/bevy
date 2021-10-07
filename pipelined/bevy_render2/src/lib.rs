@@ -27,7 +27,6 @@ use bevy_app::{App, AppLabel, Plugin};
 use bevy_asset::AssetServer;
 use bevy_ecs::prelude::*;
 use std::ops::{Deref, DerefMut};
-use wgpu::BackendBit;
 
 #[derive(Default)]
 pub struct RenderPlugin;

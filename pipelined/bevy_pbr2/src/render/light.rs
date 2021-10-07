@@ -1202,7 +1202,8 @@ pub fn prepare_lights(
                             aspect: TextureAspect::All,
                             base_mip_level: 0,
                             mip_level_count: None,
-                            base_array_layer: (light_index * 6 + face_index) as u32,
+                            // base_array_layer: (light_index * 6 + face_index) as u32,
+                            base_array_layer: face_index as u32,
                             array_layer_count: NonZeroU32::new(1),
                         });
 
