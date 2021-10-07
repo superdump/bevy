@@ -30,11 +30,11 @@ use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferSize,
     CompareFunction, DepthBiasState, DepthStencilState, Face, FragmentState, FrontFace,
-    IndexFormat, InputStepMode, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor,
-    PolygonMode, PrimitiveState, PrimitiveTopology, RenderPassDepthStencilAttachment,
-    RenderPassDescriptor, RenderPipelineDescriptor, ShaderModule, ShaderStage, StencilFaceState,
-    StencilState, TextureFormat, TextureSampleType, TextureViewDimension, VertexAttribute,
-    VertexBufferLayout, VertexFormat, VertexState,
+    IndexFormat, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode,
+    PrimitiveState, PrimitiveTopology, RenderPassDepthStencilAttachment, RenderPassDescriptor,
+    RenderPipelineDescriptor, ShaderModule, ShaderStages, StencilFaceState, StencilState,
+    TextureFormat, TextureSampleType, TextureViewDimension, VertexAttribute, VertexBufferLayout,
+    VertexFormat, VertexState, VertexStepMode,
 };
 
 use crate::{
@@ -63,7 +63,7 @@ impl FromWorld for DepthPrepassShaders {
                 // View
                 BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStage::VERTEX,
+                    visibility: ShaderStages::VERTEX,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
@@ -81,7 +81,7 @@ impl FromWorld for DepthPrepassShaders {
             entries: &[
                 BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -94,7 +94,7 @@ impl FromWorld for DepthPrepassShaders {
                 // Base Color Texture
                 BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Texture {
                         multisampled: false,
                         sample_type: TextureSampleType::Float { filterable: true },
@@ -105,7 +105,7 @@ impl FromWorld for DepthPrepassShaders {
                 // Base Color Texture Sampler
                 BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Sampler {
                         comparison: false,
                         filtering: true,
@@ -129,7 +129,7 @@ impl FromWorld for DepthPrepassShaders {
                 vertex: VertexState {
                     buffers: &[VertexBufferLayout {
                         array_stride: 32,
-                        step_mode: InputStepMode::Vertex,
+                        step_mode: VertexStepMode::Vertex,
                         attributes: &[
                             // Position (GOTCHA! Vertex_Position isn't first in the buffer due to how Mesh sorts attributes (alphabetically))
                             VertexAttribute {
@@ -185,7 +185,7 @@ impl FromWorld for DepthPrepassShaders {
                 vertex: VertexState {
                     buffers: &[VertexBufferLayout {
                         array_stride: 32,
-                        step_mode: InputStepMode::Vertex,
+                        step_mode: VertexStepMode::Vertex,
                         attributes: &[
                             // Position (GOTCHA! Vertex_Position isn't first in the buffer due to how Mesh sorts attributes (alphabetically))
                             VertexAttribute {

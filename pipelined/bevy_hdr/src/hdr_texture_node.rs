@@ -4,7 +4,7 @@ use bevy_ecs::prelude::World;
 use bevy_render2::{
     camera::{CameraPlugin, ExtractedCamera, ExtractedCameraNames},
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
-    render_resource::{Extent3d, TextureDescriptor, TextureDimension, TextureUsage, TextureView},
+    render_resource::{Extent3d, TextureDescriptor, TextureDimension, TextureUsages, TextureView},
     renderer::{RenderContext, RenderDevice},
     view::ExtractedWindows,
 };
@@ -29,7 +29,7 @@ impl HdrTexture {
             dimension: TextureDimension::D2,
             sample_count: 1,
             mip_level_count: 1,
-            usage: TextureUsage::RENDER_ATTACHMENT | TextureUsage::SAMPLED,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
         });
 
         HdrTexture {
@@ -73,7 +73,7 @@ impl Node for HdrTextureNode {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D2,
-                usage: TextureUsage::RENDER_ATTACHMENT | TextureUsage::SAMPLED,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
             });
 
             self.empty_texture = Some(texture.create_view(&Default::default()));

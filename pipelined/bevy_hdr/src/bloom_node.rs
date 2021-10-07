@@ -8,12 +8,12 @@ use bevy_render2::{
         AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
         BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
         BlendComponent, BlendFactor, BlendOperation, BlendState, Buffer, BufferBindingType,
-        BufferUsage, ColorTargetState, ColorWrite, Extent3d, Face, FilterMode, FragmentState,
+        BufferUsages, ColorTargetState, ColorWrites, Extent3d, Face, FilterMode, FragmentState,
         LoadOp, Operations, PipelineLayoutDescriptor, PrimitiveState, RenderPassColorAttachment,
         RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerDescriptor,
-        ShaderModule, ShaderStage, Texture, TextureDescriptor, TextureDimension, TextureSampleType,
-        TextureUsage, TextureView, TextureViewDescriptor, TextureViewDimension, TextureViewId,
-        VertexState,
+        ShaderModule, ShaderStages, Texture, TextureDescriptor, TextureDimension,
+        TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension,
+        TextureViewId, VertexState,
     },
     renderer::{RenderContext, RenderDevice, RenderQueue},
     shader::Shader,
@@ -51,7 +51,7 @@ impl FromWorld for BloomShaders {
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
-                    visibility: ShaderStage::VERTEX_FRAGMENT,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
                     count: None,
                 },
                 BindGroupLayoutEntry {
@@ -60,7 +60,7 @@ impl FromWorld for BloomShaders {
                         filtering: true,
                         comparison: false,
                     },
-                    visibility: ShaderStage::VERTEX_FRAGMENT,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
                     count: None,
                 },
                 BindGroupLayoutEntry {
@@ -70,7 +70,7 @@ impl FromWorld for BloomShaders {
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
-                    visibility: ShaderStage::VERTEX_FRAGMENT,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
                     count: None,
                 },
             ],
@@ -86,7 +86,7 @@ impl FromWorld for BloomShaders {
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
-                    visibility: ShaderStage::VERTEX_FRAGMENT,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
                     count: None,
                 },
                 BindGroupLayoutEntry {
@@ -95,7 +95,7 @@ impl FromWorld for BloomShaders {
                         filtering: true,
                         comparison: false,
                     },
-                    visibility: ShaderStage::VERTEX_FRAGMENT,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
                     count: None,
                 },
                 BindGroupLayoutEntry {
@@ -105,7 +105,7 @@ impl FromWorld for BloomShaders {
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
-                    visibility: ShaderStage::VERTEX_FRAGMENT,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
                     count: None,
                 },
                 BindGroupLayoutEntry {
@@ -115,7 +115,7 @@ impl FromWorld for BloomShaders {
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },
-                    visibility: ShaderStage::VERTEX_FRAGMENT,
+                    visibility: ShaderStages::VERTEX_FRAGMENT,
                     count: None,
                 },
             ],
@@ -149,7 +149,7 @@ impl FromWorld for BloomShaders {
                     targets: &[ColorTargetState {
                         format: crate::HDR_FORMAT,
                         blend: None,
-                        write_mask: ColorWrite::ALL,
+                        write_mask: ColorWrites::ALL,
                     }],
                 }),
                 primitive: PrimitiveState {
@@ -175,7 +175,7 @@ impl FromWorld for BloomShaders {
                     targets: &[ColorTargetState {
                         format: crate::HDR_FORMAT,
                         blend: None,
-                        write_mask: ColorWrite::ALL,
+                        write_mask: ColorWrites::ALL,
                     }],
                 }),
                 primitive: PrimitiveState {
@@ -201,7 +201,7 @@ impl FromWorld for BloomShaders {
                     targets: &[ColorTargetState {
                         format: crate::HDR_FORMAT,
                         blend: None,
-                        write_mask: ColorWrite::ALL,
+                        write_mask: ColorWrites::ALL,
                     }],
                 }),
                 primitive: PrimitiveState {
@@ -234,7 +234,7 @@ impl FromWorld for BloomShaders {
                             },
                             alpha: BlendComponent::REPLACE,
                         }),
-                        write_mask: ColorWrite::ALL,
+                        write_mask: ColorWrites::ALL,
                     }],
                 }),
                 primitive: PrimitiveState {
@@ -309,10 +309,10 @@ impl MipChain {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: crate::HDR_FORMAT,
-            usage: TextureUsage::COPY_DST
-                | TextureUsage::COPY_SRC
-                | TextureUsage::RENDER_ATTACHMENT
-                | TextureUsage::SAMPLED,
+            usage: TextureUsages::COPY_DST
+                | TextureUsages::COPY_SRC
+                | TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING,
         });
 
         let tex_b = render_device.create_texture(&TextureDescriptor {
@@ -322,10 +322,10 @@ impl MipChain {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: crate::HDR_FORMAT,
-            usage: TextureUsage::COPY_DST
-                | TextureUsage::COPY_SRC
-                | TextureUsage::RENDER_ATTACHMENT
-                | TextureUsage::SAMPLED,
+            usage: TextureUsages::COPY_DST
+                | TextureUsages::COPY_SRC
+                | TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING,
         });
 
         let pre_filter_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
@@ -531,7 +531,7 @@ impl Node for BloomNode {
                 label: Some("bloom_uniforms_buffer"),
                 size: std::mem::size_of::<Uniforms>() as u64,
                 mapped_at_creation: false,
-                usage: BufferUsage::COPY_DST | BufferUsage::UNIFORM,
+                usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
             });
 
             self.uniforms_buffer = Some(buffer);

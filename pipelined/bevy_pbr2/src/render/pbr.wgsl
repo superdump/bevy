@@ -23,9 +23,9 @@ struct Mesh {
 let MESH_FLAGS_SHADOW_RECEIVER_BIT: u32 = 1u;
 
 [[group(0), binding(0)]]
-var view: View;
+var<uniform> view: View;
 [[group(2), binding(0)]]
-var mesh: Mesh;
+var<uniform> mesh: Mesh;
 
 struct Vertex {
     [[location(0)]] position: vec3<f32>;
@@ -167,7 +167,7 @@ struct ClusterOffsetsAndCounts {
 
 
 [[group(0), binding(1)]]
-var lights: Lights;
+var<uniform> lights: Lights;
 // [[group(0), binding(2)]]
 // var point_shadow_textures: texture_depth_cube_array;
 // [[group(0), binding(3)]]
@@ -177,14 +177,14 @@ var lights: Lights;
 // [[group(0), binding(5)]]
 // var directional_shadow_textures_sampler: sampler_comparison;
 [[group(0), binding(6)]]
-var point_lights: PointLights;
+var<uniform> point_lights: PointLights;
 [[group(0), binding(7)]]
-var cluster_light_index_lists: ClusterLightIndexLists;
+var<uniform> cluster_light_index_lists: ClusterLightIndexLists;
 [[group(0), binding(8)]]
-var cluster_offsets_and_counts: ClusterOffsetsAndCounts;
+var<uniform> cluster_offsets_and_counts: ClusterOffsetsAndCounts;
 
 [[group(1), binding(0)]]
-var material: StandardMaterial;
+var<uniform> material: StandardMaterial;
 [[group(1), binding(1)]]
 var base_color_texture: texture_2d<f32>;
 [[group(1), binding(2)]]
@@ -330,7 +330,7 @@ fn reinhard(color: vec3<f32>) -> vec3<f32> {
 }
 
 fn reinhard_extended(color: vec3<f32>, max_white: f32) -> vec3<f32> {
-    let numerator = color * (1.0f + (color / vec3<f32>(max_white * max_white)));
+    let numerator = color * (1.0 + (color / vec3<f32>(max_white * max_white)));
     return numerator / (1.0 + color);
 }
 
@@ -347,14 +347,14 @@ fn change_luminance(c_in: vec3<f32>, l_out: f32) -> vec3<f32> {
 
 fn reinhard_luminance(color: vec3<f32>) -> vec3<f32> {
     let l_old = luminance(color);
-    let l_new = l_old / (1.0f + l_old);
+    let l_new = l_old / (1.0 + l_old);
     return change_luminance(color, l_new);
 }
 
 fn reinhard_extended_luminance(color: vec3<f32>, max_white_l: f32) -> vec3<f32> {
     let l_old = luminance(color);
-    let numerator = l_old * (1.0f + (l_old / (max_white_l * max_white_l)));
-    let l_new = numerator / (1.0f + l_old);
+    let numerator = l_old * (1.0 + (l_old / (max_white_l * max_white_l)));
+    let l_new = numerator / (1.0 + l_old);
     return change_luminance(color, l_new);
 }
 
@@ -534,12 +534,21 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
 
 fn hsv2rgb(hue: f32, saturation: f32, value: f32) -> vec3<f32> {
     let rgb = clamp(
-        abs(
-            ((hue * 6.0 + vec3<f32>(0.0, 4.0, 2.0)) % 6.0) - 3.0
-        ) - 1.0,
+        vec3<f32>(
+            abs(((hue * 6.0 + 0.0) % 6.0) - 3.0) - 1.0,
+            abs(((hue * 6.0 + 4.0) % 6.0) - 3.0) - 1.0,
+            abs(((hue * 6.0 + 2.0) % 6.0) - 3.0) - 1.0,
+        ),
         vec3<f32>(0.0),
         vec3<f32>(1.0)
     );
+    // let rgb = clamp(
+    //     abs(
+    //         ((hue * 6.0 + vec3<f32>(0.0, 4.0, 2.0)) % 6.0) - 3.0
+    //     ) - vec3<f32>(1.0),
+    //     vec3<f32>(0.0),
+    //     vec3<f32>(1.0)
+    // );
 
 	return value * mix( vec3<f32>(1.0), rgb, vec3<f32>(saturation));
 }

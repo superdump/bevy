@@ -217,7 +217,7 @@ impl FromWorld for PbrShaders {
                 // PointLights
                 BindGroupLayoutEntry {
                     binding: 6,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -230,7 +230,7 @@ impl FromWorld for PbrShaders {
                 // ClusteredLightIndexLists
                 BindGroupLayoutEntry {
                     binding: 7,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -243,7 +243,7 @@ impl FromWorld for PbrShaders {
                 // ClusterOffsetsAndCounts
                 BindGroupLayoutEntry {
                     binding: 8,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -364,7 +364,7 @@ impl FromWorld for PbrShaders {
         let mesh_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[BindGroupLayoutEntry {
                 binding: 0,
-                visibility: ShaderStage::VERTEX | ShaderStage::FRAGMENT,
+                visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
                     has_dynamic_offset: true,
@@ -459,7 +459,7 @@ impl FromWorld for PbrShaders {
                 vertex: VertexState {
                     buffers: &[VertexBufferLayout {
                         array_stride: 32,
-                        step_mode: InputStepMode::Vertex,
+                        step_mode: VertexStepMode::Vertex,
                         attributes: &[
                             // Position (GOTCHA! Vertex_Position isn't first in the buffer due to how Mesh sorts attributes (alphabetically))
                             VertexAttribute {
@@ -490,7 +490,7 @@ impl FromWorld for PbrShaders {
                     targets: &[ColorTargetState {
                         format: bevy_hdr::HDR_FORMAT,
                         blend: Some(BlendState::ALPHA_BLENDING),
-                        write_mask: ColorWrite::ALL,
+                        write_mask: ColorWrites::ALL,
                     }],
                 }),
                 depth_stencil: Some(DepthStencilState {

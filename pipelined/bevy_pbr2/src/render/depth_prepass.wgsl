@@ -6,14 +6,14 @@ struct View {
     world_position: vec3<f32>;
 };
 [[group(0), binding(0)]]
-var view: View;
+var<uniform> view: View;
 
 [[block]]
 struct Mesh {
     model: mat4x4<f32>;
 };
 [[group(2), binding(0)]]
-var mesh: Mesh;
+var<uniform> mesh: Mesh;
 
 struct VertexOpaque {
     [[location(0)]] position: vec3<f32>;
@@ -82,7 +82,7 @@ let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK: u32                = 128u;
 let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_BLEND: u32               = 256u;
 
 [[group(1), binding(0)]]
-var material: StandardMaterial;
+var<uniform> material: StandardMaterial;
 [[group(1), binding(1)]]
 var base_color_texture: texture_2d<f32>;
 [[group(1), binding(2)]]
