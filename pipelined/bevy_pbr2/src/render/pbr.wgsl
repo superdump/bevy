@@ -530,6 +530,10 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
     return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
 }
 
+fn random1D(s: f32) -> f32 {
+    return fract(sin(s * 12.9898) * 43758.5453123);
+}
+
 fn hsv2rgb(hue: f32, saturation: f32, value: f32) -> vec3<f32> {
     let rgb = clamp(
         abs(
@@ -686,8 +690,9 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
         // Cluster allocation debug (using 'over' alpha blending)
         let cluster_debug_mode = 0;
-        let cluster_overlay_alpha = 0.05;
+        let cluster_overlay_alpha = 0.4;
         if (cluster_debug_mode == 1) {
+            // Visualize the z slices
             var z_slice: u32 = view_z_to_z_slice(view_z);
             // A hack to make the colors alternate a bit more
             if ((z_slice & 1u) == 1u) {
@@ -699,10 +704,18 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
                 output_color.a
             );
         } elseif (cluster_debug_mode == 2) {
+            // Visualize the number of lights per cluster
             output_color.r = (1.0 - cluster_overlay_alpha) * output_color.r
-                + cluster_overlay_alpha * smoothStep(0.0, 16.0, f32(offset_and_count.count));
+                + cluster_overlay_alpha * smoothStep(0.0, 32.0, f32(offset_and_count.count));
             output_color.g = (1.0 - cluster_overlay_alpha) * output_color.g
-                + cluster_overlay_alpha * (1.0 - smoothStep(0.0, 16.0, f32(offset_and_count.count)));
+                + cluster_overlay_alpha * (1.0 - smoothStep(0.0, 32.0, f32(offset_and_count.count)));
+        } elseif (cluster_debug_mode == 3) {
+            // Visualize the cluster
+            let cluster_color = hsv2rgb(random1D(f32(cluster_index)), 1.0, 0.5);
+            output_color = vec4<f32>(
+                (1.0 - cluster_overlay_alpha) * output_color.rgb + cluster_overlay_alpha * cluster_color,
+                output_color.a
+            );
         }
 
         // tone_mapping (done later in the pipeline)
