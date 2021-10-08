@@ -217,7 +217,7 @@ impl FromWorld for PbrShaders {
                 // PointLights
                 BindGroupLayoutEntry {
                     binding: 6,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -230,7 +230,7 @@ impl FromWorld for PbrShaders {
                 // ClusteredLightIndexLists
                 BindGroupLayoutEntry {
                     binding: 7,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -243,7 +243,7 @@ impl FromWorld for PbrShaders {
                 // ClusterOffsetsAndCounts
                 BindGroupLayoutEntry {
                     binding: 8,
-                    visibility: ShaderStage::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
