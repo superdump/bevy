@@ -10,10 +10,12 @@ use bevy_ecs::{
     system::{lifetimeless::*, SystemState},
 };
 use bevy_math::{
-    const_vec3, Mat4, UVec2, UVec3, UVec4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles,
+    const_vec3, Mat4, UVec2, UVec3, UVec4, Vec2, Vec3, Vec3A, Vec3Swizzles, Vec4, Vec4Swizzles,
 };
 use bevy_render2::{
-    camera::{Camera, CameraProjection},
+    camera::{
+        ActiveCamera, ActiveCameras, Camera, CameraPlugin, CameraProjection, PerspectiveProjection,
+    },
     color::Color,
     mesh::Mesh,
     primitives::{Aabb, CubemapFrusta, Frustum, Sphere},
@@ -43,6 +45,7 @@ pub enum LightSystems {
     AddClusters,
     UpdateClusters,
     AssignLightsToClusters,
+    UpdateDirectionalLightProjection,
     UpdateDirectionalLightFrusta,
     UpdatePointLightFrusta,
     CheckLightVisibility,
@@ -637,6 +640,54 @@ pub fn assign_lights_to_clusters(
         });
     }
     global_lights.entities = global_lights_set.into_iter().collect();
+}
+
+pub fn update_directional_light_projection(
+    active_cameras: Res<ActiveCameras>,
+    views: Query<(&GlobalTransform, &PerspectiveProjection), With<Camera>>,
+    mut lights: Query<(&GlobalTransform, &mut DirectionalLight)>,
+) {
+    if let Some(&ActiveCamera {
+        entity: Some(camera_entity),
+        ..
+    }) = active_cameras.get(CameraPlugin::CAMERA_3D)
+    {
+        if let Ok((camera_transform, camera_projection)) = views.get(camera_entity) {
+            // NOTE: Minus near and far here as -z extends in front of the camera
+            let z_near = -camera_projection.near;
+            let z_far = -camera_projection.far;
+            let ar = camera_projection.aspect_ratio;
+            let tan_half_fov = (0.5 * camera_projection.fov).tan();
+            let v = [
+                Vec3A::new(-z_near * ar * tan_half_fov, -z_near * tan_half_fov, z_near),
+                Vec3A::new(-z_near * ar * tan_half_fov, z_near * tan_half_fov, z_near),
+                Vec3A::new(z_near * ar * tan_half_fov, -z_near * tan_half_fov, z_near),
+                Vec3A::new(z_near * ar * tan_half_fov, z_near * tan_half_fov, z_near),
+                Vec3A::new(-z_far * ar * tan_half_fov, -z_far * tan_half_fov, z_far),
+                Vec3A::new(-z_far * ar * tan_half_fov, z_far * tan_half_fov, z_far),
+                Vec3A::new(z_far * ar * tan_half_fov, -z_far * tan_half_fov, z_far),
+                Vec3A::new(z_far * ar * tan_half_fov, z_far * tan_half_fov, z_far),
+            ];
+            let camera_view = camera_transform.compute_matrix();
+            for (transform, mut directional_light) in lights.iter_mut() {
+                // NOTE: Directional light so only use the rotation component of the transform
+                let l = Mat4::from_quat(transform.rotation).inverse() * camera_view;
+                let mut min = Vec3A::splat(f32::MAX);
+                let mut max = Vec3A::splat(f32::MIN);
+                for v_i in &v {
+                    let p = Vec3A::from(l * v_i.extend(1.0));
+                    min = min.min(p);
+                    max = max.max(p);
+                }
+                directional_light.shadow_projection.left = min.x;
+                directional_light.shadow_projection.right = max.x;
+                directional_light.shadow_projection.bottom = min.y;
+                directional_light.shadow_projection.top = max.y;
+                directional_light.shadow_projection.near = min.z;
+                directional_light.shadow_projection.far = max.z;
+            }
+        }
+    }
 }
 
 pub fn update_directional_light_frusta(
