@@ -1,4 +1,4 @@
-// NOTE: Keep in sync with depth.wgsl
+// NOTE: Keep in sync with depth.wgsl and depth_prepass.wgsl
 [[block]]
 struct View {
     view_proj: mat4x4<f32>;
@@ -125,8 +125,16 @@ struct PointLight {
 
 let POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32 = 1u;
 
-struct DirectionalLight {
+struct DirectionalCascade {
     view_projection: mat4x4<f32>;
+    texel_size: vec4<f32>;
+};
+
+struct DirectionalLight {
+    // NOTE: there array sizes must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
+    cascades: array<DirectionalCascade, 4u>;
+    // NOTE: contains the far view z bound of each cascade
+    cascade_config: vec4<f32>;//array<f32, 4u>;
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
     // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
@@ -499,15 +507,25 @@ fn fetch_point_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: v
     return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
 }
 
-fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
-    let light = lights.directional_lights[light_id];
+fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>, view_z: f32) -> f32 {
+    var light = lights.directional_lights[light_id];
+
+    var cascade_index: u32 = 0u;
+    loop {
+        if (-view_z < light.cascade_config[cascade_index] || cascade_index + 1u >= 4u) {
+            break;
+        }
+        cascade_index = cascade_index + 1u;
+    }
+
+    let cascade = light.cascades[cascade_index];
 
     // The normal bias is scaled to the texel size.
-    let normal_offset = light.shadow_normal_bias * surface_normal.xyz;
+    let normal_offset = light.shadow_normal_bias * cascade.texel_size.x * surface_normal.xyz;
     let depth_offset = light.shadow_depth_bias * light.direction_to_light.xyz;
     let offset_position = vec4<f32>(frag_position.xyz + normal_offset + depth_offset, frag_position.w);
 
-    let offset_position_clip = light.view_projection * offset_position;
+    let offset_position_clip = cascade.view_projection * offset_position;
     if (offset_position_clip.w <= 0.0) {
         return 1.0;
     }
@@ -527,7 +545,7 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
     // do the lookup, using HW PCF and comparison
     // NOTE: Due to non-uniform control flow above, we must use the level variant of the texture
     //       sampler to avoid use of implicit derivatives causing possible undefined behavior.
-    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
+    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id * 4u + cascade_index), depth);
 }
 
 fn random1D(s: f32) -> f32 {
@@ -673,7 +691,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             var shadow: f32 = 1.0;
             if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
                     || (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-                shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
+                shadow = fetch_directional_shadow(i, in.world_position, in.world_normal, view_z);
             }
             let light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
             light_accum = light_accum + light_contrib * shadow;

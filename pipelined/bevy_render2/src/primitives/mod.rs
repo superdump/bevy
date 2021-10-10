@@ -155,3 +155,29 @@ impl CubemapFrusta {
         self.frusta.iter_mut()
     }
 }
+
+#[derive(Debug, Default)]
+pub struct CascadeFrusta {
+    pub frusta: Vec<Frustum>,
+}
+
+impl CascadeFrusta {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            frusta: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn reserve_and_clear(&mut self, capacity: usize) {
+        self.frusta.resize(capacity, Default::default());
+        self.frusta.clear();
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Frustum> {
+        self.frusta.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut Frustum> {
+        self.frusta.iter_mut()
+    }
+}

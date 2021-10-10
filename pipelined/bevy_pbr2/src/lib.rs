@@ -67,8 +67,8 @@ impl Plugin for PbrPlugin {
             )
             .add_system_to_stage(
                 CoreStage::PostUpdate,
-                render::update_directional_light_projection
-                    .label(LightSystems::UpdateDirectionalLightProjection)
+                render::update_directional_light_cascades
+                    .label(LightSystems::UpdateDirectionalLightCascades)
                     .after(TransformSystem::TransformPropagate),
             )
             .add_system_to_stage(
@@ -76,7 +76,7 @@ impl Plugin for PbrPlugin {
                 render::update_directional_light_frusta
                     .label(LightSystems::UpdateDirectionalLightFrusta)
                     .after(TransformSystem::TransformPropagate)
-                    .after(LightSystems::UpdateDirectionalLightProjection),
+                    .after(LightSystems::UpdateDirectionalLightCascades),
             )
             .add_system_to_stage(
                 CoreStage::PostUpdate,

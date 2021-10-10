@@ -30,6 +30,7 @@ impl Plugin for ViewPlugin {
 pub struct ExtractedView {
     pub projection: Mat4,
     pub transform: GlobalTransform,
+    pub view_projection: Option<Mat4>,
     pub width: u32,
     pub height: u32,
     pub near: f32,
@@ -67,19 +68,24 @@ fn prepare_views(
     view_uniforms
         .uniforms
         .reserve_and_clear(extracted_views.iter_mut().len(), &render_device);
-    for (entity, camera) in extracted_views.iter() {
-        let projection = camera.projection;
-        let inverse_view = camera.transform.compute_matrix().inverse();
+    for (entity, extracted_view) in extracted_views.iter() {
+        let projection = extracted_view.projection;
+        let inverse_view = extracted_view.transform.compute_matrix().inverse();
+        let view_proj = if let Some(view_projection) = extracted_view.view_projection {
+            view_projection
+        } else {
+            projection * inverse_view
+        };
         let view_uniforms = ViewUniformOffset {
             offset: view_uniforms.uniforms.push(ViewUniform {
-                view_proj: projection * inverse_view,
+                view_proj,
                 inverse_view,
                 projection,
-                world_position: camera.transform.translation,
-                near: camera.near,
-                far: camera.far,
-                width: camera.width as f32,
-                height: camera.height as f32,
+                world_position: extracted_view.transform.translation,
+                near: extracted_view.near,
+                far: extracted_view.far,
+                width: extracted_view.width as f32,
+                height: extracted_view.height as f32,
             }),
         };
 

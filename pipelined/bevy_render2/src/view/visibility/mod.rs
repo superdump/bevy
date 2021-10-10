@@ -55,6 +55,10 @@ impl VisibleEntities {
     pub fn len(&self) -> usize {
         self.entities.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
@@ -73,7 +77,8 @@ impl Plugin for VisibilityPlugin {
 
         app.add_system_to_stage(
             CoreStage::PostUpdate,
-            calculate_bounds.label(CalculateBounds),
+            // NOTE: Exclusive so Aabbs are added before visibility check systems
+            calculate_bounds.exclusive_system().label(CalculateBounds),
         )
         .add_system_to_stage(
             CoreStage::PostUpdate,
@@ -106,6 +111,7 @@ pub fn calculate_bounds(
 ) {
     for (entity, mesh_handle) in without_aabb.iter() {
         if let Some(mesh) = meshes.get(mesh_handle) {
+            // dbg!(entity);
             if let Some(aabb) = mesh.compute_aabb() {
                 commands.entity(entity).insert(aabb);
             }

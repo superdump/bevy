@@ -1,14 +1,14 @@
-use crate::{DirectionalLight, PointLight, StandardMaterial};
+use crate::{Cascades, CascadesConfig, DirectionalLight, PointLight, StandardMaterial};
 use bevy_asset::Handle;
 use bevy_ecs::bundle::Bundle;
 use bevy_render2::{
     mesh::Mesh,
-    primitives::{CubemapFrusta, Frustum},
+    primitives::{CascadeFrusta, CubemapFrusta},
     view::{ComputedVisibility, Visibility, VisibleEntities},
 };
 use bevy_transform::components::{GlobalTransform, Transform};
 
-#[derive(Bundle, Clone)]
+#[derive(Bundle, Clone, Default)]
 pub struct PbrBundle {
     pub mesh: Handle<Mesh>,
     pub material: Handle<StandardMaterial>,
@@ -20,25 +20,53 @@ pub struct PbrBundle {
     pub computed_visibility: ComputedVisibility,
 }
 
-impl Default for PbrBundle {
-    fn default() -> Self {
-        Self {
-            mesh: Default::default(),
-            material: Default::default(),
-            transform: Default::default(),
-            global_transform: Default::default(),
-            visibility: Default::default(),
-            computed_visibility: Default::default(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct CubemapVisibleEntities {
     data: [VisibleEntities; 6],
 }
 
 impl CubemapVisibleEntities {
+    pub fn get(&self, i: usize) -> &VisibleEntities {
+        &self.data[i]
+    }
+
+    pub fn get_mut(&mut self, i: usize) -> &mut VisibleEntities {
+        &mut self.data[i]
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &VisibleEntities> {
+        self.data.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut VisibleEntities> {
+        self.data.iter_mut()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CascadesVisibleEntities {
+    data: Vec<VisibleEntities>,
+}
+
+impl Default for CascadesVisibleEntities {
+    fn default() -> Self {
+        Self::with_capacity(CascadesConfig::default().len())
+    }
+}
+
+impl CascadesVisibleEntities {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            data: vec![Default::default(); capacity],
+        }
+    }
+
+    pub fn clear(&mut self) {
+        for visible_entities in self.data.iter_mut() {
+            visible_entities.entities.clear();
+        }
+    }
+
     pub fn get(&self, i: usize) -> &VisibleEntities {
         &self.data[i]
     }
@@ -70,8 +98,10 @@ pub struct PointLightBundle {
 #[derive(Debug, Bundle, Default)]
 pub struct DirectionalLightBundle {
     pub directional_light: DirectionalLight,
-    pub frustum: Frustum,
-    pub visible_entities: VisibleEntities,
+    pub cascades_config: CascadesConfig,
+    pub cascades: Cascades,
+    pub cascade_frusta: CascadeFrusta,
+    pub cascades_visible_entities: CascadesVisibleEntities,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
 }
