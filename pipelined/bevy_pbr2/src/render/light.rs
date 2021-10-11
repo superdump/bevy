@@ -123,7 +123,7 @@ pub struct GpuDirectionalCascade {
 pub struct GpuDirectionalLight {
     // NOTE: Contains the far view z bound of each cascade
     cascades: [GpuDirectionalCascade; MAX_CASCADES_PER_LIGHT],
-    cascade_config: Vec4,
+    cascade_config: [Vec2; MAX_CASCADES_PER_LIGHT],
     color: Vec4,
     dir_to_light: Vec3,
     flags: u32,
@@ -756,17 +756,17 @@ impl CascadesConfig {
         self.cascade_view_z_bounds.iter_mut()
     }
 
-    pub fn far_bounds_slice(&self) -> [f32; MAX_CASCADES_PER_LIGHT] {
-        let mut far_bounds = [0.0f32; MAX_CASCADES_PER_LIGHT];
-        for (bounds, far_bound) in self
+    pub fn as_slice(&self) -> [Vec2; MAX_CASCADES_PER_LIGHT] {
+        let mut slice = [Vec2::ZERO; MAX_CASCADES_PER_LIGHT];
+        for (bounds, output) in self
             .cascade_view_z_bounds
             .iter()
-            .zip(far_bounds.iter_mut())
+            .zip(slice.iter_mut())
             .take(MAX_CASCADES_PER_LIGHT)
         {
-            *far_bound = bounds.y;
+            *output = *bounds;
         }
-        far_bounds
+        slice
     }
 }
 
@@ -1626,7 +1626,7 @@ pub fn prepare_lights(
             let intensity = light.illuminance * exposure;
 
             gpu_lights.directional_lights[light_index] = GpuDirectionalLight {
-                cascade_config: Vec4::from_slice(&cascades_config.far_bounds_slice()),
+                cascade_config: cascades_config.as_slice(),
                 cascades: [GpuDirectionalCascade::default(); MAX_CASCADES_PER_LIGHT],
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]

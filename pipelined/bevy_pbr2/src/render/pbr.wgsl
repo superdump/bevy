@@ -134,7 +134,7 @@ struct DirectionalLight {
     // NOTE: there array sizes must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
     cascades: array<DirectionalCascade, 4u>;
     // NOTE: contains the far view z bound of each cascade
-    cascade_config: vec4<f32>;//array<f32, 4u>;
+    cascade_config: array<vec2<f32>, 4u>;
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
     // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
@@ -512,7 +512,7 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
 
     var cascade_index: u32 = 0u;
     loop {
-        if (-view_z < light.cascade_config[cascade_index] || cascade_index + 1u >= 4u) {
+        if (-view_z < light.cascade_config[cascade_index].y || cascade_index + 1u >= 4u) {
             break;
         }
         cascade_index = cascade_index + 1u;
