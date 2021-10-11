@@ -123,7 +123,7 @@ pub struct GpuDirectionalCascade {
 pub struct GpuDirectionalLight {
     // NOTE: Contains the far view z bound of each cascade
     cascades: [GpuDirectionalCascade; MAX_CASCADES_PER_LIGHT],
-    cascade_config: [Vec2; MAX_CASCADES_PER_LIGHT],
+    cascade_config: [Vec4; MAX_CASCADES_PER_LIGHT / 2],
     color: Vec4,
     dir_to_light: Vec3,
     flags: u32,
@@ -756,15 +756,22 @@ impl CascadesConfig {
         self.cascade_view_z_bounds.iter_mut()
     }
 
-    pub fn as_slice(&self) -> [Vec2; MAX_CASCADES_PER_LIGHT] {
-        let mut slice = [Vec2::ZERO; MAX_CASCADES_PER_LIGHT];
-        for (bounds, output) in self
+    pub fn as_slice(&self) -> [Vec4; MAX_CASCADES_PER_LIGHT / 2] {
+        let mut slice = [Vec4::ZERO; MAX_CASCADES_PER_LIGHT / 2];
+        for (cascade_index, bounds) in self
             .cascade_view_z_bounds
             .iter()
-            .zip(slice.iter_mut())
             .take(MAX_CASCADES_PER_LIGHT)
+            .enumerate()
         {
-            *output = *bounds;
+            let slice_index = cascade_index >> 1;
+            if cascade_index & 1 == 0 {
+                slice[slice_index].x = bounds.x;
+                slice[slice_index].y = bounds.y;
+            } else {
+                slice[slice_index].z = bounds.x;
+                slice[slice_index].w = bounds.y;
+            }
         }
         slice
     }

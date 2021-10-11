@@ -130,11 +130,14 @@ struct DirectionalCascade {
     texel_size: vec4<f32>;
 };
 
+// NOTE: Keep in sync with light.rs!
+let MAX_CASCADES_PER_LIGHT: u32 = 4u;
+
 struct DirectionalLight {
     // NOTE: there array sizes must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
-    cascades: array<DirectionalCascade, 4u>;
-    // NOTE: contains the far view z bound of each cascade
-    cascade_config: array<vec2<f32>, 4u>;
+    cascades: array<DirectionalCascade, 4u>; // MAX_CASCADES_PER_LIGHT
+    // NOTE: contains the view z bounds of each cascade
+    cascades_config: array<vec4<f32>, 2u>; // MAX_CASCADES_PER_LIGHT / 2
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
     // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
@@ -507,17 +510,27 @@ fn fetch_point_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: v
     return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
 }
 
-fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>, view_z: f32) -> f32 {
-    var light = lights.directional_lights[light_id];
+fn get_cascade_z_bounds(light_id: u32, cascade_index: u32) -> vec2<f32> {
+    var light: DirectionalLight = lights.directional_lights[light_id];
 
-    var cascade_index: u32 = 0u;
-    loop {
-        if (-view_z < light.cascade_config[cascade_index].y || cascade_index + 1u >= 4u) {
-            break;
-        }
-        cascade_index = cascade_index + 1u;
+    var bounds: vec2<f32> = vec2<f32>(0.0);
+    let bounds_set = light.cascades_config[cascade_index >> 1u];
+    if ((cascade_index & 1u) == 0u) {
+        bounds = bounds_set.xy;
+    } else {
+        bounds = bounds_set.zw;
     }
 
+    return bounds;
+}
+
+fn sample_cascade(
+    light_id: u32,
+    cascade_index: u32,
+    frag_position: vec4<f32>,
+    surface_normal: vec3<f32>
+) -> f32 {
+    var light: DirectionalLight = lights.directional_lights[light_id];
     let cascade = light.cascades[cascade_index];
 
     // The normal bias is scaled to the texel size.
@@ -545,7 +558,47 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
     // do the lookup, using HW PCF and comparison
     // NOTE: Due to non-uniform control flow above, we must use the level variant of the texture
     //       sampler to avoid use of implicit derivatives causing possible undefined behavior.
-    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id * 4u + cascade_index), depth);
+    return textureSampleCompareLevel(
+        directional_shadow_textures,
+        directional_shadow_textures_sampler,
+        light_local,
+        i32(light_id * MAX_CASCADES_PER_LIGHT + cascade_index),
+        depth
+    );
+}
+
+fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>, view_z: f32) -> f32 {
+    var light = lights.directional_lights[light_id];
+
+    var cascade_index: u32 = 0u;
+    var cascade_bounds: vec2<f32> = vec2<f32>(0.0);
+    loop {
+        cascade_bounds = get_cascade_z_bounds(light_id, cascade_index);
+        if (-view_z <= cascade_bounds.y) {
+            break;
+        }
+        cascade_index = cascade_index + 1u;
+        if (cascade_index >= MAX_CASCADES_PER_LIGHT) {
+            return 1.0;
+        }
+    }
+
+    var shadow: f32 = sample_cascade(light_id, cascade_index, frag_position, surface_normal);
+
+    let next_cascade_index = cascade_index + 1u;
+    if (next_cascade_index < MAX_CASCADES_PER_LIGHT) {
+        let next_cascade_bounds = get_cascade_z_bounds(light_id, next_cascade_index);
+        if (-view_z >= next_cascade_bounds.x) {
+            let next_cascade_shadow = sample_cascade(light_id, next_cascade_index, frag_position, surface_normal);
+            shadow = mix(
+                shadow,
+                next_cascade_shadow,
+                (-view_z - next_cascade_bounds.x) / (cascade_bounds.y - next_cascade_bounds.x)
+            );
+        }
+    }
+
+    return shadow;
 }
 
 fn random1D(s: f32) -> f32 {
