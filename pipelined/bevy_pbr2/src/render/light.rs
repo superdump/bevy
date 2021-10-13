@@ -118,17 +118,20 @@ pub struct GpuDirectionalCascade {
     texel_size: Vec4,
 }
 
+pub type GpuDirectionalCascadeBounds = [Vec4; (MAX_CASCADES_PER_LIGHT + 3) / 4];
+
 #[repr(C)]
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuDirectionalLight {
     // NOTE: Contains the far view z bound of each cascade
     cascades: [GpuDirectionalCascade; MAX_CASCADES_PER_LIGHT],
-    cascade_config: [Vec4; MAX_CASCADES_PER_LIGHT / 2],
+    cascades_far_bounds: GpuDirectionalCascadeBounds,
     color: Vec4,
     dir_to_light: Vec3,
     flags: u32,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+    cascades_overlap_proportion: f32,
 }
 
 // NOTE: These must match the bit flags in bevy_pbr2/src/render/pbr.frag!
@@ -717,63 +720,49 @@ pub fn assign_lights_to_clusters(
 
 #[derive(Clone, Debug)]
 pub struct CascadesConfig {
-    pub cascade_view_z_bounds: Vec<Vec2>,
+    pub cascades_far_bounds: Vec<f32>,
+    pub overlap_proportion: f32,
 }
 
 impl Default for CascadesConfig {
     fn default() -> Self {
         Self {
-            // cascade_view_z_bounds: vec![
-            //     Vec2::new(0.0, 1.0),
-            //     Vec2::new(10.0, 11.0),
-            //     Vec2::new(20.0, 21.0),
-            //     Vec2::new(30.0, 31.0),
-            // ],
-            cascade_view_z_bounds: vec![
-                Vec2::new(0.0, 15.0),
-                Vec2::new(10.0, 50.0),
-                Vec2::new(40.0, 120.0),
-                Vec2::new(100.0, 320.0),
-            ],
+            cascades_far_bounds: vec![15.0, 50.0, 120.0, 320.0],
+            overlap_proportion: 0.2,
         }
     }
 }
 
 impl CascadesConfig {
     pub fn len(&self) -> usize {
-        self.cascade_view_z_bounds.len()
+        self.cascades_far_bounds.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.cascade_view_z_bounds.is_empty()
+        self.cascades_far_bounds.is_empty()
     }
 
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Vec2> {
-        self.cascade_view_z_bounds.iter()
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &f32> {
+        self.cascades_far_bounds.iter()
     }
 
-    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut Vec2> {
-        self.cascade_view_z_bounds.iter_mut()
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut f32> {
+        self.cascades_far_bounds.iter_mut()
     }
 
-    pub fn as_slice(&self) -> [Vec4; MAX_CASCADES_PER_LIGHT / 2] {
-        let mut slice = [Vec4::ZERO; MAX_CASCADES_PER_LIGHT / 2];
-        for (cascade_index, bounds) in self
-            .cascade_view_z_bounds
+    pub fn get_far_bounds(&self) -> GpuDirectionalCascadeBounds {
+        let mut cascades_bounds = GpuDirectionalCascadeBounds::default();
+        for (cascade_index, cascade_far_bound) in self
+            .cascades_far_bounds
             .iter()
             .take(MAX_CASCADES_PER_LIGHT)
             .enumerate()
         {
-            let slice_index = cascade_index >> 1;
-            if cascade_index & 1 == 0 {
-                slice[slice_index].x = bounds.x;
-                slice[slice_index].y = bounds.y;
-            } else {
-                slice[slice_index].z = bounds.x;
-                slice[slice_index].w = bounds.y;
-            }
+            let slice_index = cascade_index >> 2;
+            let cascade_sub_index = cascade_index & 3;
+            cascades_bounds[slice_index][cascade_sub_index] = *cascade_far_bound;
         }
-        slice
+        cascades_bounds
     }
 }
 
@@ -975,7 +964,7 @@ pub fn update_directional_light_cascades(
                 let camera_to_light_view = world_to_light_view.inverse() * camera_view;
 
                 cascades.reserve_and_clear(cascades_config.len());
-                for cascade_z_bounds in cascades_config.iter().copied() {
+                for (i, cascade_far_bound) in cascades_config.iter().copied().enumerate() {
                     let cascade = calculate_cascade(
                         ar,
                         tan_half_fov,
@@ -983,8 +972,13 @@ pub fn update_directional_light_cascades(
                         world_to_light_view,
                         camera_to_light_view,
                         // NOTE: -z is in front of the camera so we negate the cascade z bounds
-                        -cascade_z_bounds.x,
-                        -cascade_z_bounds.y,
+                        if i > 0 {
+                            (1.0 - cascades_config.overlap_proportion)
+                                * -cascades_config.cascades_far_bounds[i - 1]
+                        } else {
+                            0.0
+                        },
+                        -cascade_far_bound,
                     );
                     cascades.push(cascade);
                 }
@@ -1021,7 +1015,7 @@ pub fn update_directional_light_frusta(
                 &cascade.view_projection,
                 &Vec3::from(cascade.view_transform.w_axis),
                 &Vec3::from(cascade.view_transform.z_axis),
-                cascade_config.y,
+                *cascade_config,
             );
             // dbg!(&frustum);
             frusta.frusta.push(frustum);
@@ -1633,8 +1627,8 @@ pub fn prepare_lights(
             let intensity = light.illuminance * exposure;
 
             gpu_lights.directional_lights[light_index] = GpuDirectionalLight {
-                cascade_config: cascades_config.as_slice(),
                 cascades: [GpuDirectionalCascade::default(); MAX_CASCADES_PER_LIGHT],
+                cascades_far_bounds: cascades_config.get_far_bounds(),
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: (light.color.as_rgba_linear() * intensity).into(),
@@ -1642,10 +1636,11 @@ pub fn prepare_lights(
                 flags: flags.bits,
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
+                cascades_overlap_proportion: cascades_config.overlap_proportion,
             };
 
             let gpu_light = &mut gpu_lights.directional_lights[light_index];
-            for (cascade_index, (cascade_config, cascade)) in cascades_config
+            for (cascade_index, (cascade_far_bound, cascade)) in cascades_config
                 .iter()
                 .zip(cascades.iter())
                 .enumerate()
@@ -1693,8 +1688,13 @@ pub fn prepare_lights(
                             projection: cascade.projection,
                             // NOTE: This view projection matrix is very important for shadow stability!
                             view_projection: Some(cascade.view_projection),
-                            near: cascade_config.x,
-                            far: cascade_config.y,
+                            near: if cascade_index > 0 {
+                                (1.0 - cascades_config.overlap_proportion)
+                                    * cascades_config.cascades_far_bounds[cascade_index - 1]
+                            } else {
+                                0.0
+                            },
+                            far: *cascade_far_bound,
                         },
                         RenderPhase::<Shadow>::default(),
                         LightEntity::Directional((light_entity, cascade_index)),

@@ -136,14 +136,16 @@ let MAX_CASCADES_PER_LIGHT: u32 = 4u;
 struct DirectionalLight {
     // NOTE: there array sizes must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
     cascades: array<DirectionalCascade, 4u>; // MAX_CASCADES_PER_LIGHT
-    // NOTE: contains the view z bounds of each cascade
-    cascades_config: array<vec4<f32>, 2u>; // MAX_CASCADES_PER_LIGHT / 2
+    // NOTE: contains the far view z bounds of each cascade
+    cascades_far_bounds: array<vec4<f32>, 1u>; // (MAX_CASCADES_PER_LIGHT + 3) / 4
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
     // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
     flags: u32;
     shadow_depth_bias: f32;
     shadow_normal_bias: f32;
+    // The proportion by which adjacent cascades overlap
+    cascade_overlap_proportion: f32;
 };
 
 let DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32 = 1u;
@@ -510,18 +512,36 @@ fn fetch_point_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: v
     return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
 }
 
-fn get_cascade_z_bounds(light_id: u32, cascade_index: u32) -> vec2<f32> {
+let CASCADE_INDEX_OFFSETS_4: vec4<u32> = vec4<u32>(0u, 1u, 2u, 3u);
+let MAX_CASCADES_PER_LIGHT_4: vec4<u32> = vec4<u32>(
+    MAX_CASCADES_PER_LIGHT,
+    MAX_CASCADES_PER_LIGHT,
+    MAX_CASCADES_PER_LIGHT,
+    MAX_CASCADES_PER_LIGHT
+);
+
+fn get_cascade_index(light_id: u32, view_z: f32) -> u32 {
     var light: DirectionalLight = lights.directional_lights[light_id];
 
-    var bounds: vec2<f32> = vec2<f32>(0.0);
-    let bounds_set = light.cascades_config[cascade_index >> 1u];
-    if ((cascade_index & 1u) == 0u) {
-        bounds = bounds_set.xy;
-    } else {
-        bounds = bounds_set.zw;
+    // NOTE: This parallel comparison technique is from the CascadedShadowMaps11 DirextX SDK example code
+    //       which is MIT licensed
+    var index_f32: f32 = 0.0;
+    let view_z4 = vec4<f32>(-view_z);
+    let max_elements = (MAX_CASCADES_PER_LIGHT + 3u) / 4u;
+    for (var i: u32 = 0u; i < max_elements; i = i + 1u) {
+        // NOTE: Comparison contains true for each cascade far bound where view z is closer
+        let comparison = view_z4 <= light.cascades_far_bounds[i];
+        let four_i4 = vec4<u32>(i * 4u);
+        index_f32 = index_f32 + dot(
+            vec4<f32>(comparison),
+            vec4<f32>((four_i4 + CASCADE_INDEX_OFFSETS_4) < MAX_CASCADES_PER_LIGHT_4)
+        );
     }
 
-    return bounds;
+    // NOTE: If view z is closer than all cascade far bounds, then it is the 0th cascade.
+    //       If it is not closer than any, then it is beyond the last cascade and should
+    //       return MAX_CASCADES_PER_LIGHT or greater.
+    return MAX_CASCADES_PER_LIGHT - u32(index_f32);
 }
 
 fn sample_cascade(
@@ -570,30 +590,24 @@ fn sample_cascade(
 fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>, view_z: f32) -> f32 {
     var light = lights.directional_lights[light_id];
 
-    var cascade_index: u32 = 0u;
-    var cascade_bounds: vec2<f32> = vec2<f32>(0.0);
-    loop {
-        cascade_bounds = get_cascade_z_bounds(light_id, cascade_index);
-        if (-view_z <= cascade_bounds.y) {
-            break;
-        }
-        cascade_index = cascade_index + 1u;
-        if (cascade_index >= MAX_CASCADES_PER_LIGHT) {
-            return 1.0;
-        }
+    let cascade_index = get_cascade_index(light_id, view_z);
+    if (cascade_index >= MAX_CASCADES_PER_LIGHT) {
+        return 1.0;
     }
 
     var shadow: f32 = sample_cascade(light_id, cascade_index, frag_position, surface_normal);
 
     let next_cascade_index = cascade_index + 1u;
     if (next_cascade_index < MAX_CASCADES_PER_LIGHT) {
-        let next_cascade_bounds = get_cascade_z_bounds(light_id, next_cascade_index);
-        if (-view_z >= next_cascade_bounds.x) {
+        let cascade_far_bound = light.cascades_far_bounds[cascade_index >> 2u][cascade_index & 3u];
+        let next_cascade_near_bound = (1.0 - light.cascade_overlap_proportion) * cascade_far_bound;
+        if (-view_z >= next_cascade_near_bound) {
             let next_cascade_shadow = sample_cascade(light_id, next_cascade_index, frag_position, surface_normal);
             shadow = mix(
                 shadow,
                 next_cascade_shadow,
-                (-view_z - next_cascade_bounds.x) / (cascade_bounds.y - next_cascade_bounds.x)
+                (-view_z - next_cascade_near_bound)
+                    / (cascade_far_bound - next_cascade_near_bound)
             );
         }
     }
