@@ -131,6 +131,7 @@ pub struct GpuDirectionalLight {
     flags: u32,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+    n_cascades: u32,
     cascades_overlap_proportion: f32,
 }
 
@@ -150,7 +151,7 @@ pub const MAX_POINT_LIGHTS: usize = 256;
 //        point light shadow maps for now
 pub const POINT_SHADOW_LAYERS: u32 = (6 * 10) as u32;
 pub const MAX_DIRECTIONAL_LIGHTS: usize = 1;
-pub const MAX_CASCADES_PER_LIGHT: usize = 4;
+pub const MAX_CASCADES_PER_LIGHT: usize = 8;
 pub const DIRECTIONAL_SHADOW_LAYERS: u32 = (MAX_CASCADES_PER_LIGHT * MAX_DIRECTIONAL_LIGHTS) as u32;
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
@@ -726,14 +727,45 @@ pub struct CascadesConfig {
 
 impl Default for CascadesConfig {
     fn default() -> Self {
-        Self {
-            cascades_far_bounds: vec![15.0, 50.0, 120.0, 320.0],
-            overlap_proportion: 0.2,
-        }
+        CascadesConfig::new(5, 1000.0, 5.0, 0.2)
     }
 }
 
+// Given the number of cascades, the shadow far distance, and the first far bound,
+// generate the cascade far bounds using a polynomial sum
+fn calculate_cascade_far_bounds(
+    n_cascades: usize,
+    shadow_far_distance: f32,
+    first_far_bound: f32,
+) -> Vec<f32> {
+    let mut cascades_far_bounds = Vec::with_capacity(n_cascades);
+
+    let base = (shadow_far_distance / first_far_bound).powf(1.0 / (n_cascades - 1) as f32);
+    for i in 0..n_cascades {
+        let cascade_far_bound = first_far_bound * base.powf(i as f32);
+        cascades_far_bounds.push(cascade_far_bound);
+    }
+
+    cascades_far_bounds
+}
+
 impl CascadesConfig {
+    pub fn new(
+        n_cascades: usize,
+        shadow_far_distance: f32,
+        first_far_bound: f32,
+        overlap_proportion: f32,
+    ) -> Self {
+        Self {
+            cascades_far_bounds: calculate_cascade_far_bounds(
+                n_cascades,
+                shadow_far_distance,
+                first_far_bound,
+            ),
+            overlap_proportion,
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.cascades_far_bounds.len()
     }
@@ -1636,6 +1668,7 @@ pub fn prepare_lights(
                 flags: flags.bits,
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
+                n_cascades: cascades_config.cascades_far_bounds.len() as u32,
                 cascades_overlap_proportion: cascades_config.overlap_proportion,
             };
 
