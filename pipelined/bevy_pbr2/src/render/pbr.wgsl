@@ -774,9 +774,42 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
                 emissive.rgb * output_color.a,
             output_color.a);
 
+        // Debug overlay alpha
+        let debug_overlay_alpha = 0.4;
+
+        // Cascade debug
+        let cascade_debug_mode = 0;
+        if (cascade_debug_mode == 1) {
+            // Visualize the cascades
+
+            var light: DirectionalLight = lights.directional_lights[0u];
+
+            var cascade_index: u32 = get_cascade_index(0u, view_z);
+            var cascade_color: vec3<f32> = hsv2rgb(f32(cascade_index) / f32(light.n_cascades + 1u), 1.0, 0.5);
+
+            var next_cascade_index: u32 = cascade_index + 1u;
+            if (next_cascade_index < light.n_cascades) {
+                let cascade_far_bound = light.cascades_far_bounds[cascade_index >> 2u][cascade_index & 3u];
+                let next_cascade_near_bound = (1.0 - light.cascade_overlap_proportion) * cascade_far_bound;
+                if (-view_z >= next_cascade_near_bound) {
+                    let next_cascade_color = hsv2rgb(f32(next_cascade_index) / f32(light.n_cascades + 1u), 1.0, 0.5);
+                    cascade_color = mix(
+                        cascade_color,
+                        next_cascade_color,
+                        (-view_z - next_cascade_near_bound)
+                            / (cascade_far_bound - next_cascade_near_bound)
+                    );
+                }
+            }
+
+            output_color = vec4<f32>(
+                (1.0 - debug_overlay_alpha) * output_color.rgb + debug_overlay_alpha * cascade_color,
+                output_color.a
+            );
+        }
+
         // Cluster allocation debug (using 'over' alpha blending)
         let cluster_debug_mode = 0;
-        let cluster_overlay_alpha = 0.4;
         if (cluster_debug_mode == 1) {
             // Visualize the z slices
             var z_slice: u32 = view_z_to_z_slice(view_z);
@@ -786,20 +819,20 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             }
             let slice_color = hsv2rgb(f32(z_slice) / f32(lights.cluster_dimensions.z + 1u), 1.0, 0.5);
             output_color = vec4<f32>(
-                (1.0 - cluster_overlay_alpha) * output_color.rgb + cluster_overlay_alpha * slice_color,
+                (1.0 - debug_overlay_alpha) * output_color.rgb + debug_overlay_alpha * slice_color,
                 output_color.a
             );
         } elseif (cluster_debug_mode == 2) {
             // Visualize the number of lights per cluster
-            output_color.r = (1.0 - cluster_overlay_alpha) * output_color.r
-                + cluster_overlay_alpha * smoothStep(0.0, 32.0, f32(offset_and_count.count));
-            output_color.g = (1.0 - cluster_overlay_alpha) * output_color.g
-                + cluster_overlay_alpha * (1.0 - smoothStep(0.0, 32.0, f32(offset_and_count.count)));
+            output_color.r = (1.0 - debug_overlay_alpha) * output_color.r
+                + debug_overlay_alpha * smoothStep(0.0, 32.0, f32(offset_and_count.count));
+            output_color.g = (1.0 - debug_overlay_alpha) * output_color.g
+                + debug_overlay_alpha * (1.0 - smoothStep(0.0, 32.0, f32(offset_and_count.count)));
         } elseif (cluster_debug_mode == 3) {
             // Visualize the cluster
             let cluster_color = hsv2rgb(random1D(f32(cluster_index)), 1.0, 0.5);
             output_color = vec4<f32>(
-                (1.0 - cluster_overlay_alpha) * output_color.rgb + cluster_overlay_alpha * cluster_color,
+                (1.0 - debug_overlay_alpha) * output_color.rgb + debug_overlay_alpha * cluster_color,
                 output_color.a
             );
         }
