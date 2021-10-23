@@ -127,7 +127,8 @@ let POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32 = 1u;
 
 struct DirectionalCascade {
     view_projection: mat4x4<f32>;
-    texel_size: vec4<f32>;
+    // NOTE: .xy are texel_size, .zw are scale
+    texel_size_scale: vec4<f32>;
 };
 
 // NOTE: Keep in sync with light.rs!
@@ -654,11 +655,9 @@ fn compute_receiver_plane_depth_bias(tex_coord_dx: vec3<f32>, tex_coord_dy: vec3
     return bias_uv;
 }
 
-// fn compute_receiver_plane_depth_bias(shadow_map_uv_depth: vec3<f32>) -> vec2<f32> {
+// fn compute_receiver_plane_depth_bias(duvdepth_dscreenu: vec3<f32>, duvdepth_dscreenv: vec3<f32>) -> vec2<f32> {
 //     // Receiver Plane Depth Bias
 //     // from https://developer.amd.com/wordpress/media/2012/10/Isidoro-ShadowMapping.pdf
-//     let duvdepth_dscreenu = dpdx(shadow_map_uv_depth);
-//     let duvdepth_dscreenv = dpdy(shadow_map_uv_depth);
 //     let uv_jacobian = mat2x2<f32>(duvdepth_dscreenu.xy, duvdepth_dscreenv.xy);
 //     let ddepth_dscreenuv = vec2<f32>(duvdepth_dscreenu.z, duvdepth_dscreenv.z);
 //     return transpose(inverse2x2(uv_jacobian)) * ddepth_dscreenuv;
@@ -671,6 +670,8 @@ fn sample_shadow_map_random_disc_pcf(
     shadow_pos: vec3<f32>,
     light_id: u32,
     cascade_index: u32,
+    cascade_0_scale: f32,
+    cascade_scale: f32,
     screen_pos: vec2<u32>
 ) -> f32 {
     var light: DirectionalLight = lights.directional_lights[light_id];
@@ -679,8 +680,8 @@ fn sample_shadow_map_random_disc_pcf(
     let shadow_pos_dx = dpdx(shadow_pos);
     let shadow_pos_dy = dpdy(shadow_pos);
 
-    let max_filter_size = vec2<f32>(MAX_KERNEL_SIZE / abs(light.cascades[0].texel_size.x));
-    let filter_size = clamp(min(FILTER_SIZE, max_filter_size) * abs(cascade.texel_size.x), vec2<f32>(1.0), vec2<f32>(MAX_KERNEL_SIZE));
+    let max_filter_size = vec2<f32>(MAX_KERNEL_SIZE / abs(cascade_0_scale));
+    let filter_size = clamp(min(FILTER_SIZE, max_filter_size) * abs(cascade_scale), vec2<f32>(1.0), vec2<f32>(MAX_KERNEL_SIZE));
     // let filter_size = vec2<f32>(2.0);
 
     var result: f32 = 1.0;
@@ -691,8 +692,9 @@ fn sample_shadow_map_random_disc_pcf(
     // #if UsePlaneDepthBias_
         let texel_size = vec2<f32>(1.0) / shadow_map_size;
 
-        let receiver_plane_depth_bias = compute_receiver_plane_depth_bias(shadow_pos_dx, shadow_pos_dy);
+        // let receiver_plane_depth_bias = compute_receiver_plane_depth_bias(shadow_pos_dx, shadow_pos_dy);
         // let receiver_plane_depth_bias = ddepth_duv;
+        let receiver_plane_depth_bias = vec2<f32>(0.0);
 
         // Static depth biasing to make up for incorrect fractional sampling on the shadow map grid
         let fractional_sampling_error = dot(texel_size, vec2<f32>(abs(receiver_plane_depth_bias)));
@@ -788,11 +790,12 @@ fn SampleShadowMap(
     shadow_map_size_inv: vec2<f32>,
     light_id: u32,
     cascade_index: u32,
+    cascade_scale: f32,
     depth: f32,
     receiver_plane_depth_bias: vec2<f32>
 ) -> f32 {
 
-    let uv = base_uv + vec2<f32>(u, v) * lights.directional_lights[light_id].cascades[cascade_index].texel_size.xy;
+    let uv = base_uv + vec2<f32>(u, v) * shadow_map_size_inv;// / cascade_scale;
 
     // #if UsePlaneDepthBias_
     //     let z = depth + dot(vec2<f32>(u, v) * shadow_map_size_inv, receiver_plane_depth_bias);
@@ -818,6 +821,7 @@ fn SampleShadowMapOptimizedPCF(
     // shadowPosDY: vec3<f32>,
     light_id: u32,
     cascade_index: u32,
+    cascade_scale: f32,
     filter_size: f32
 ) -> f32 {
     let shadowMapSize = vec3<f32>(textureDimensions(directional_shadow_textures));
@@ -881,10 +885,10 @@ fn SampleShadowMapOptimizedPCF(
         let v0 = (2.0 - t) / vw0 - 1.0;
         let v1 = t / vw1 + 1.0;
 
-        sum = sum + uw0 * vw0 * SampleShadowMap(base_uv, u0, v0, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw1 * vw0 * SampleShadowMap(base_uv, u1, v0, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw0 * vw1 * SampleShadowMap(base_uv, u0, v1, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw1 * vw1 * SampleShadowMap(base_uv, u1, v1, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw0 * vw0 * SampleShadowMap(base_uv, u0, v0, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw1 * vw0 * SampleShadowMap(base_uv, u1, v0, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw0 * vw1 * SampleShadowMap(base_uv, u0, v1, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw1 * vw1 * SampleShadowMap(base_uv, u1, v1, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
 
         return sum * 1.0 / 16.0;
     } elseif (filter_size <= 5.0) {
@@ -904,17 +908,17 @@ fn SampleShadowMapOptimizedPCF(
         let v1 = (3.0 + t) / vw1;
         let v2 = t / vw2 + 2.0;
 
-        sum = sum + uw0 * vw0 * SampleShadowMap(base_uv, u0, v0, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw1 * vw0 * SampleShadowMap(base_uv, u1, v0, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw2 * vw0 * SampleShadowMap(base_uv, u2, v0, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw0 * vw0 * SampleShadowMap(base_uv, u0, v0, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw1 * vw0 * SampleShadowMap(base_uv, u1, v0, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw2 * vw0 * SampleShadowMap(base_uv, u2, v0, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
 
-        sum = sum + uw0 * vw1 * SampleShadowMap(base_uv, u0, v1, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw1 * vw1 * SampleShadowMap(base_uv, u1, v1, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw2 * vw1 * SampleShadowMap(base_uv, u2, v1, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw0 * vw1 * SampleShadowMap(base_uv, u0, v1, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw1 * vw1 * SampleShadowMap(base_uv, u1, v1, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw2 * vw1 * SampleShadowMap(base_uv, u2, v1, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
 
-        sum = sum + uw0 * vw2 * SampleShadowMap(base_uv, u0, v2, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw1 * vw2 * SampleShadowMap(base_uv, u1, v2, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw2 * vw2 * SampleShadowMap(base_uv, u2, v2, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw0 * vw2 * SampleShadowMap(base_uv, u0, v2, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw1 * vw2 * SampleShadowMap(base_uv, u1, v2, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw2 * vw2 * SampleShadowMap(base_uv, u2, v2, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
 
         return sum * 1.0 / 144.0;
     } else {
@@ -940,25 +944,25 @@ fn SampleShadowMapOptimizedPCF(
         let v2 = -(7.0 * t + 5.0) / vw2 + 1.0;
         let v3 = -t / vw3 + 3.0;
 
-        sum = sum + uw0 * vw0 * SampleShadowMap(base_uv, u0, v0, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw1 * vw0 * SampleShadowMap(base_uv, u1, v0, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw2 * vw0 * SampleShadowMap(base_uv, u2, v0, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw3 * vw0 * SampleShadowMap(base_uv, u3, v0, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw0 * vw0 * SampleShadowMap(base_uv, u0, v0, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw1 * vw0 * SampleShadowMap(base_uv, u1, v0, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw2 * vw0 * SampleShadowMap(base_uv, u2, v0, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw3 * vw0 * SampleShadowMap(base_uv, u3, v0, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
 
-        sum = sum + uw0 * vw1 * SampleShadowMap(base_uv, u0, v1, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw1 * vw1 * SampleShadowMap(base_uv, u1, v1, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw2 * vw1 * SampleShadowMap(base_uv, u2, v1, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw3 * vw1 * SampleShadowMap(base_uv, u3, v1, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw0 * vw1 * SampleShadowMap(base_uv, u0, v1, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw1 * vw1 * SampleShadowMap(base_uv, u1, v1, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw2 * vw1 * SampleShadowMap(base_uv, u2, v1, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw3 * vw1 * SampleShadowMap(base_uv, u3, v1, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
 
-        sum = sum + uw0 * vw2 * SampleShadowMap(base_uv, u0, v2, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw1 * vw2 * SampleShadowMap(base_uv, u1, v2, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw2 * vw2 * SampleShadowMap(base_uv, u2, v2, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw3 * vw2 * SampleShadowMap(base_uv, u3, v2, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw0 * vw2 * SampleShadowMap(base_uv, u0, v2, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw1 * vw2 * SampleShadowMap(base_uv, u1, v2, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw2 * vw2 * SampleShadowMap(base_uv, u2, v2, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw3 * vw2 * SampleShadowMap(base_uv, u3, v2, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
 
-        sum = sum + uw0 * vw3 * SampleShadowMap(base_uv, u0, v3, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw1 * vw3 * SampleShadowMap(base_uv, u1, v3, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw2 * vw3 * SampleShadowMap(base_uv, u2, v3, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
-        sum = sum + uw3 * vw3 * SampleShadowMap(base_uv, u3, v3, shadowMapSizeInv, light_id, cascade_index, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw0 * vw3 * SampleShadowMap(base_uv, u0, v3, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw1 * vw3 * SampleShadowMap(base_uv, u1, v3, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw2 * vw3 * SampleShadowMap(base_uv, u2, v3, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
+        sum = sum + uw3 * vw3 * SampleShadowMap(base_uv, u3, v3, shadowMapSizeInv, light_id, cascade_index, cascade_scale, lightDepth, receiverPlaneDepthBias);
 
         return sum * 1.0 / 2704.0;
     }
@@ -969,7 +973,9 @@ fn sample_cascade(
     cascade_index: u32,
     frag_position: vec4<f32>,
     surface_normal: vec3<f32>,
-    frag_coord: vec4<f32>
+    frag_coord: vec4<f32>,
+    cascade_0_scale: f32,
+    cascade_scale: f32
 ) -> f32 {
     var light: DirectionalLight = lights.directional_lights[light_id];
     let cascade = light.cascades[cascade_index];
@@ -979,7 +985,7 @@ fn sample_cascade(
     // let frag_position_dpdy = dpdy(frag_position.xyz);
 
     // The normal bias is scaled to the texel size.
-    let normal_offset = light.shadow_normal_bias * cascade.texel_size.x * surface_normal.xyz;
+    let normal_offset = light.shadow_normal_bias * cascade.texel_size_scale.x * surface_normal.xyz;
     let depth_offset = light.shadow_depth_bias * light.direction_to_light.xyz;
     let offset_position = vec4<f32>(frag_position.xyz + normal_offset + depth_offset, frag_position.w);
 
@@ -1004,22 +1010,25 @@ fn sample_cascade(
     let shadow_map_uv_depth = vec3<f32>(shadow_map_uv, depth);
     // let receiver_plane_depth_bias = compute_receiver_plane_depth_bias(shadow_map_uv_depth);
 
-    return SampleShadowMapOptimizedPCF(
-        shadow_map_uv_depth,
-        // shadowPosDX: vec3<f32>,
-        // shadowPosDY: vec3<f32>,
-        light_id,
-        cascade_index,
-        5.0
-    );
-
-    // return sample_shadow_map_random_disc_pcf(
+    // return SampleShadowMapOptimizedPCF(
     //     shadow_map_uv_depth,
-    //     // receiver_plane_depth_bias,
+    //     // shadowPosDX: vec3<f32>,
+    //     // shadowPosDY: vec3<f32>,
     //     light_id,
     //     cascade_index,
-    //     vec2<u32>(frag_coord.xy)
+    //     cascade_scale,
+    //     5.0
     // );
+
+    return sample_shadow_map_random_disc_pcf(
+        shadow_map_uv_depth,
+        // receiver_plane_depth_bias,
+        light_id,
+        cascade_index,
+        cascade_0_scale,
+        cascade_scale,
+        vec2<u32>(frag_coord.xy)
+    );
 
     // // do the lookup, using HW PCF and comparison
     // // NOTE: Due to non-uniform control flow above, we must use the level variant of the texture
@@ -1041,14 +1050,26 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
         return 1.0;
     }
 
-    var shadow: f32 = sample_cascade(light_id, cascade_index, frag_position, surface_normal, frag_coord);
+    var cascade_near_bound: f32 = 0.0;
+    if (cascade_index > 0u) {
+        let prev_cascade_index = cascade_index - 1u;
+        cascade_near_bound = light.cascades_far_bounds[prev_cascade_index >> 2u][prev_cascade_index & 3u];
+    }
+    let cascade_far_bound = light.cascades_far_bounds[cascade_index >> 2u][cascade_index & 3u];
+    let final_cascade_index = light.n_cascades - 1u;
+    let shadow_far_bound = light.cascades_far_bounds[final_cascade_index >> 2u][final_cascade_index & 3u];
+
+    let cascade_0_scale = shadow_far_bound / light.cascades_far_bounds[0u][0u];
+    let cascade_scale = shadow_far_bound / (cascade_far_bound - cascade_near_bound);
+
+
+    var shadow: f32 = sample_cascade(light_id, cascade_index, frag_position, surface_normal, frag_coord, cascade_0_scale, cascade_scale);
 
     let next_cascade_index = cascade_index + 1u;
     if (next_cascade_index < light.n_cascades) {
-        let cascade_far_bound = light.cascades_far_bounds[cascade_index >> 2u][cascade_index & 3u];
         let next_cascade_near_bound = (1.0 - light.cascade_overlap_proportion) * cascade_far_bound;
         if (-view_z >= next_cascade_near_bound) {
-            let next_cascade_shadow = sample_cascade(light_id, next_cascade_index, frag_position, surface_normal, frag_coord);
+            let next_cascade_shadow = sample_cascade(light_id, next_cascade_index, frag_position, surface_normal, frag_coord, cascade_0_scale, cascade_scale);
             shadow = mix(
                 shadow,
                 next_cascade_shadow,

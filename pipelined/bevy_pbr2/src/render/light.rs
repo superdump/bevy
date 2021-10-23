@@ -115,7 +115,7 @@ bitflags::bitflags! {
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
 pub struct GpuDirectionalCascade {
     view_projection: Mat4,
-    texel_size: Vec4,
+    texel_size_scale: Vec4,
 }
 
 pub type GpuDirectionalCascadeBounds = [Vec4; (MAX_CASCADES_PER_LIGHT + 3) / 4];
@@ -803,7 +803,8 @@ pub struct Cascade {
     view_transform: Mat4,
     projection: Mat4,
     view_projection: Mat4,
-    cascade_texel_size: f32,
+    texel_size: f32,
+    scale: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -838,6 +839,19 @@ impl Cascades {
     }
 }
 
+fn inverse_scale_translation(m: Mat4) -> Mat4 {
+    let mut inv = Mat4::IDENTITY;
+
+    inv.x_axis[0] = 1.0 / m.x_axis[0];
+    inv.y_axis[1] = 1.0 / m.y_axis[1];
+    inv.z_axis[2] = 1.0 / m.z_axis[2];
+    inv.w_axis[0] = -m.w_axis[0] * inv.x_axis[0];
+    inv.w_axis[1] = -m.w_axis[1] * inv.y_axis[1];
+    inv.w_axis[2] = -m.w_axis[2] * inv.z_axis[2];
+
+    return inv;
+}
+
 // NOTE: This code is very sensitive to floating point precision and instability and has followed
 //       instructions to avoid view dependence from the section on cascade shadow maps in
 //       Eric Lengyel's Foundations of Game Engine Development 2: Rendering. Be very careful when
@@ -848,6 +862,7 @@ fn calculate_cascade(
     cascade_texture_size: f32,
     world_to_light_view: Mat4,  // m_light
     camera_to_light_view: Mat4, // l
+    view_frustum_diameter: f32,
     z_near: f32,
     z_far: f32,
 ) -> Cascade {
@@ -855,7 +870,7 @@ fn calculate_cascade(
     let b = z_far * tan_half_fov;
     // NOTE: These vertices are in a specific order: bottom right, top right, top left, bottom left
     //                                               for near then for far
-    let frustum_corners = [
+    let frustum_corners_camera_view = [
         Vec3A::new(a * ar, -a, z_near),
         Vec3A::new(a * ar, a, z_near),
         Vec3A::new(-a * ar, a, z_near),
@@ -865,11 +880,11 @@ fn calculate_cascade(
         Vec3A::new(-b * ar, b, z_far),
         Vec3A::new(-b * ar, -b, z_far),
     ];
-    // dbg!(&frustum_corners);
+    // dbg!(&frustum_corners_camera_view);
 
     let mut min = Vec3A::splat(f32::MAX);
     let mut max = Vec3A::splat(f32::MIN);
-    for corner_camera_view in frustum_corners {
+    for corner_camera_view in frustum_corners_camera_view {
         let corner_light_view = Vec3A::from(camera_to_light_view * corner_camera_view.extend(1.0));
         // dbg!(&corner_light_view);
         min = min.min(corner_light_view);
@@ -889,9 +904,9 @@ fn calculate_cascade(
     //       as even though the lengths using corner_light_view above should be the same, preicsion can
     //       introduce small but significant differences.
     // NOTE: The size remains the same unless the view frustum or cascade configuration is modified.
-    let cascade_diameter = (frustum_corners[0] - frustum_corners[6])
+    let cascade_diameter = (frustum_corners_camera_view[0] - frustum_corners_camera_view[6])
         .length()
-        .max((frustum_corners[4] - frustum_corners[6]).length())
+        .max((frustum_corners_camera_view[4] - frustum_corners_camera_view[6]).length())
         .ceil();
     // dbg!(&cascade_diameter);
     // panic!("blerp");
@@ -902,6 +917,11 @@ fn calculate_cascade(
     //       integer, cascade_texel_size is then an integer multiple of a power of 2 and can be
     //       exactly represented in a floating point value.
     let cascade_texel_size = cascade_diameter / cascade_texture_size;
+    // dbg!(&z_near);
+    // dbg!(&z_far);
+    // dbg!(&cascade_diameter);
+    // dbg!(&cascade_texel_size);
+    // dbg!(cascade_diameter / view_frustum_diameter);
     // NOTE: For shadow stability it is very important that the near_plane_center is at integer
     //       multiples of the texel size to be exactly representable in a floating point value.
     let near_plane_center = Vec3A::new(
@@ -960,7 +980,8 @@ fn calculate_cascade(
         view_transform: cascade_world_to_light_view,
         projection: cascade_projection,
         view_projection: cascade_view_projection,
-        cascade_texel_size,
+        texel_size: cascade_texel_size,
+        scale: view_frustum_diameter / cascade_diameter,
     }
 }
 
@@ -995,6 +1016,32 @@ pub fn update_directional_light_cascades(
                 let world_to_light_view = Mat4::from_quat(transform.rotation);
                 let camera_to_light_view = world_to_light_view.inverse() * camera_view;
 
+                let z_near = 0.0;
+                let z_far = *cascades_config.cascades_far_bounds.iter().last().unwrap();
+                let a = z_near * tan_half_fov;
+                let b = z_far * tan_half_fov;
+                let near_bottom_right = Vec3A::new(a * ar, -a, z_near);
+                let far_bottom_right = Vec3A::new(b * ar, -b, z_far);
+                let far_top_left = Vec3A::new(-b * ar, b, z_far);
+                // dbg!(&z_near);
+                // dbg!(&z_far);
+                // dbg!(&near_bottom_right);
+                // dbg!(&far_bottom_right);
+                // dbg!(&far_top_left);
+
+                // NOTE: Use the larger of the frustum slice far plane diagonal and body diagonal lengths as this
+                //       will be the maximum possible projection size. Use the ceiling to get an integer which is
+                //       very important for floating point stability later. It is also important that these are
+                //       calculated using the original camera space corner positions for floating point precision
+                //       as even though the lengths using corner_light_view above should be the same, preicsion can
+                //       introduce small but significant differences.
+                // NOTE: The size remains the same unless the view frustum or cascade configuration is modified.
+                let view_frustum_diameter = (near_bottom_right - far_top_left)
+                    .length()
+                    .max((far_bottom_right - far_top_left).length())
+                    .ceil();
+                // dbg!(&view_frustum_diameter);
+
                 cascades.reserve_and_clear(cascades_config.len());
                 for (i, cascade_far_bound) in cascades_config.iter().copied().enumerate() {
                     let cascade = calculate_cascade(
@@ -1003,6 +1050,7 @@ pub fn update_directional_light_cascades(
                         directional_light_shadow_map.size as f32,
                         world_to_light_view,
                         camera_to_light_view,
+                        view_frustum_diameter,
                         // NOTE: -z is in front of the camera so we negate the cascade z bounds
                         if i > 0 {
                             (1.0 - cascades_config.overlap_proportion)
@@ -1685,7 +1733,12 @@ pub fn prepare_lights(
 
                 *gpu_cascade = GpuDirectionalCascade {
                     view_projection: cascade.view_projection,
-                    texel_size: Vec4::splat(cascade.cascade_texel_size),
+                    texel_size_scale: Vec4::new(
+                        cascade.texel_size,
+                        cascade.texel_size,
+                        cascade.scale,
+                        cascade.scale,
+                    ),
                 };
 
                 let depth_texture_view =
