@@ -196,6 +196,10 @@ var<uniform> point_lights: PointLights;
 var<uniform> cluster_light_index_lists: ClusterLightIndexLists;
 [[group(0), binding(8)]]
 var<uniform> cluster_offsets_and_counts: ClusterOffsetsAndCounts;
+[[group(0), binding(9)]]
+var blue_noise_texture: texture_2d<f32>;
+[[group(0), binding(10)]]
+var blue_noise_sampler: sampler;
 
 [[group(1), binding(0)]]
 var<uniform> material: StandardMaterial;

@@ -43,6 +43,8 @@ impl Plugin for PbrPlugin {
             .init_resource::<PointLightShadowMap>()
             .init_resource::<AmbientLight>()
             .init_resource::<VisiblePointLights>()
+            .init_resource::<BlueNoise>()
+            .add_startup_system(load_blue_noise)
             .add_system_to_stage(
                 CoreStage::PostUpdate,
                 // NOTE: Clusters need to have been added before update_clusters is run so
@@ -102,6 +104,7 @@ impl Plugin for PbrPlugin {
         {
             let render_app = app.sub_app(RenderApp);
             render_app
+                .add_system_to_stage(RenderStage::Extract, render::extract_blue_noise)
                 .add_system_to_stage(RenderStage::Extract, render::extract_meshes)
                 .add_system_to_stage(
                     RenderStage::Extract,
