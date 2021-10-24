@@ -1223,7 +1223,11 @@ pub fn check_light_mesh_visibility(
                     frusta.iter().zip(cascades_visible_entities.iter_mut())
                 {
                     // println!("Testing frustum");
-                    if frustum.intersects_obb(aabb, &transform.compute_matrix()) {
+                    if frustum.intersects_obb(
+                        aabb,
+                        &transform.compute_matrix(),
+                        ALL_FRUSTUM_PLANES_BUT_NEAR,
+                    ) {
                         // println!("Intersected");
                         is_visible = true;
                         visible_entities.entities.push(entity);
@@ -1293,7 +1297,7 @@ pub fn check_light_mesh_visibility(
                             .iter()
                             .zip(cubemap_visible_entities.iter_mut())
                         {
-                            if frustum.intersects_obb(aabb, &model_to_world) {
+                            if frustum.intersects_obb(aabb, &model_to_world, ALL_FRUSTUM_PLANES) {
                                 computed_visibility.is_visible = true;
                                 visible_entities.entities.push(entity);
                             }

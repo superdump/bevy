@@ -80,8 +80,33 @@ pub struct Plane {
     pub normal_d: Vec4,
 }
 
+bitflags::bitflags! {
+    #[repr(transparent)]
+    struct FrustumPlanes: u32 {
+        const LEFT          = (1 << 0);
+        const RIGHT         = (1 << 0);
+        const TOP           = (1 << 0);
+        const BOTTOM        = (1 << 0);
+        const NEAR          = (1 << 0);
+        const FAR           = (1 << 0);
+    }
+}
+
+pub const ALL_FRUSTUM_PLANES: FrustumPlanes = FrustumPlanes::LEFT
+    | FrustumPlanes::RIGHT
+    | FrustumPlanes::TOP
+    | FrustumPlanes::BOTTOM
+    | FrustumPlanes::NEAR
+    | FrustumPlanes::FAR;
+pub const ALL_FRUSTUM_PLANES_BUT_NEAR: FrustumPlanes = FrustumPlanes::LEFT
+    | FrustumPlanes::RIGHT
+    | FrustumPlanes::TOP
+    | FrustumPlanes::BOTTOM
+    | FrustumPlanes::FAR;
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Frustum {
+    // Frustum planes in the order: left, right, top, bottom, near, far
     pub planes: [Plane; 6],
 }
 
@@ -123,7 +148,7 @@ impl Frustum {
         true
     }
 
-    pub fn intersects_obb(&self, aabb: &Aabb, model_to_world: &Mat4) -> bool {
+    pub fn intersects_obb(&self, aabb: &Aabb, model_to_world: &Mat4, mask: FrustumPlanes) -> bool {
         let aabb_center_world = *model_to_world * aabb.center.extend(1.0);
         let axes = [
             Vec3A::from(model_to_world.x_axis),
@@ -131,11 +156,23 @@ impl Frustum {
             Vec3A::from(model_to_world.z_axis),
         ];
 
-        for plane in &self.planes {
-            let p_normal = Vec3A::from(plane.normal_d);
-            let relative_radius = aabb.relative_radius(&p_normal, &axes);
-            if plane.normal_d.dot(aabb_center_world) + relative_radius <= 0.0 {
-                return false;
+        if mask == ALL_FRUSTUM_PLANES {
+            for plane in &self.planes {
+                let p_normal = Vec3A::from(plane.normal_d);
+                let relative_radius = aabb.relative_radius(&p_normal, &axes);
+                if plane.normal_d.dot(aabb_center_world) + relative_radius <= 0.0 {
+                    return false;
+                }
+            }
+        } else {
+            for (i, plane) in self.planes.iter().enumerate() {
+                if mask.contains(FrustumPlanes::from_bits(1u32 << (i as u32)).unwrap()) {
+                    let p_normal = Vec3A::from(plane.normal_d);
+                    let relative_radius = aabb.relative_radius(&p_normal, &axes);
+                    if plane.normal_d.dot(aabb_center_world) + relative_radius <= 0.0 {
+                        return false;
+                    }
+                }
             }
         }
         true
