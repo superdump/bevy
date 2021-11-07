@@ -137,10 +137,9 @@ pub struct GpuLights {
 
 // NOTE: this must be kept in sync with the same constants in pbr.frag
 pub const MAX_POINT_LIGHTS: usize = 256;
+pub const MAX_POINT_LIGHT_SHADOW_MAPS: usize = 1;
 pub const MAX_DIRECTIONAL_LIGHTS: usize = 1;
-// FIXME: How should we handle shadows for clustered forward? Limiting to maximum 10
-//        point light shadow maps for now
-pub const POINT_SHADOW_LAYERS: u32 = (6 * 10) as u32;
+pub const POINT_SHADOW_LAYERS: u32 = (6 * MAX_POINT_LIGHT_SHADOW_MAPS) as u32;
 pub const DIRECTIONAL_SHADOW_LAYERS: u32 = MAX_DIRECTIONAL_LIGHTS as u32;
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
@@ -189,6 +188,8 @@ impl FromWorld for ShadowPipeline {
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
                 compare: Some(CompareFunction::GreaterEqual),
+                // compare: Some(CompareFunction::LessEqual),
+                // compare: None,
                 ..Default::default()
             }),
             directional_light_sampler: render_device.create_sampler(&SamplerDescriptor {
@@ -199,6 +200,7 @@ impl FromWorld for ShadowPipeline {
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
                 compare: Some(CompareFunction::GreaterEqual),
+                // compare: None,
                 ..Default::default()
             }),
         }
@@ -646,8 +648,8 @@ pub fn prepare_lights(
         };
 
         // TODO: this should select lights based on relevance to the view instead of the first ones that show up in a query
-        for (light_entity, light) in point_lights.iter() {
-            if !light.shadows_enabled {
+        for (i, (light_entity, light)) in point_lights.iter().enumerate().take(MAX_POINT_LIGHTS) {
+            if !light.shadows_enabled || i >= MAX_POINT_LIGHT_SHADOW_MAPS {
                 continue;
             }
             let light_index = *global_light_meta
@@ -787,9 +789,11 @@ pub fn prepare_lights(
             point_light_depth_texture
                 .texture
                 .create_view(&TextureViewDescriptor {
-                    label: Some("point_light_shadow_map_array_texture_view"),
+                    // label: Some("point_light_shadow_map_array_texture_view"),
+                    label: Some("point_light_shadow_map_texture_view"),
                     format: None,
-                    dimension: Some(TextureViewDimension::CubeArray),
+                    // dimension: Some(TextureViewDimension::CubeArray),
+                    dimension: Some(TextureViewDimension::Cube),
                     aspect: TextureAspect::All,
                     base_mip_level: 0,
                     mip_level_count: None,
@@ -799,9 +803,11 @@ pub fn prepare_lights(
         let directional_light_depth_texture_view = directional_light_depth_texture
             .texture
             .create_view(&TextureViewDescriptor {
-                label: Some("directional_light_shadow_map_array_texture_view"),
+                // label: Some("directional_light_shadow_map_array_texture_view"),
+                label: Some("directional_light_shadow_map_texture_view"),
                 format: None,
-                dimension: Some(TextureViewDimension::D2Array),
+                // dimension: Some(TextureViewDimension::D2Array),
+                dimension: Some(TextureViewDimension::D2),
                 aspect: TextureAspect::All,
                 base_mip_level: 0,
                 mip_level_count: None,

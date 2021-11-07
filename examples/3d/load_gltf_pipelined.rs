@@ -7,12 +7,19 @@ use bevy::{
     render2::{
         camera::{OrthographicProjection, PerspectiveCameraBundle},
         color::Color,
+        view::Msaa,
     },
+    window::WindowDescriptor,
     PipelinedDefaultPlugins,
 };
 
 fn main() {
     App::new()
+        .insert_resource(Msaa { samples: 1 })
+        .insert_resource(WindowDescriptor {
+            scale_factor_override: Some(1.0),
+            ..Default::default()
+        })
         .insert_resource(AmbientLight {
             color: Color::WHITE,
             brightness: 1.0 / 5.0f32,

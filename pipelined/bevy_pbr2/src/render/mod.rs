@@ -204,22 +204,24 @@ impl FromWorld for PbrPipeline {
                     },
                     count: None,
                 },
-                // Point Shadow Texture Cube Array
+                // Point Shadow Texture Cube [Array]
                 BindGroupLayoutEntry {
                     binding: 2,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Texture {
                         multisampled: false,
                         sample_type: TextureSampleType::Depth,
-                        view_dimension: TextureViewDimension::CubeArray,
+                        // view_dimension: TextureViewDimension::CubeArray,
+                        view_dimension: TextureViewDimension::Cube,
                     },
                     count: None,
                 },
-                // Point Shadow Texture Array Sampler
+                // Point Shadow Texture [Array] Sampler
                 BindGroupLayoutEntry {
                     binding: 3,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Sampler {
+                        // comparison: false,
                         comparison: true,
                         filtering: true,
                     },
@@ -232,7 +234,8 @@ impl FromWorld for PbrPipeline {
                     ty: BindingType::Texture {
                         multisampled: false,
                         sample_type: TextureSampleType::Depth,
-                        view_dimension: TextureViewDimension::D2Array,
+                        // view_dimension: TextureViewDimension::D2Array,
+                        view_dimension: TextureViewDimension::D2,
                     },
                     count: None,
                 },
@@ -242,6 +245,7 @@ impl FromWorld for PbrPipeline {
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Sampler {
                         comparison: true,
+                        // comparison: false,
                         filtering: true,
                     },
                     count: None,
@@ -590,6 +594,7 @@ impl SpecializedPipeline for PbrPipeline {
             // depth buffer
             depth_write_enabled = true;
         }
+        shader_defs.push(String::from("NO_CUBE_ARRAY_TEXTURES_SUPPORT"));
         RenderPipelineDescriptor {
             vertex: VertexState {
                 shader: PBR_SHADER_HANDLE.typed::<Shader>(),

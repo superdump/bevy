@@ -721,6 +721,7 @@ impl WgpuFrom<WgpuLimits> for wgpu::Limits {
             max_vertex_buffer_array_stride: val.max_vertex_buffer_array_stride,
             min_storage_buffer_offset_alignment: val.min_storage_buffer_offset_alignment,
             min_uniform_buffer_offset_alignment: val.min_uniform_buffer_offset_alignment,
+            ..Default::default()
         }
     }
 }

@@ -11,7 +11,7 @@ use crate::{
 use bevy_app::EventReader;
 use bevy_asset::{AssetEvent, Handle};
 use bevy_ecs::system::{Res, ResMut};
-use bevy_utils::{HashMap, HashSet};
+use bevy_utils::{tracing::error, HashMap, HashSet};
 use std::{collections::hash_map::Entry, hash::Hash, ops::Deref, sync::Arc};
 use thiserror::Error;
 use wgpu::{PipelineLayoutDescriptor, ShaderModule, VertexBufferLayout};
@@ -54,6 +54,7 @@ impl ShaderCache {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 let processed = self.processor.process_shader(shader, shader_defs)?;
+                error!("Shader code:\n{:?}", processed);
                 let module_descriptor = processed.get_module_descriptor()?;
                 entry.insert(Arc::new(
                     render_device.create_shader_module(&module_descriptor),
@@ -249,6 +250,7 @@ impl RenderPipelineCache {
                         continue;
                     }
                 };
+                error!("Fragment shader module:\n{:?}", fragment_module);
                 Some((
                     fragment_module,
                     fragment.entry_point.deref(),

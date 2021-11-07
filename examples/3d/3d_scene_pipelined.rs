@@ -13,12 +13,19 @@ use bevy::{
         camera::{OrthographicProjection, PerspectiveCameraBundle},
         color::Color,
         mesh::{shape, Mesh},
+        view::Msaa,
     },
+    window::WindowDescriptor,
     PipelinedDefaultPlugins,
 };
 
 fn main() {
     App::new()
+        .insert_resource(Msaa { samples: 1 })
+        .insert_resource(WindowDescriptor {
+            scale_factor_override: Some(1.0),
+            ..Default::default()
+        })
         .add_plugins(PipelinedDefaultPlugins)
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(LogDiagnosticsPlugin::default())

@@ -45,6 +45,7 @@ pub enum Shader {
 }
 
 /// A processed [Shader]. This cannot contain preprocessor directions. It must be "ready to compile"
+#[derive(Debug)]
 pub enum ProcessedShader {
     Wgsl(Cow<'static, str>),
     Glsl(Cow<'static, str>, naga::ShaderStage),

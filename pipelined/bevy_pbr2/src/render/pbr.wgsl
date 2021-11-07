@@ -184,14 +184,25 @@ struct ClusterOffsetsAndCounts {
 
 [[group(0), binding(1)]]
 var<uniform> lights: Lights;
+#ifdef CUBE_ARRAY_TEXTURES_SUPPORT
 [[group(0), binding(2)]]
 var point_shadow_textures: texture_depth_cube_array;
 [[group(0), binding(3)]]
 var point_shadow_textures_sampler: sampler_comparison;
+#endif
+#ifdef NO_CUBE_ARRAY_TEXTURES_SUPPORT
+[[group(0), binding(2)]]
+var point_shadow_textures: texture_depth_cube;
+[[group(0), binding(3)]]
+var point_shadow_textures_sampler: sampler_comparison;
+// var point_shadow_textures_sampler: sampler;
+#endif
 [[group(0), binding(4)]]
-var directional_shadow_textures: texture_depth_2d_array;
+// var directional_shadow_textures: texture_depth_2d_array;
+var directional_shadow_textures: texture_depth_2d;
 [[group(0), binding(5)]]
 var directional_shadow_textures_sampler: sampler_comparison;
+// var directional_shadow_textures_sampler: sampler;
 [[group(0), binding(6)]]
 var<uniform> point_lights: PointLights;
 [[group(0), binding(7)]]
@@ -516,7 +527,18 @@ fn fetch_point_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: v
     //       a quad (2x2 fragments) being processed not being sampled, and this messing with
     //       mip-mapping functionality. The shadow maps have no mipmaps so Level just samples
     //       from LOD 0.
+#ifdef CUBE_ARRAY_TEXTURES_SUPPORT
     return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
+#endif
+#ifdef NO_CUBE_ARRAY_TEXTURES_SUPPORT
+    return textureSampleCompare(point_shadow_textures, point_shadow_textures_sampler, frag_ls, depth);
+    // let sampled_depth = textureSample(point_shadow_textures, point_shadow_textures_sampler, frag_ls);
+    // if (sampled_depth >= depth) {
+    //     return 0.0;
+    // } else {
+    //     return 1.0;
+    // }
+#endif
 }
 
 fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
@@ -547,7 +569,24 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
     // do the lookup, using HW PCF and comparison
     // NOTE: Due to non-uniform control flow above, we must use the level variant of the texture
     //       sampler to avoid use of implicit derivatives causing possible undefined behavior.
-    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
+    // return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
+    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, depth);
+    // let sampled_depth = textureSample(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id));
+    // // No shadow outside the orthographic projection volume
+
+    // if (offset_position_clip.w <= 0.0) {
+    //     return 1.0;
+    // }
+    // if (any(offset_position_ndc.xy < vec2<f32>(-1.0)) || offset_position_ndc.z < 0.0
+    //         || any(offset_position_ndc > vec3<f32>(1.0))) {
+    //     return 1.0;
+    // }
+
+    // if (sampled_depth >= depth) {
+    //     return 0.0;
+    // } else {
+    //     return 1.0;
+    // }
 }
 
 fn hsv2rgb(hue: f32, saturation: f32, value: f32) -> vec3<f32> {
@@ -683,8 +722,15 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             let light_id = get_light_id(i);
             let light = point_lights.data[light_id];
             var shadow: f32 = 1.0;
+#ifdef CUBE_ARRAY_TEXTURES_SUPPORT
             if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
                     || (light.flags & POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
+#endif
+#ifdef NO_CUBE_ARRAY_TEXTURES_SUPPORT
+            if (light_id < 1u
+                    && ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+                        || (light.flags & POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u)) {
+#endif
                 shadow = fetch_point_shadow(light_id, in.world_position, in.world_normal);
             }
             let light_contrib = point_light(in.world_position.xyz, light, roughness, NdotV, N, V, R, F0, diffuse_color);
