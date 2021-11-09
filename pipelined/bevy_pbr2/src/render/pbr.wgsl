@@ -131,17 +131,25 @@ struct PointLight {
     radius: f32;
     near: f32;
     far: f32;
+    // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
+    flags: u32;
     shadow_depth_bias: f32;
     shadow_normal_bias: f32;
 };
+
+let POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32 = 1u;
 
 struct DirectionalLight {
     view_projection: mat4x4<f32>;
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
+    // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
+    flags: u32;
     shadow_depth_bias: f32;
     shadow_normal_bias: f32;
 };
+
+let DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32 = 1u;
 
 [[block]]
 struct Lights {
@@ -606,7 +614,8 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         for (var i: i32 = 0; i < n_point_lights; i = i + 1) {
             let light = lights.point_lights[i];
             var shadow: f32;
-            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u) {
+            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+                    || (light.flags & POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
                 shadow = fetch_point_shadow(i, in.world_position, in.world_normal);
             } else {
                 shadow = 1.0;
@@ -617,7 +626,8 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         for (var i: i32 = 0; i < n_directional_lights; i = i + 1) {
             let light = lights.directional_lights[i];
             var shadow: f32;
-            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u) {
+            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+                    || (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
                 shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
             } else {
                 shadow = 1.0;
