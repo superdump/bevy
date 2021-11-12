@@ -1,7 +1,5 @@
-mod depth_prepass;
 mod light;
 
-pub use depth_prepass::*;
 pub use light::*;
 
 use crate::{AlphaMode, NotShadowCaster, NotShadowReceiver, StandardMaterial, PBR_SHADER_HANDLE};
@@ -515,22 +513,25 @@ impl SpecializedPipeline for PbrPipeline {
         if key.contains(PbrPipelineKey::STANDARDMATERIAL_NORMAL_MAP) {
             shader_defs.push(String::from("STANDARDMATERIAL_NORMAL_MAP"));
         }
-        let (label, blend, depth_compare) = if key.contains(PbrPipelineKey::TRANSPARENT_MAIN_PASS) {
-            (
-                Some("transparent_pbr_pipeline".into()),
-                Some(BlendState::ALPHA_BLENDING),
-                // For the transparent pass, fragments that are closer will be alpha blended
-                CompareFunction::Greater,
-            )
-        } else {
-            (
-                Some("opaque_pbr_pipeline".into()),
-                Some(BlendState::REPLACE),
-                // For the opaque and alpha mask passes, only the fragments at
-                // the depth buffer depth will be shaded
-                CompareFunction::Equal,
-            )
-        };
+        let (label, blend, depth_write_enabled) =
+            if key.contains(PbrPipelineKey::TRANSPARENT_MAIN_PASS) {
+                (
+                    Some("transparent_pbr_pipeline".into()),
+                    Some(BlendState::ALPHA_BLENDING),
+                    // For the transparent pass, fragments that are closer will be alpha blended
+                    // but their depth is not written to the depth buffer
+                    false,
+                )
+            } else {
+                (
+                    Some("opaque_pbr_pipeline".into()),
+                    Some(BlendState::REPLACE),
+                    // For the opaque and alpha mask passes, fragments that are closer will replace
+                    // the current fragment value in the output and the depth is written to the
+                    // depth buffer
+                    true,
+                )
+            };
         RenderPipelineDescriptor {
             vertex: VertexState {
                 shader: PBR_SHADER_HANDLE.typed::<Shader>(),
@@ -568,8 +569,8 @@ impl SpecializedPipeline for PbrPipeline {
             },
             depth_stencil: Some(DepthStencilState {
                 format: TextureFormat::Depth32Float,
-                depth_write_enabled: false,
-                depth_compare,
+                depth_write_enabled,
+                depth_compare: CompareFunction::Greater,
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
