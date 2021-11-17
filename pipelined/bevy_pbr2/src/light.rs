@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use bevy_core_pipeline::Opaque3d;
 use bevy_ecs::prelude::*;
 use bevy_math::{Mat4, UVec2, UVec3, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 use bevy_render2::{
@@ -176,6 +177,9 @@ pub struct NotShadowReceiver;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum SimulationLightSystems {
+    AddClusters,
+    UpdateClusters,
+    AssignLightsToClusters,
     UpdateDirectionalLightFrusta,
     UpdatePointLightFrusta,
     CheckLightVisibility,
@@ -183,10 +187,9 @@ pub enum SimulationLightSystems {
 
 pub struct Clusters {
     /// Tile size
-    tile_size: UVec2,
+    pub(crate) tile_size: UVec2,
     /// Number of clusters in x / y / z in the view frustum
-    pub(crate) dimensions: UVec3,
-    // FIXME: Do we need to store these?
+    pub(crate) axis_slices: UVec3,
     aabbs: Vec<Aabb>,
     pub(crate) lights: Vec<VisiblePointLights>,
 }
@@ -195,7 +198,7 @@ impl Clusters {
     fn new(tile_size: UVec2, screen_size: UVec2, z_slices: u32) -> Self {
         let mut clusters = Self {
             tile_size,
-            dimensions: Default::default(),
+            axis_slices: Default::default(),
             aabbs: Default::default(),
             lights: Default::default(),
         };
@@ -205,7 +208,7 @@ impl Clusters {
 
     fn update(&mut self, tile_size: UVec2, screen_size: UVec2, z_slices: u32) {
         self.tile_size = tile_size;
-        self.dimensions = UVec3::new(
+        self.axis_slices = UVec3::new(
             (screen_size.x + 1) / tile_size.x,
             (screen_size.y + 1) / tile_size.y,
             z_slices,
@@ -240,7 +243,7 @@ fn compute_aabb_for_cluster(
     cluster_dimensions: UVec3,
     ijk: UVec3,
 ) -> Aabb {
-    let ijk = ijk.as_f32();
+    let ijk = ijk.as_vec3();
 
     // Calculate the minimum and maximum points in screen space
     let p_min = ijk.xy() * tile_size;
@@ -272,13 +275,12 @@ fn compute_aabb_for_cluster(
 pub fn add_clusters(
     mut commands: Commands,
     windows: Res<Windows>,
-    cameras: Query<(Entity, &Camera), Without<Clusters>>,
+    cameras: Query<(Entity, &Camera), (With<Opaque3d>, Without<Clusters>)>,
 ) {
     for (entity, camera) in cameras.iter() {
         let window = windows.get(camera.window).unwrap();
-        // FIXME: Make clusters configurable? People can add the Clusters component manually I suppose.
         commands.entity(entity).insert(Clusters::new(
-            UVec2::splat(1920 / 16),
+            UVec2::splat(window.physical_width() / 16),
             UVec2::new(window.physical_width(), window.physical_height()),
             24,
         ));
@@ -290,14 +292,14 @@ pub fn update_clusters(windows: Res<Windows>, mut views: Query<(&Camera, &mut Cl
         let inverse_projection = camera.projection_matrix.inverse();
         let window = windows.get(camera.window).unwrap();
         let screen_size_u32 = UVec2::new(window.physical_width(), window.physical_height());
-        let screen_size = screen_size_u32.as_f32();
+        let screen_size = screen_size_u32.as_vec2();
         let tile_size_u32 = clusters.tile_size;
-        let tile_size = tile_size_u32.as_f32();
-        let z_slices = clusters.dimensions.z;
+        let tile_size = tile_size_u32.as_vec2();
+        let z_slices = clusters.axis_slices.z;
         clusters.update(tile_size_u32, screen_size_u32, z_slices);
         println!(
             "Cluster configuration: {:?} {:?}",
-            clusters.tile_size, clusters.dimensions
+            clusters.tile_size, clusters.axis_slices
         );
 
         // Calculate view space AABBs
@@ -306,11 +308,11 @@ pub fn update_clusters(windows: Res<Windows>, mut views: Query<(&Camera, &mut Cl
         // I choose to scan along rows of tiles in x,y, and for each tile then scan
         // along z
         let mut aabbs = Vec::with_capacity(
-            (clusters.dimensions.y * clusters.dimensions.x * clusters.dimensions.z) as usize,
+            (clusters.axis_slices.y * clusters.axis_slices.x * clusters.axis_slices.z) as usize,
         );
-        for y in 0..clusters.dimensions.y {
-            for x in 0..clusters.dimensions.x {
-                for z in 0..clusters.dimensions.z {
+        for y in 0..clusters.axis_slices.y {
+            for x in 0..clusters.axis_slices.x {
+                for z in 0..clusters.axis_slices.z {
                     // FIXME: Make independent of screen size by dropping tile size and just using i / dim.x?
                     aabbs.push(compute_aabb_for_cluster(
                         camera.near,
@@ -318,7 +320,7 @@ pub fn update_clusters(windows: Res<Windows>, mut views: Query<(&Camera, &mut Cl
                         tile_size,
                         screen_size,
                         inverse_projection,
-                        clusters.dimensions,
+                        clusters.axis_slices,
                         UVec3::new(x, y, z),
                     ));
                 }
@@ -583,12 +585,5 @@ pub fn check_light_mesh_visibility(
                 // to prevent holding unneeded memory
             }
         }
-    }
-}
-
-pub type ExtractedClustersPointLights = Vec<VisiblePointLights>;
-pub fn extract_clusters(mut commands: Commands, views: Query<(Entity, &Clusters), With<Camera>>) {
-    for (entity, clusters) in views.iter() {
-        commands.entity(entity).insert(clusters.lights.clone());
     }
 }
