@@ -184,7 +184,7 @@ impl FromWorld for PbrPipeline {
                         has_dynamic_offset: true,
                         // TODO: change this to ViewUniform::std140_size_static once crevice fixes this!
                         // Context: https://github.com/LPGhatguy/crevice/issues/29
-                        min_binding_size: BufferSize::new(144),
+                        min_binding_size: BufferSize::new(224),
                     },
                     count: None,
                 },
@@ -240,6 +240,42 @@ impl FromWorld for PbrPipeline {
                     ty: BindingType::Sampler {
                         comparison: true,
                         filtering: true,
+                    },
+                    count: None,
+                },
+                // PointLights
+                BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        // NOTE: 0 if no point lights?
+                        min_binding_size: BufferSize::new(0),
+                    },
+                    count: None,
+                },
+                // ClusteredLightIndexLists
+                BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        // NOTE: 0 if no point lights?
+                        min_binding_size: BufferSize::new(0),
+                    },
+                    count: None,
+                },
+                // ClusterOffsetsAndCounts
+                BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: ShaderStage::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        // NOTE: number of clusters * u32, so minimum clusters = 1 => 4
+                        min_binding_size: BufferSize::new(4),
                     },
                     count: None,
                 },
@@ -655,7 +691,7 @@ pub fn queue_meshes(
     mut views: Query<(
         Entity,
         &ExtractedView,
-        &ViewLights,
+        &ViewShadowBindings,
         &VisibleEntities,
         &mut RenderPhase<Opaque3d>,
         &mut RenderPhase<AlphaMask3d>,
@@ -669,7 +705,7 @@ pub fn queue_meshes(
         for (
             entity,
             view,
-            view_lights,
+            view_shadow_bindings,
             visible_entities,
             mut opaque_phase,
             mut alpha_mask_phase,
@@ -689,7 +725,7 @@ pub fn queue_meshes(
                     BindGroupEntry {
                         binding: 2,
                         resource: BindingResource::TextureView(
-                            &view_lights.point_light_depth_texture_view,
+                            &view_shadow_bindings.point_light_depth_texture_view,
                         ),
                     },
                     BindGroupEntry {
@@ -699,7 +735,7 @@ pub fn queue_meshes(
                     BindGroupEntry {
                         binding: 4,
                         resource: BindingResource::TextureView(
-                            &view_lights.directional_light_depth_texture_view,
+                            &view_shadow_bindings.directional_light_depth_texture_view,
                         ),
                     },
                     BindGroupEntry {
@@ -814,7 +850,7 @@ pub struct SetMeshViewBindGroup<const I: usize>;
 impl<const I: usize> EntityRenderCommand for SetMeshViewBindGroup<I> {
     type Param = SQuery<(
         Read<ViewUniformOffset>,
-        Read<ViewLights>,
+        Read<ViewLightsUniformOffset>,
         Read<PbrViewBindGroup>,
     )>;
     #[inline]
@@ -828,7 +864,7 @@ impl<const I: usize> EntityRenderCommand for SetMeshViewBindGroup<I> {
         pass.set_bind_group(
             I,
             &pbr_view_bind_group.value,
-            &[view_uniform.offset, view_lights.gpu_light_binding_index],
+            &[view_uniform.offset, view_lights.offset],
         );
     }
 }

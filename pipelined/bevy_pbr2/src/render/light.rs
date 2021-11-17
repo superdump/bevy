@@ -10,7 +10,7 @@ use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemParamItem},
 };
-use bevy_math::{const_vec3, Mat4, Vec3, Vec4};
+use bevy_math::{Mat4, UVec4, Vec3, Vec4, const_vec3};
 use bevy_render2::{
     camera::CameraProjection,
     color::Color,
@@ -49,6 +49,7 @@ pub struct ExtractedPointLight {
     range: f32,
     radius: f32,
     transform: GlobalTransform,
+    shadows_enabled: bool,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
 }
@@ -60,8 +61,11 @@ pub struct ExtractedDirectionalLight {
     illuminance: f32,
     direction: Vec3,
     projection: Mat4,
+    shadows_enabled: bool,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+    near: f32,
+    far: f32,
 }
 
 pub type ExtractedDirectionalLightShadowMap = DirectionalLightShadowMap;
@@ -76,8 +80,19 @@ pub struct GpuPointLight {
     radius: f32,
     near: f32,
     far: f32,
+    flags: u32,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+}
+
+// NOTE: These must match the bit flags in bevy_pbr2/src/render/pbr.frag!
+bitflags::bitflags! {
+    #[repr(transparent)]
+    struct PointLightFlags: u32 {
+        const SHADOWS_ENABLED            = (1 << 0);
+        const NONE                       = 0;
+        const UNINITIALIZED              = 0xFFFF;
+    }
 }
 
 #[repr(C)]
@@ -86,18 +101,28 @@ pub struct GpuDirectionalLight {
     view_projection: Mat4,
     color: Vec4,
     dir_to_light: Vec3,
+    flags: u32,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+}
+
+// NOTE: These must match the bit flags in bevy_pbr2/src/render/pbr.frag!
+bitflags::bitflags! {
+    #[repr(transparent)]
+    struct DirectionalLightFlags: u32 {
+        const SHADOWS_ENABLED            = (1 << 0);
+        const NONE                       = 0;
+        const UNINITIALIZED              = 0xFFFF;
+    }
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, AsStd140)]
 pub struct GpuLights {
     // TODO: this comes first to work around a WGSL alignment issue. We need to solve this issue before releasing the renderer rework
-    point_lights: [GpuPointLight; MAX_POINT_LIGHTS],
     directional_lights: [GpuDirectionalLight; MAX_DIRECTIONAL_LIGHTS],
     ambient_color: Vec4,
-    n_point_lights: u32,
+    cluster_dimensions: UVec4,
     n_directional_lights: u32,
 }
 
@@ -327,6 +352,7 @@ pub fn extract_lights(
                 range: point_light.range,
                 radius: point_light.radius,
                 transform: *transform,
+                shadows_enabled: point_light.shadows_enabled,
                 shadow_depth_bias: point_light.shadow_depth_bias,
                 // The factor of SQRT_2 is for the worst-case diagonal offset
                 shadow_normal_bias: point_light.shadow_normal_bias
@@ -356,16 +382,21 @@ pub fn extract_lights(
                 illuminance: directional_light.illuminance,
                 direction: transform.forward(),
                 projection: directional_light.shadow_projection.get_projection_matrix(),
+                shadows_enabled: directional_light.shadows_enabled,
                 shadow_depth_bias: directional_light.shadow_depth_bias,
                 // The factor of SQRT_2 is for the worst-case diagonal offset
                 shadow_normal_bias: directional_light.shadow_normal_bias
                     * directional_light_texel_size
                     * std::f32::consts::SQRT_2,
+                near: directional_light.shadow_projection.near,
+                far: directional_light.shadow_projection.far,
             },
             render_visible_entities,
         ));
     }
 }
+
+const POINT_LIGHT_NEAR_Z: f32 = 0.1f32;
 
 // Can't do `Vec3::Y * -1.0` because mul isn't const
 const NEGATIVE_X: Vec3 = const_vec3!([-1.0, 0.0, 0.0]);
@@ -423,18 +454,28 @@ fn face_index_to_name(face_index: usize) -> &'static str {
     }
 }
 
-pub struct ViewLight {
+pub struct ShadowView {
     pub depth_texture_view: TextureView,
     pub pass_name: String,
 }
 
-pub struct ViewLights {
+pub struct ViewShadowBindings {
     pub point_light_depth_texture: Texture,
     pub point_light_depth_texture_view: TextureView,
     pub directional_light_depth_texture: Texture,
     pub directional_light_depth_texture_view: TextureView,
+}
+
+pub struct ViewLightEntities {
     pub lights: Vec<Entity>,
-    pub gpu_light_binding_index: u32,
+}
+
+pub struct ViewLightsUniformOffset {
+    pub offset: u32,
+}
+
+pub struct GlobalLightMeta {
+    pub gpu_point_lights: UniformVec<GpuPointLight>,
 }
 
 #[derive(Default)]
@@ -459,6 +500,7 @@ pub fn prepare_lights(
     mut texture_cache: ResMut<TextureCache>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    mut global_light_meta: ResMut<GlobalLightMeta>,
     mut light_meta: ResMut<LightMeta>,
     views: Query<Entity, With<RenderPhase<Transparent3d>>>,
     ambient_light: Res<ExtractedAmbientLight>,
@@ -472,11 +514,34 @@ pub fn prepare_lights(
     let ambient_color = ambient_light.color.as_rgba_linear() * ambient_light.brightness;
     // Pre-calculate for PointLights
     let cube_face_projection =
-        Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1);
+        Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, POINT_LIGHT_NEAR_Z);
     let cube_face_rotations = CUBE_MAP_FACES
         .iter()
         .map(|CubeMapFace { target, up }| GlobalTransform::identity().looking_at(*target, *up))
         .collect::<Vec<_>>();
+
+    global_light_meta.gpu_point_lights.reserve_and_clear(point_lights.iter().count(), &render_device);
+    for (_, light) in point_lights.iter() {
+        let mut flags = PointLightFlags::NONE;
+        if light.shadows_enabled {
+            flags |= PointLightFlags::SHADOWS_ENABLED;
+        }
+        global_light_meta.gpu_point_lights.push(GpuPointLight {
+            projection: cube_face_projection,
+            // premultiply color by intensity
+            // we don't use the alpha at all, so no reason to multiply only [0..3]
+            color: (light.color.as_rgba_linear() * light.intensity).into(),
+            radius: light.radius,
+            position: light.transform.translation,
+            inverse_square_range: 1.0 / (light.range * light.range),
+            near: POINT_LIGHT_NEAR_Z,
+            far: light.range,
+            flags: flags.bits,
+            shadow_depth_bias: light.shadow_depth_bias,
+            shadow_normal_bias: light.shadow_normal_bias,
+        });
+    }
+    global_light_meta.gpu_point_lights.write_buffer(&render_queue);
 
     // set up light data for each view
     for entity in views.iter() {
@@ -515,17 +580,14 @@ pub fn prepare_lights(
         let mut view_lights = Vec::new();
 
         let mut gpu_lights = GpuLights {
-            ambient_color: ambient_color.into(),
-            n_point_lights: point_lights.iter().len() as u32,
-            n_directional_lights: directional_lights.iter().len() as u32,
-            point_lights: [GpuPointLight::default(); MAX_POINT_LIGHTS],
             directional_lights: [GpuDirectionalLight::default(); MAX_DIRECTIONAL_LIGHTS],
+            ambient_color: ambient_color.into(),
+            cluster_dimensions: UVec4::new(16, 9, 24, 0),
+            n_directional_lights: directional_lights.iter().len() as u32,
         };
 
         // TODO: this should select lights based on relevance to the view instead of the first ones that show up in a query
-        for (light_index, (light_entity, light)) in
-            point_lights.iter().enumerate().take(MAX_POINT_LIGHTS)
-        {
+        for (light_index, (light_entity, light)) in point_lights.iter().enumerate() {
             // ignore scale because we don't want to effectively scale light radius and range
             // by applying those as a view transform to shadow map rendering of objects
             // and ignore rotation because we want the shadow map projections to align with the axes
@@ -549,7 +611,7 @@ pub fn prepare_lights(
                 let view_light_entity = commands
                     .spawn()
                     .insert_bundle((
-                        ViewLight {
+                        ShadowView {
                             depth_texture_view,
                             pass_name: format!(
                                 "shadow pass point light {} {}",
@@ -562,6 +624,8 @@ pub fn prepare_lights(
                             height: point_light_shadow_map.size as u32,
                             transform: view_translation * *view_rotation,
                             projection: cube_face_projection,
+                            near: POINT_LIGHT_NEAR_Z,
+                            far: light.range,
                         },
                         RenderPhase::<Shadow>::default(),
                         LightEntity::Point {
@@ -572,20 +636,6 @@ pub fn prepare_lights(
                     .id();
                 view_lights.push(view_light_entity);
             }
-
-            gpu_lights.point_lights[light_index] = GpuPointLight {
-                projection: cube_face_projection,
-                // premultiply color by intensity
-                // we don't use the alpha at all, so no reason to multiply only [0..3]
-                color: (light.color.as_rgba_linear() * light.intensity).into(),
-                radius: light.radius,
-                position: light.transform.translation,
-                inverse_square_range: 1.0 / (light.range * light.range),
-                near: 0.1,
-                far: light.range,
-                shadow_depth_bias: light.shadow_depth_bias,
-                shadow_normal_bias: light.shadow_normal_bias,
-            };
         }
 
         for (i, (light_entity, light)) in directional_lights
@@ -615,6 +665,11 @@ pub fn prepare_lights(
             // NOTE: This orthographic projection defines the volume within which shadows from a directional light can be cast
             let projection = light.projection;
 
+            let mut flags = DirectionalLightFlags::NONE;
+            if light.shadows_enabled {
+                flags |= DirectionalLightFlags::SHADOWS_ENABLED;
+            }
+
             gpu_lights.directional_lights[i] = GpuDirectionalLight {
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
@@ -622,6 +677,7 @@ pub fn prepare_lights(
                 dir_to_light,
                 // NOTE: * view is correct, it should not be view.inverse() here
                 view_projection: projection * view,
+                flags: flags.bits,
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
             };
@@ -643,7 +699,7 @@ pub fn prepare_lights(
             let view_light_entity = commands
                 .spawn()
                 .insert_bundle((
-                    ViewLight {
+                    ShadowView {
                         depth_texture_view,
                         pass_name: format!("shadow pass directional light {}", i),
                     },
@@ -652,6 +708,8 @@ pub fn prepare_lights(
                         height: directional_light_shadow_map.size as u32,
                         transform: GlobalTransform::from_matrix(view.inverse()),
                         projection,
+                        near: light.near,
+                        far: light.far,
                     },
                     RenderPhase::<Shadow>::default(),
                     LightEntity::Directional { light_entity },
@@ -685,14 +743,20 @@ pub fn prepare_lights(
                 array_layer_count: None,
             });
 
-        commands.entity(entity).insert(ViewLights {
-            point_light_depth_texture: point_light_depth_texture.texture,
-            point_light_depth_texture_view,
-            directional_light_depth_texture: directional_light_depth_texture.texture,
-            directional_light_depth_texture_view,
-            lights: view_lights,
-            gpu_light_binding_index: light_meta.view_gpu_lights.push(gpu_lights),
-        });
+        commands.entity(entity).insert_bundle((
+            ViewShadowBindings {
+                point_light_depth_texture: point_light_depth_texture.texture,
+                point_light_depth_texture_view,
+                directional_light_depth_texture: directional_light_depth_texture.texture,
+                directional_light_depth_texture_view,
+            },
+            ViewLightEntities {
+                lights: view_lights,
+            },
+            ViewLightsUniformOffset {
+                offset: light_meta.view_gpu_lights.push(gpu_lights),
+            },
+        ));
     }
 
     light_meta
@@ -727,12 +791,12 @@ pub fn queue_shadows(
     render_meshes: Res<RenderAssets<Mesh>>,
     mut pipelines: ResMut<SpecializedPipelines<ShadowPipeline>>,
     mut pipeline_cache: ResMut<RenderPipelineCache>,
-    mut view_lights: Query<&ViewLights>,
+    view_lights: Query<&ViewLightEntities>,
     mut view_light_shadow_phases: Query<(&LightEntity, &mut RenderPhase<Shadow>)>,
     point_light_entities: Query<&CubemapVisibleEntities, With<ExtractedPointLight>>,
     directional_light_entities: Query<&VisibleEntities, With<ExtractedDirectionalLight>>,
 ) {
-    for view_lights in view_lights.iter_mut() {
+    for view_lights in view_lights.iter() {
         let draw_shadow_mesh = shadow_draw_functions
             .read()
             .get_id::<DrawShadowMesh>()
@@ -752,6 +816,8 @@ pub fn queue_shadows(
                     .expect("Failed to get point light visible entities")
                     .get(*face_index),
             };
+            // NOTE: Lights with shadow mapping disabled will have no visible entities
+            //       so no meshes will be queued
             for VisibleEntity { entity, .. } in visible_entities.iter() {
                 let mut key = ShadowPipelineKey::empty();
                 if let Ok(mesh_handle) = casting_meshes.get(*entity) {
@@ -810,8 +876,8 @@ impl CachedPipelinePhaseItem for Shadow {
 }
 
 pub struct ShadowPassNode {
-    main_view_query: QueryState<&'static ViewLights>,
-    view_light_query: QueryState<(&'static ViewLight, &'static RenderPhase<Shadow>)>,
+    main_view_query: QueryState<&'static ViewLightEntities>,
+    view_light_query: QueryState<(&'static ShadowView, &'static RenderPhase<Shadow>)>,
 }
 
 impl ShadowPassNode {
