@@ -54,6 +54,7 @@ impl Plugin for PbrPlugin {
             .init_resource::<DirectionalLightShadowMap>()
             .init_resource::<PointLightShadowMap>()
             .init_resource::<AmbientLight>()
+            .init_resource::<VisiblePointLights>()
             .add_system_to_stage(
                 CoreStage::PostUpdate,
                 add_clusters
@@ -141,6 +142,7 @@ impl Plugin for PbrPlugin {
             .init_resource::<ShadowPipeline>()
             .init_resource::<DrawFunctions<Shadow>>()
             .init_resource::<LightMeta>()
+            .init_resource::<GlobalLightMeta>()
             .init_resource::<SpecializedPipelines<PbrPipeline>>()
             .init_resource::<SpecializedPipelines<ShadowPipeline>>();
 
