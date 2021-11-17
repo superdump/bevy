@@ -234,7 +234,8 @@ impl FromWorld for PbrPipeline {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        // NOTE: 0 if no point lights?
+                        // NOTE: Static size for uniform buffers. GpuPointLight has a padded
+                        //       size of 128 bytes, so 16384 / 128 = 128 point lights max
                         min_binding_size: BufferSize::new(0),
                     },
                     count: None,
@@ -246,7 +247,8 @@ impl FromWorld for PbrPipeline {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        // NOTE: 0 if no point lights?
+                        // NOTE: With 128 point lights max, indices need 7 bits. Use u8 for
+                        //       convenience.
                         min_binding_size: BufferSize::new(0),
                     },
                     count: None,
@@ -258,7 +260,10 @@ impl FromWorld for PbrPipeline {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        // NOTE: number of clusters * u32, so minimum clusters = 1 => 4
+                        // NOTE: The offset needs to address 16384 indices, which needs 21 bits.
+                        //       The count can be at most all 128 lights so 7 bits.
+                        //       Pack the offset into the upper 24 bits and the count into the
+                        //       lower 8 bits for convenience.
                         min_binding_size: BufferSize::new(0),
                     },
                     count: None,
