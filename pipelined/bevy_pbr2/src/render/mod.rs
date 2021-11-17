@@ -235,7 +235,7 @@ impl FromWorld for PbrPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         // NOTE: 0 if no point lights?
-                        min_binding_size: BufferSize::new(0),
+                        min_binding_size: BufferSize::new(16384),
                     },
                     count: None,
                 },
@@ -247,7 +247,7 @@ impl FromWorld for PbrPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         // NOTE: 0 if no point lights?
-                        min_binding_size: BufferSize::new(0),
+                        min_binding_size: BufferSize::new(16384),
                     },
                     count: None,
                 },
@@ -259,7 +259,7 @@ impl FromWorld for PbrPipeline {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         // NOTE: number of clusters * u32, so minimum clusters = 1 => 4
-                        min_binding_size: BufferSize::new(4),
+                        min_binding_size: BufferSize::new(16384),
                     },
                     count: None,
                 },
