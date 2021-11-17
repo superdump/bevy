@@ -10,7 +10,7 @@ use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemParamItem},
 };
-use bevy_math::{const_vec3, Mat4, Vec3, Vec4};
+use bevy_math::{Mat4, UVec4, Vec3, Vec4, const_vec3};
 use bevy_render2::{
     camera::CameraProjection,
     color::Color,
@@ -64,6 +64,8 @@ pub struct ExtractedDirectionalLight {
     shadows_enabled: bool,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+    near: f32,
+    far: f32,
 }
 
 pub type ExtractedDirectionalLightShadowMap = DirectionalLightShadowMap;
@@ -118,10 +120,9 @@ bitflags::bitflags! {
 #[derive(Copy, Clone, Debug, AsStd140)]
 pub struct GpuLights {
     // TODO: this comes first to work around a WGSL alignment issue. We need to solve this issue before releasing the renderer rework
-    point_lights: [GpuPointLight; MAX_POINT_LIGHTS],
     directional_lights: [GpuDirectionalLight; MAX_DIRECTIONAL_LIGHTS],
     ambient_color: Vec4,
-    n_point_lights: u32,
+    cluster_dimensions: UVec4,
     n_directional_lights: u32,
 }
 
@@ -387,11 +388,15 @@ pub fn extract_lights(
                 shadow_normal_bias: directional_light.shadow_normal_bias
                     * directional_light_texel_size
                     * std::f32::consts::SQRT_2,
+                near: directional_light.shadow_projection.near,
+                far: directional_light.shadow_projection.far,
             },
             render_visible_entities,
         ));
     }
 }
+
+const POINT_LIGHT_NEAR_Z: f32 = 0.1f32;
 
 // Can't do `Vec3::Y * -1.0` because mul isn't const
 const NEGATIVE_X: Vec3 = const_vec3!([-1.0, 0.0, 0.0]);
@@ -469,6 +474,10 @@ pub struct ViewLightsUniformOffset {
     pub offset: u32,
 }
 
+pub struct GlobalLightMeta {
+    pub gpu_point_lights: UniformVec<GpuPointLight>,
+}
+
 #[derive(Default)]
 pub struct LightMeta {
     pub view_gpu_lights: DynamicUniformVec<GpuLights>,
@@ -491,6 +500,7 @@ pub fn prepare_lights(
     mut texture_cache: ResMut<TextureCache>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    mut global_light_meta: ResMut<GlobalLightMeta>,
     mut light_meta: ResMut<LightMeta>,
     views: Query<Entity, With<RenderPhase<Transparent3d>>>,
     ambient_light: Res<ExtractedAmbientLight>,
@@ -504,11 +514,34 @@ pub fn prepare_lights(
     let ambient_color = ambient_light.color.as_rgba_linear() * ambient_light.brightness;
     // Pre-calculate for PointLights
     let cube_face_projection =
-        Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1);
+        Mat4::perspective_infinite_reverse_rh(std::f32::consts::FRAC_PI_2, 1.0, POINT_LIGHT_NEAR_Z);
     let cube_face_rotations = CUBE_MAP_FACES
         .iter()
         .map(|CubeMapFace { target, up }| GlobalTransform::identity().looking_at(*target, *up))
         .collect::<Vec<_>>();
+
+    global_light_meta.gpu_point_lights.reserve_and_clear(point_lights.iter().count(), &render_device);
+    for (_, light) in point_lights.iter() {
+        let mut flags = PointLightFlags::NONE;
+        if light.shadows_enabled {
+            flags |= PointLightFlags::SHADOWS_ENABLED;
+        }
+        global_light_meta.gpu_point_lights.push(GpuPointLight {
+            projection: cube_face_projection,
+            // premultiply color by intensity
+            // we don't use the alpha at all, so no reason to multiply only [0..3]
+            color: (light.color.as_rgba_linear() * light.intensity).into(),
+            radius: light.radius,
+            position: light.transform.translation,
+            inverse_square_range: 1.0 / (light.range * light.range),
+            near: POINT_LIGHT_NEAR_Z,
+            far: light.range,
+            flags: flags.bits,
+            shadow_depth_bias: light.shadow_depth_bias,
+            shadow_normal_bias: light.shadow_normal_bias,
+        });
+    }
+    global_light_meta.gpu_point_lights.write_buffer(&render_queue);
 
     // set up light data for each view
     for entity in views.iter() {
@@ -547,11 +580,10 @@ pub fn prepare_lights(
         let mut view_lights = Vec::new();
 
         let mut gpu_lights = GpuLights {
-            ambient_color: ambient_color.into(),
-            n_point_lights: point_lights.iter().len() as u32,
-            n_directional_lights: directional_lights.iter().len() as u32,
-            point_lights: [GpuPointLight::default(); MAX_POINT_LIGHTS],
             directional_lights: [GpuDirectionalLight::default(); MAX_DIRECTIONAL_LIGHTS],
+            ambient_color: ambient_color.into(),
+            cluster_dimensions: UVec4::new(16, 9, 24, 0),
+            n_directional_lights: directional_lights.iter().len() as u32,
         };
 
         // TODO: this should select lights based on relevance to the view instead of the first ones that show up in a query
@@ -592,6 +624,8 @@ pub fn prepare_lights(
                             height: point_light_shadow_map.size as u32,
                             transform: view_translation * *view_rotation,
                             projection: cube_face_projection,
+                            near: POINT_LIGHT_NEAR_Z,
+                            far: light.range,
                         },
                         RenderPhase::<Shadow>::default(),
                         LightEntity::Point {
@@ -602,26 +636,6 @@ pub fn prepare_lights(
                     .id();
                 view_lights.push(view_light_entity);
             }
-
-            let mut flags = PointLightFlags::NONE;
-            if light.shadows_enabled {
-                flags |= PointLightFlags::SHADOWS_ENABLED;
-            }
-
-            gpu_lights.point_lights[light_index] = GpuPointLight {
-                projection: cube_face_projection,
-                // premultiply color by intensity
-                // we don't use the alpha at all, so no reason to multiply only [0..3]
-                color: (light.color.as_rgba_linear() * light.intensity).into(),
-                radius: light.radius,
-                position: light.transform.translation,
-                inverse_square_range: 1.0 / (light.range * light.range),
-                near: 0.1,
-                far: light.range,
-                flags: flags.bits,
-                shadow_depth_bias: light.shadow_depth_bias,
-                shadow_normal_bias: light.shadow_normal_bias,
-            };
         }
 
         for (i, (light_entity, light)) in directional_lights
@@ -694,6 +708,8 @@ pub fn prepare_lights(
                         height: directional_light_shadow_map.size as u32,
                         transform: GlobalTransform::from_matrix(view.inverse()),
                         projection,
+                        near: light.near,
+                        far: light.far,
                     },
                     RenderPhase::<Shadow>::default(),
                     LightEntity::Directional { light_entity },
