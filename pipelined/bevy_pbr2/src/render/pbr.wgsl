@@ -2,8 +2,13 @@
 [[block]]
 struct View {
     view_proj: mat4x4<f32>;
+    inverse_view: mat4x4<f32>;
     projection: mat4x4<f32>;
     world_position: vec3<f32>;
+    near: f32;
+    far: f32;
+    width: f32;
+    height: f32;
 };
 
 
@@ -110,6 +115,7 @@ struct StandardMaterial {
     reflectance: f32;
     // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
     flags: u32;
+    alpha_cutoff: f32;
 };
 
 let STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT: u32         = 1u;
@@ -118,36 +124,61 @@ let STANDARD_MATERIAL_FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT: u32 = 4u;
 let STANDARD_MATERIAL_FLAGS_OCCLUSION_TEXTURE_BIT: u32          = 8u;
 let STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT: u32               = 16u;
 let STANDARD_MATERIAL_FLAGS_UNLIT_BIT: u32                      = 32u;
+let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE: u32              = 64u;
+let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK: u32                = 128u;
+let STANDARD_MATERIAL_FLAGS_ALPHA_MODE_BLEND: u32               = 256u;
 
 struct PointLight {
-    projection: mat4x4<f32>;
-    color: vec4<f32>;
-    position: vec3<f32>;
-    inverse_square_range: f32;
-    radius: f32;
-    near: f32;
-    far: f32;
+    // NOTE: .z.z .z.w .w.z .w.w
+    projection_lr: vec4<f32>;
+    color_inverse_square_range: vec4<f32>;
+    position_radius: vec4<f32>;
+    // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
+    flags: u32;
     shadow_depth_bias: f32;
     shadow_normal_bias: f32;
 };
+
+let POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32 = 1u;
 
 struct DirectionalLight {
     view_projection: mat4x4<f32>;
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
+    // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
+    flags: u32;
     shadow_depth_bias: f32;
     shadow_normal_bias: f32;
 };
 
+let DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32 = 1u;
+
 [[block]]
 struct Lights {
     // NOTE: this array size must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
-    // TODO: this can be removed if we move to storage buffers for light arrays
-    point_lights: array<PointLight, 10>;
-    directional_lights: array<DirectionalLight, 1>;
+    directional_lights: array<DirectionalLight, 1u>;
     ambient_color: vec4<f32>;
-    n_point_lights: u32;
+    cluster_dimensions: vec4<u32>; // x/y/z dimensions
+    cluster_factors: vec4<f32>; // xy are vec2<f32<(cluster_dimensions.xy) / vec2<f32<(view.width, view.height)
+                                // z is cluster_dimensions.z / log(far / near)
+                                // w is cluster_dimensions.z * log(near) / log(far / near)
     n_directional_lights: u32;
+};
+
+[[block]]
+struct PointLights {
+    data: array<PointLight, 256u>;
+};
+
+[[block]]
+struct ClusterLightIndexLists {
+    data: array<vec4<u32>, 1024u>; // each u32 contains 4 u8 indices into the PointLights array
+};
+
+[[block]]
+struct ClusterOffsetsAndCounts {
+    data: array<vec4<u32>, 1024u>; // each u32 contains a 24-bit index into ClusterLightIndexLists in the high 24 bits
+                             // and an 8-bit count of the number of lights in the low 8 bits
 };
 
 
@@ -161,6 +192,12 @@ var point_shadow_textures_sampler: sampler_comparison;
 var directional_shadow_textures: texture_depth_2d_array;
 [[group(0), binding(5)]]
 var directional_shadow_textures_sampler: sampler_comparison;
+[[group(0), binding(6)]]
+var<uniform> point_lights: PointLights;
+[[group(0), binding(7)]]
+var<uniform> cluster_light_index_lists: ClusterLightIndexLists;
+[[group(0), binding(8)]]
+var<uniform> cluster_offsets_and_counts: ClusterOffsetsAndCounts;
 
 [[group(1), binding(0)]]
 var<uniform> material: StandardMaterial;
@@ -341,23 +378,57 @@ fn reinhard_extended_luminance(color: vec3<f32>, max_white_l: f32) -> vec3<f32> 
     return change_luminance(color, l_new);
 }
 
+fn view_z_to_z_slice(view_z: f32) -> u32 {
+    // NOTE: had to use -view_z to make it positive else log(negative) is nan
+    return u32(floor(log(-view_z) * lights.cluster_factors.z - lights.cluster_factors.w));
+}
+
+fn fragment_cluster_index(frag_coord: vec2<f32>, view_z: f32) -> u32 {
+    let xy = vec2<u32>(floor(frag_coord * lights.cluster_factors.xy));
+    let z_slice = view_z_to_z_slice(view_z);
+    return (xy.y * lights.cluster_dimensions.x + xy.x) * lights.cluster_dimensions.z + z_slice;
+}
+
+struct ClusterOffsetAndCount {
+    offset: u32;
+    count: u32;
+};
+
+fn unpack_offset_and_count(cluster_index: u32) -> ClusterOffsetAndCount {
+    let offset_and_count = cluster_offsets_and_counts.data[cluster_index >> 2u][cluster_index & ((1u << 2u) - 1u)];
+    var output: ClusterOffsetAndCount;
+    // The offset is stored in the upper 24 bits
+    output.offset = (offset_and_count >> 8u) & ((1u << 24u) - 1u);
+    // The count is stored in the lower 8 bits
+    output.count = offset_and_count & ((1u << 8u) - 1u);
+    return output;
+}
+
+fn get_light_id(index: u32) -> u32 {
+    // The index is correct but in cluster_light_index_lists we pack 4 u8s into a u32
+    // This means the index into cluster_light_index_lists is index / 4
+    let indices = cluster_light_index_lists.data[index >> 4u][(index >> 2u) & ((1u << 2u) - 1u)];
+    // And index % 4 gives the sub-index of the u8 within the u32 so we shift by 8 * sub-index
+    return (indices >> (8u * (index & ((1u << 2u) - 1u)))) & ((1u << 8u) - 1u);
+}
+
 fn point_light(
     world_position: vec3<f32>, light: PointLight, roughness: f32, NdotV: f32, N: vec3<f32>, V: vec3<f32>,
     R: vec3<f32>, F0: vec3<f32>, diffuseColor: vec3<f32>
 ) -> vec3<f32> {
-    let light_to_frag = light.position.xyz - world_position.xyz;
+    let light_to_frag = light.position_radius.xyz - world_position.xyz;
     let distance_square = dot(light_to_frag, light_to_frag);
     let rangeAttenuation =
-        getDistanceAttenuation(distance_square, light.inverse_square_range);
+        getDistanceAttenuation(distance_square, light.color_inverse_square_range.w);
 
     // Specular.
     // Representative Point Area Lights.
     // see http://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf p14-16
     let a = roughness;
     let centerToRay = dot(light_to_frag, R) * R - light_to_frag;
-    let closestPoint = light_to_frag + centerToRay * saturate(light.radius * inverseSqrt(dot(centerToRay, centerToRay)));
+    let closestPoint = light_to_frag + centerToRay * saturate(light.position_radius.w * inverseSqrt(dot(centerToRay, centerToRay)));
     let LspecLengthInverse = inverseSqrt(dot(closestPoint, closestPoint));
-    let normalizationFactor = a / saturate(a + (light.radius * 0.5 * LspecLengthInverse));
+    let normalizationFactor = a / saturate(a + (light.position_radius.w * 0.5 * LspecLengthInverse));
     let specularIntensity = normalizationFactor * normalizationFactor;
 
     var L: vec3<f32> = closestPoint * LspecLengthInverse; // normalize() equivalent?
@@ -393,7 +464,7 @@ fn point_light(
 
     // TODO compensate for energy loss https://google.github.io/filament/Filament.html#materialsystem/improvingthebrdfs/energylossinspecularreflectance
 
-    return ((diffuse + specular_light) * light.color.rgb) * (rangeAttenuation * NoL);
+    return ((diffuse + specular_light) * light.color_inverse_square_range.rgb) * (rangeAttenuation * NoL);
 }
 
 fn directional_light(light: DirectionalLight, roughness: f32, NdotV: f32, normal: vec3<f32>, view: vec3<f32>, R: vec3<f32>, F0: vec3<f32>, diffuseColor: vec3<f32>) -> vec3<f32> {
@@ -411,12 +482,12 @@ fn directional_light(light: DirectionalLight, roughness: f32, NdotV: f32, normal
     return (specular_light + diffuse) * light.color.rgb * NoL;
 }
 
-fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
-    let light = lights.point_lights[light_id];
+fn fetch_point_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
+    let light = point_lights.data[light_id];
 
     // because the shadow maps align with the axes and the frustum planes are at 45 degrees
     // we can get the worldspace depth by taking the largest absolute axis
-    let surface_to_light = light.position.xyz - frag_position.xyz;
+    let surface_to_light = light.position_radius.xyz - frag_position.xyz;
     let surface_to_light_abs = abs(surface_to_light);
     let distance_to_light = max(surface_to_light_abs.x, max(surface_to_light_abs.y, surface_to_light_abs.z));
 
@@ -428,7 +499,7 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
     let offset_position = frag_position.xyz + normal_offset + depth_offset;
 
     // similar largest-absolute-axis trick as above, but now with the offset fragment position
-    let frag_ls = light.position.xyz - offset_position.xyz;
+    let frag_ls = light.position_radius.xyz - offset_position.xyz;
     let abs_position_ls = abs(frag_ls);
     let major_axis_magnitude = max(abs_position_ls.x, max(abs_position_ls.y, abs_position_ls.z));
 
@@ -436,19 +507,8 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
     //       projection * vec4(0, 0, -major_axis_magnitude, 1.0)
     //       and keeping only the terms that have any impact on the depth.
     // Projection-agnostic approach:
-    let z = -major_axis_magnitude * light.projection[2][2] + light.projection[3][2];
-    let w = -major_axis_magnitude * light.projection[2][3] + light.projection[3][3];
-
-    // For perspective_rh:
-    // let proj_r = light.far / (light.near - light.far);
-    // let z = -major_axis_magnitude * proj_r + light.near * proj_r;
-    // let w = major_axis_magnitude;
-
-    // For perspective_infinite_reverse_rh:
-    // let z = light.near;
-    // let w = major_axis_magnitude;
-
-    let depth = z / w;
+    let zw = -major_axis_magnitude * light.projection_lr.xy + light.projection_lr.zw;
+    let depth = zw.x / zw.y;
 
     // do the lookup, using HW PCF and comparison
     // NOTE: Due to the non-uniform control flow above, we must use the Level variant of
@@ -459,7 +519,7 @@ fn fetch_point_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: v
     return textureSampleCompareLevel(point_shadow_textures, point_shadow_textures_sampler, frag_ls, i32(light_id), depth);
 }
 
-fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
+fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
     let light = lights.directional_lights[light_id];
 
     // The normal bias is scaled to the texel size.
@@ -490,8 +550,21 @@ fn fetch_directional_shadow(light_id: i32, frag_position: vec4<f32>, surface_nor
     return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
 }
 
+fn hsv2rgb(hue: f32, saturation: f32, value: f32) -> vec3<f32> {
+    let rgb = clamp(
+        abs(
+            ((hue * 6.0 + vec3<f32>(0.0, 4.0, 2.0)) % 6.0) - 3.0
+        ) - 1.0,
+        vec3<f32>(0.0),
+        vec3<f32>(1.0)
+    );
+
+	return value * mix( vec3<f32>(1.0), rgb, vec3<f32>(saturation));
+}
+
 struct FragmentInput {
     [[builtin(front_facing)]] is_front: bool;
+    [[builtin(position)]] frag_coord: vec4<f32>;
     [[location(0)]] world_position: vec4<f32>;
     [[location(1)]] world_normal: vec3<f32>;
     [[location(2)]] uv: vec2<f32>;
@@ -529,6 +602,19 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
         var occlusion: f32 = 1.0;
         if ((material.flags & STANDARD_MATERIAL_FLAGS_OCCLUSION_TEXTURE_BIT) != 0u) {
             occlusion = textureSample(occlusion_texture, occlusion_sampler, in.uv).r;
+        }
+
+        if ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE) != 0u) {
+            // NOTE: If rendering as opaque, alpha should be ignored so set to 1.0
+            output_color.a = 1.0;
+        } elseif ((material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK) != 0u) {
+            if (output_color.a >= material.alpha_cutoff) {
+                // NOTE: If rendering as masked alpha and >= the cutoff, render as fully opaque
+                output_color.a = 1.0;
+            }
+            // NOTE: output_color.a < material.alpha_cutoff should not reach here as it will not
+            //       be discarded in the depth prepass and we use the 'equals' depth buffer comparison
+            //       function
         }
 
         var N: vec3<f32> = normalize(in.world_normal);
@@ -583,26 +669,34 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
 
         // accumulate color
         var light_accum: vec3<f32> = vec3<f32>(0.0);
-        let n_point_lights = i32(lights.n_point_lights);
-        let n_directional_lights = i32(lights.n_directional_lights);
-        for (var i: i32 = 0; i < n_point_lights; i = i + 1) {
-            let light = lights.point_lights[i];
-            var shadow: f32;
-            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u) {
-                shadow = fetch_point_shadow(i, in.world_position, in.world_normal);
-            } else {
-                shadow = 1.0;
+
+        let view_z = dot(vec4<f32>(
+            view.inverse_view.x.z,
+            view.inverse_view.y.z,
+            view.inverse_view.z.z,
+            view.inverse_view.w.z
+        ), in.world_position);
+        let cluster_index = fragment_cluster_index(in.frag_coord.xy, view_z);
+        let offset_and_count = unpack_offset_and_count(cluster_index);
+        for (var i: u32 = offset_and_count.offset; i < offset_and_count.offset + offset_and_count.count; i = i + 1u) {
+            let light_id = get_light_id(i);
+            let light = point_lights.data[light_id];
+            var shadow: f32 = 1.0;
+            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+                    || (light.flags & POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
+                shadow = fetch_point_shadow(light_id, in.world_position, in.world_normal);
             }
             let light_contrib = point_light(in.world_position.xyz, light, roughness, NdotV, N, V, R, F0, diffuse_color);
             light_accum = light_accum + light_contrib * shadow;
         }
-        for (var i: i32 = 0; i < n_directional_lights; i = i + 1) {
+
+        let n_directional_lights = lights.n_directional_lights;
+        for (var i: u32 = 0u; i < n_directional_lights; i = i + 1u) {
             let light = lights.directional_lights[i];
-            var shadow: f32;
-            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u) {
+            var shadow: f32 = 1.0;
+            if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+                    || (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
                 shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
-            } else {
-                shadow = 1.0;
             }
             let light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
             light_accum = light_accum + light_contrib * shadow;
@@ -616,6 +710,27 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
                 (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb * occlusion +
                 emissive.rgb * output_color.a,
             output_color.a);
+
+        // Cluster allocation debug (using 'over' alpha blending)
+        let cluster_debug_mode = 2;
+        let cluster_overlay_alpha = 0.05;
+        if (cluster_debug_mode == 1) {
+            var z_slice: u32 = view_z_to_z_slice(view_z);
+            // A hack to make the colors alternate a bit more
+            if ((z_slice & 1u) == 1u) {
+                z_slice = z_slice + lights.cluster_dimensions.z / 2u;
+            }
+            let slice_color = hsv2rgb(f32(z_slice) / f32(lights.cluster_dimensions.z + 1u), 1.0, 0.5);
+            output_color = vec4<f32>(
+                (1.0 - cluster_overlay_alpha) * output_color.rgb + cluster_overlay_alpha * slice_color,
+                output_color.a
+            );
+        } elseif (cluster_debug_mode == 2) {
+            output_color.r = (1.0 - cluster_overlay_alpha) * output_color.r
+                + cluster_overlay_alpha * smoothStep(0.0, 16.0, f32(offset_and_count.count));
+            output_color.g = (1.0 - cluster_overlay_alpha) * output_color.g
+                + cluster_overlay_alpha * (1.0 - smoothStep(0.0, 16.0, f32(offset_and_count.count)));
+        }
 
         // tone_mapping
         output_color = vec4<f32>(reinhard_luminance(output_color.rgb), output_color.a);
