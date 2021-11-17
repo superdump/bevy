@@ -2,10 +2,7 @@ mod light;
 
 pub use light::*;
 
-use crate::{
-    AlphaMode, NotShadowCaster, NotShadowReceiver, StandardMaterial, StandardMaterialUniformData,
-    PBR_SHADER_HANDLE,
-};
+use crate::{AlphaMode, NotShadowCaster, NotShadowReceiver, StandardMaterial, PBR_SHADER_HANDLE};
 use bevy_asset::Handle;
 use bevy_core_pipeline::{AlphaMask3d, Opaque3d, Transparent3d};
 use bevy_ecs::{
@@ -258,9 +255,9 @@ impl FromWorld for PbrPipeline {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(
-                            StandardMaterialUniformData::std140_size_static() as u64,
-                        ),
+                        // TODO: change this to StandardMaterialUniformData::std140_size_static once crevice fixes this!
+                        // Context: https://github.com/LPGhatguy/crevice/issues/29
+                        min_binding_size: BufferSize::new(64),
                     },
                     count: None,
                 },
