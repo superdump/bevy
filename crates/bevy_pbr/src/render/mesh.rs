@@ -28,12 +28,21 @@ use bevy_transform::components::GlobalTransform;
 #[derive(Default)]
 pub struct MeshRenderPlugin;
 
-pub const MESH_VIEW_BIND_GROUP_HANDLE: HandleUntyped =
+pub const MESH_VIEW_TYPES_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 6944437233335238185);
+const MESH_VIEW_TYPES_IMPORT_PATH: &str = "bevy_pbr::mesh_view_types";
+pub const MESH_VIEW_BINDINGS_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9076678235888822571);
-const MESH_VIEW_BIND_GROUP_IMPORT_PATH: &str = "bevy_pbr::mesh_view_bind_group";
-pub const MESH_STRUCT_HANDLE: HandleUntyped =
+const MESH_VIEW_BINDINGS_IMPORT_PATH: &str = "bevy_pbr::mesh_view_bindings";
+pub const MESH_TYPES_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 2506024101911992377);
-const MESH_STRUCT_IMPORT_PATH: &str = "bevy_pbr::mesh_struct";
+const MESH_TYPES_IMPORT_PATH: &str = "bevy_pbr::mesh_types";
+pub const MESH_BINDINGS_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 17763658410392053870);
+const MESH_BINDINGS_IMPORT_PATH: &str = "bevy_pbr::mesh_bindings";
+pub const MESH_FUNCTIONS_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 8157763673499264335);
+const MESH_FUNCTIONS_IMPORT_PATH: &str = "bevy_pbr::mesh_functions";
 pub const MESH_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 3252377289100772450);
 
@@ -44,23 +53,32 @@ impl Plugin for MeshRenderPlugin {
             let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
             shaders.set_untracked(
                 MESH_SHADER_HANDLE,
-                Shader::from_wgsl(include_str!(
-                    "../../../../assets/shaders/bevy_pbr/mesh.wgsl"
-                )),
+                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh.wgsl")),
             );
             shaders.set_untracked(
-                MESH_STRUCT_HANDLE,
-                Shader::from_wgsl(include_str!(
-                    "../../../../assets/shaders/bevy_pbr/mesh_struct.wgsl"
-                ))
-                .with_import_path(MESH_STRUCT_IMPORT_PATH),
+                MESH_VIEW_TYPES_HANDLE,
+                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_view_types.wgsl"))
+                    .with_import_path(MESH_VIEW_TYPES_IMPORT_PATH.to_string()),
             );
             shaders.set_untracked(
-                MESH_VIEW_BIND_GROUP_HANDLE,
-                Shader::from_wgsl(include_str!(
-                    "../../../../assets/shaders/bevy_pbr/mesh_view_bind_group.wgsl"
-                ))
-                .with_import_path(MESH_VIEW_BIND_GROUP_IMPORT_PATH),
+                MESH_VIEW_BINDINGS_HANDLE,
+                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_view_bindings.wgsl"))
+                    .with_import_path(MESH_VIEW_BINDINGS_IMPORT_PATH.to_string()),
+            );
+            shaders.set_untracked(
+                MESH_TYPES_HANDLE,
+                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_types.wgsl"))
+                    .with_import_path(MESH_TYPES_IMPORT_PATH.to_string()),
+            );
+            shaders.set_untracked(
+                MESH_BINDINGS_HANDLE,
+                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_bindings.wgsl"))
+                    .with_import_path(MESH_BINDINGS_IMPORT_PATH.to_string()),
+            );
+            shaders.set_untracked(
+                MESH_FUNCTIONS_HANDLE,
+                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_functions.wgsl"))
+                    .with_import_path(MESH_FUNCTIONS_IMPORT_PATH.to_string()),
             );
         }
         #[cfg(feature = "bevy_shader_hot_reloading")]
@@ -68,24 +86,47 @@ impl Plugin for MeshRenderPlugin {
             let asset_server = app.world.get_resource::<AssetServer>().unwrap();
             let mesh_shader_handle: Handle<Shader> =
                 asset_server.load("shaders/bevy_pbr/mesh.wgsl");
-            let mesh_struct_handle: Handle<Shader> =
-                asset_server.load("shaders/bevy_pbr/mesh_struct.wgsl");
-            let mesh_view_bind_group_handle: Handle<Shader> =
-                asset_server.load("shaders/bevy_pbr/mesh_view_bind_group.wgsl");
+            let mesh_view_types_handle: Handle<Shader> =
+                asset_server.load("shaders/bevy_pbr/mesh_view_types.wgsl");
+            let mesh_view_bindings_handle: Handle<Shader> =
+                asset_server.load("shaders/bevy_pbr/mesh_view_bindings.wgsl");
+            let mesh_types_handle: Handle<Shader> =
+                asset_server.load("shaders/bevy_pbr/mesh_types.wgsl");
+            let mesh_bindings_handle: Handle<Shader> =
+                asset_server.load("shaders/bevy_pbr/mesh_bindings.wgsl");
+            let mesh_functions_handle: Handle<Shader> =
+                asset_server.load("shaders/bevy_pbr/mesh_functions.wgsl");
 
             let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
             shaders.add_alias(&mesh_shader_handle, MESH_SHADER_HANDLE);
-            shaders.add_alias(&mesh_struct_handle, MESH_STRUCT_HANDLE);
-            shaders.add_alias(&mesh_view_bind_group_handle, MESH_VIEW_BIND_GROUP_HANDLE);
+            shaders.add_alias(&mesh_view_types_handle, MESH_VIEW_TYPES_HANDLE);
+            shaders.add_alias(&mesh_view_bindings_handle, MESH_VIEW_BINDINGS_HANDLE);
+            shaders.add_alias(&mesh_types_handle, MESH_TYPES_HANDLE);
+            shaders.add_alias(&mesh_bindings_handle, MESH_BINDINGS_HANDLE);
+            shaders.add_alias(&mesh_functions_handle, MESH_FUNCTIONS_HANDLE);
 
             // NOTE: We need to store the strong handles created from the asset paths
             let mut hot_reload_shaders = app.world.get_resource_mut::<HotReloadShaders>().unwrap();
             hot_reload_shaders.keep_shader_alive(mesh_shader_handle);
-            hot_reload_shaders
-                .add_hot_reload_shader(mesh_struct_handle, MESH_STRUCT_IMPORT_PATH.to_string());
             hot_reload_shaders.add_hot_reload_shader(
-                mesh_view_bind_group_handle,
-                MESH_VIEW_BIND_GROUP_IMPORT_PATH.to_string(),
+                mesh_view_types_handle,
+                MESH_VIEW_TYPES_IMPORT_PATH.to_string(),
+            );
+            hot_reload_shaders.add_hot_reload_shader(
+                mesh_view_bindings_handle,
+                MESH_VIEW_BINDINGS_IMPORT_PATH.to_string(),
+            );
+            hot_reload_shaders.add_hot_reload_shader(
+                mesh_types_handle,
+                MESH_TYPES_IMPORT_PATH.to_string(),
+            );
+            hot_reload_shaders.add_hot_reload_shader(
+                mesh_bindings_handle,
+                MESH_BINDINGS_IMPORT_PATH.to_string(),
+            );
+            hot_reload_shaders.add_hot_reload_shader(
+                mesh_functions_handle,
+                MESH_FUNCTIONS_IMPORT_PATH.to_string(),
             );
         }
 
