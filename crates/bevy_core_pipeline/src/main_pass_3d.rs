@@ -62,6 +62,8 @@ impl Node for MainPass3dNode {
                 // buffer as well as writing to it.
                 color_attachments: &[target.get_color_attachment(Operations {
                     load: LoadOp::Load,
+                    // NOTE: The next pass (alpha mask pass) loads the sampled attachment when
+                    // using MSAA samples > 1 so the opaque pass must store.
                     store: true,
                 })],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
@@ -96,6 +98,8 @@ impl Node for MainPass3dNode {
                 // NOTE: The alpha_mask pass loads the color buffer as well as overwriting it where appropriate.
                 color_attachments: &[target.get_color_attachment(Operations {
                     load: LoadOp::Load,
+                    // NOTE: The next pass (transparent pass) loads the sampled attachment when
+                    // using MSAA samples > 1 so the alpha mask pass must store.
                     store: true,
                 })],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
@@ -130,7 +134,12 @@ impl Node for MainPass3dNode {
                 // NOTE: The transparent pass loads the color buffer as well as overwriting it where appropriate.
                 color_attachments: &[target.get_color_attachment(Operations {
                     load: LoadOp::Load,
-                    store: true,
+                    // NOTE: The transparent pass is the final pass before resolving is complete when
+                    // using MSAA samples > 1 so the transparent pass only needs to store if there is
+                    // no sampled target (i.e. MSAA samples == 1).
+                    // NOTE: Change this if at some point a later node/pass needs to read the sampled
+                    // target.
+                    store: target.sampled_target.is_none(),
                 })],
                 depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
                     view: &depth.view,
