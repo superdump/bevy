@@ -573,7 +573,11 @@ fn load_node(
                     // For a point light, luminous power = 4 * pi * luminous intensity
                     let luminous_power = light.intensity() * std::f32::consts::PI * 4.0;
                     parent.spawn_bundle(PointLightBundle {
-                        point_light: PointLight::new(Color::from(light.color()), luminous_power),
+                        point_light: PointLight {
+                            color: Color::from(light.color()),
+                            intensity: luminous_power,
+                            ..Default::default()
+                        },
                         ..Default::default()
                     });
                 }
