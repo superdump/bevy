@@ -170,6 +170,10 @@ name = "parenting"
 path = "examples/3d/parenting.rs"
 
 [[example]]
+name = "point_light_range"
+path = "examples/3d/point_light_range.rs"
+
+[[example]]
 name = "pbr"
 path = "examples/3d/pbr.rs"
 
