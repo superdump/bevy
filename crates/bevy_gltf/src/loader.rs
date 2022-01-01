@@ -568,17 +568,12 @@ fn load_node(
                     });
                 }
                 gltf::khr_lights_punctual::Kind::Point => {
+                    // NOTE: KHR_punctual_lights defines the intensity units for point lights in
+                    // candela (lm/sr) which is luminous intensity and we need luminous power.
+                    // For a point light, luminous power = 4 * pi * luminous intensity
+                    let luminous_power = light.intensity() * std::f32::consts::PI * 4.0;
                     parent.spawn_bundle(PointLightBundle {
-                        point_light: PointLight {
-                            color: Color::from(light.color()),
-                            // NOTE: KHR_punctual_lights defines the intensity units for point lights in
-                            // candela (lm/sr) which is luminous intensity and we need luminous power.
-                            // For a point light, luminous power = 4 * pi * luminous intensity
-                            intensity: light.intensity() * std::f32::consts::PI * 4.0,
-                            range: light.range().unwrap_or(20.0),
-                            radius: light.range().unwrap_or(0.0),
-                            ..Default::default()
-                        },
+                        point_light: PointLight::new(Color::from(light.color()), luminous_power),
                         ..Default::default()
                     });
                 }
