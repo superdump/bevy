@@ -71,6 +71,8 @@ impl Plugin for PbrPlugin {
         app.register_type::<CubemapVisibleEntities>()
             .register_type::<DirectionalLight>()
             .register_type::<PointLight>()
+            .register_type::<NotShadowCaster>()
+            .register_type::<NotShadowReceiver>()
             .add_plugin(MeshRenderPlugin)
             .add_plugin(MaterialPlugin::<StandardMaterial>::default())
             .add_plugin(ExtractComponentPlugin::<Handle<StandardMaterial>>::default())

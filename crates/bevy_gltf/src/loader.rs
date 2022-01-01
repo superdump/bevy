@@ -7,8 +7,8 @@ use bevy_ecs::world::World;
 use bevy_log::warn;
 use bevy_math::{Mat4, Vec3};
 use bevy_pbr::{
-    AlphaMode, DirectionalLight, DirectionalLightBundle, PbrBundle, PointLight, PointLightBundle,
-    StandardMaterial,
+    AlphaMode, DirectionalLight, DirectionalLightBundle, NotShadowCaster, PbrBundle, PointLight,
+    PointLightBundle, StandardMaterial,
 };
 use bevy_render::{
     camera::{
@@ -540,16 +540,22 @@ fn load_node(
                     AssetPath::new_ref(load_context.path(), Some(&material_label));
 
                 let bounds = primitive.bounding_box();
-                parent
-                    .spawn_bundle(PbrBundle {
-                        mesh: load_context.get_handle(mesh_asset_path),
-                        material: load_context.get_handle(material_asset_path),
-                        ..Default::default()
-                    })
-                    .insert(Aabb::from_min_max(
-                        Vec3::from_slice(&bounds.min),
-                        Vec3::from_slice(&bounds.max),
-                    ));
+                let mut entity = parent.spawn_bundle(PbrBundle {
+                    mesh: load_context.get_handle(mesh_asset_path),
+                    material: load_context.get_handle(material_asset_path),
+                    ..Default::default()
+                });
+                entity.insert(Aabb::from_min_max(
+                    Vec3::from_slice(&bounds.min),
+                    Vec3::from_slice(&bounds.max),
+                ));
+
+                let not_shadow_caster = material.extras().as_ref().map_or(false, |extras| {
+                    extras.get().contains(r#""bevy_NotShadowCaster":"True""#)
+                });
+                if not_shadow_caster {
+                    entity.insert(NotShadowCaster);
+                }
             }
         }
 

@@ -29,6 +29,7 @@ gltf = { version = "0.16.0", default-features = false, features = [
     "KHR_materials_unlit",
     "names",
     "utils",
+    "extras",
 ] }
 thiserror = "1.0"
 anyhow = "1.0.4"
