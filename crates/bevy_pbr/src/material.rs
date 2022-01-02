@@ -1,6 +1,6 @@
 use crate::{
-    AlphaMode, DrawMesh, MeshPipeline, MeshPipelineKey, MeshUniform, SetMeshBindGroup,
-    SetMeshViewBindGroup,
+    AlphaMode, ClusteredForwardDebug, DrawMesh, MeshPipeline, MeshPipelineKey, MeshUniform,
+    SetMeshBindGroup, SetMeshViewBindGroup,
 };
 use bevy_app::{App, Plugin};
 use bevy_asset::{AddAsset, Asset, AssetServer, Handle};
@@ -278,6 +278,7 @@ pub fn queue_material_meshes<M: SpecializedMaterial>(
     mut pipelines: ResMut<SpecializedPipelines<MaterialPipeline<M>>>,
     mut pipeline_cache: ResMut<RenderPipelineCache>,
     msaa: Res<Msaa>,
+    clustered_forward_debug: Res<ClusteredForwardDebug>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderAssets<M>>,
     material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform)>,
@@ -307,7 +308,8 @@ pub fn queue_material_meshes<M: SpecializedMaterial>(
 
         let inverse_view_matrix = view.transform.compute_matrix().inverse();
         let inverse_view_row_2 = inverse_view_matrix.row(2);
-        let mesh_key = MeshPipelineKey::from_msaa_samples(msaa.samples);
+        let mesh_key = MeshPipelineKey::from_msaa_samples(msaa.samples)
+            | MeshPipelineKey::from_clustered_forward_debug(*clustered_forward_debug);
 
         for visible_entity in &visible_entities.entities {
             if let Ok((material_handle, mesh_handle, mesh_uniform)) =

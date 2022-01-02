@@ -51,10 +51,12 @@ impl Plugin for MeshRenderPlugin {
                 .with_import_path("bevy_pbr::mesh_view_bind_group"),
         );
 
-        app.add_plugin(UniformComponentPlugin::<MeshUniform>::default());
+        app.add_plugin(UniformComponentPlugin::<MeshUniform>::default())
+            .init_resource::<ClusteredForwardDebug>();
 
         app.sub_app_mut(RenderApp)
             .init_resource::<MeshPipeline>()
+            .add_system_to_stage(RenderStage::Extract, extract_clustered_forward_debug)
             .add_system_to_stage(RenderStage::Extract, extract_meshes)
             .add_system_to_stage(RenderStage::Queue, queue_mesh_bind_group)
             .add_system_to_stage(RenderStage::Queue, queue_mesh_view_bind_groups);
@@ -76,6 +78,13 @@ bitflags::bitflags! {
         const NONE                       = 0;
         const UNINITIALIZED              = 0xFFFF;
     }
+}
+
+pub fn extract_clustered_forward_debug(
+    mut commands: Commands,
+    clustered_forward_debug: Res<ClusteredForwardDebug>,
+) {
+    commands.insert_resource(*clustered_forward_debug);
 }
 
 pub fn extract_meshes(
@@ -366,6 +375,21 @@ bitflags::bitflags! {
         const TRANSPARENT_MAIN_PASS       = (1 << 1);
         const MSAA_RESERVED_BITS          = MeshPipelineKey::MSAA_MASK_BITS << MeshPipelineKey::MSAA_SHIFT_BITS;
         const PRIMITIVE_TOPOLOGY_RESERVED_BITS = MeshPipelineKey::PRIMITIVE_TOPOLOGY_MASK_BITS << MeshPipelineKey::PRIMITIVE_TOPOLOGY_SHIFT_BITS;
+        const CLUSTERED_FORWARD_DEBUG_RESERVED_BITS = MeshPipelineKey::CLUSTERED_FORWARD_DEBUG_MASK_BITS << MeshPipelineKey::CLUSTERED_FORWARD_DEBUG_SHIFT_BITS;
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ClusteredForwardDebug {
+    None,
+    ZSlices,
+    ClusterLightComplexity,
+    ClusterCoherency,
+}
+
+impl Default for ClusteredForwardDebug {
+    fn default() -> Self {
+        ClusteredForwardDebug::None
     }
 }
 
@@ -374,6 +398,8 @@ impl MeshPipelineKey {
     const MSAA_SHIFT_BITS: u32 = 32 - 6;
     const PRIMITIVE_TOPOLOGY_MASK_BITS: u32 = 0b111;
     const PRIMITIVE_TOPOLOGY_SHIFT_BITS: u32 = Self::MSAA_SHIFT_BITS - 3;
+    const CLUSTERED_FORWARD_DEBUG_MASK_BITS: u32 = 0b11;
+    const CLUSTERED_FORWARD_DEBUG_SHIFT_BITS: u32 = Self::PRIMITIVE_TOPOLOGY_SHIFT_BITS - 2;
 
     pub fn from_msaa_samples(msaa_samples: u32) -> Self {
         let msaa_bits = ((msaa_samples - 1) & Self::MSAA_MASK_BITS) << Self::MSAA_SHIFT_BITS;
@@ -401,6 +427,28 @@ impl MeshPipelineKey {
             x if x == PrimitiveTopology::TriangleList as u32 => PrimitiveTopology::TriangleList,
             x if x == PrimitiveTopology::TriangleStrip as u32 => PrimitiveTopology::TriangleStrip,
             _ => PrimitiveTopology::default(),
+        }
+    }
+
+    pub fn from_clustered_forward_debug(clustered_forward_debug: ClusteredForwardDebug) -> Self {
+        let clustered_forward_debug_bits = ((clustered_forward_debug as u32)
+            & Self::CLUSTERED_FORWARD_DEBUG_MASK_BITS)
+            << Self::CLUSTERED_FORWARD_DEBUG_SHIFT_BITS;
+        MeshPipelineKey::from_bits(clustered_forward_debug_bits).unwrap()
+    }
+
+    pub fn clustered_forward_debug(&self) -> ClusteredForwardDebug {
+        let clustered_forward_debug_bits = (self.bits >> Self::CLUSTERED_FORWARD_DEBUG_SHIFT_BITS)
+            & Self::CLUSTERED_FORWARD_DEBUG_MASK_BITS;
+        match clustered_forward_debug_bits {
+            x if x == ClusteredForwardDebug::ZSlices as u32 => ClusteredForwardDebug::ZSlices,
+            x if x == ClusteredForwardDebug::ClusterLightComplexity as u32 => {
+                ClusteredForwardDebug::ClusterLightComplexity
+            }
+            x if x == ClusteredForwardDebug::ClusterCoherency as u32 => {
+                ClusteredForwardDebug::ClusterCoherency
+            }
+            _ => ClusteredForwardDebug::default(),
         }
     }
 }
@@ -466,6 +514,21 @@ impl SpecializedPipeline for MeshPipeline {
                 )
             };
         let mut shader_defs = Vec::new();
+        if key.contains(MeshPipelineKey::VERTEX_TANGENTS) {
+            shader_defs.push(String::from("VERTEX_TANGENTS"));
+        }
+        match key.clustered_forward_debug() {
+            ClusteredForwardDebug::None => {}
+            ClusteredForwardDebug::ZSlices => {
+                shader_defs.push(String::from("CLUSTERED_FORWARD_DEBUG_Z_SLICES"))
+            }
+            ClusteredForwardDebug::ClusterLightComplexity => shader_defs.push(String::from(
+                "CLUSTERED_FORWARD_DEBUG_CLUSTER_LIGHT_COMPLEXITY",
+            )),
+            ClusteredForwardDebug::ClusterCoherency => {
+                shader_defs.push(String::from("CLUSTERED_FORWARD_DEBUG_CLUSTER_COHERENCY"))
+            }
+        }
         if key.contains(MeshPipelineKey::VERTEX_TANGENTS) {
             shader_defs.push(String::from("VERTEX_TANGENTS"));
         }
