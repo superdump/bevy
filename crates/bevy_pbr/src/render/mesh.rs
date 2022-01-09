@@ -12,6 +12,7 @@ use bevy_math::{Mat4, Size};
 use bevy_reflect::TypeUuid;
 use bevy_render::{
     mesh::{GpuBufferInfo, Mesh},
+    options::WgpuOptions,
     render_asset::RenderAssets,
     render_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
     render_phase::{EntityRenderCommand, RenderCommandResult, TrackedRenderPass},
@@ -166,6 +167,17 @@ pub struct MeshPipeline {
 impl FromWorld for MeshPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
+        let (cluster_buffer_binding_type, cluster_min_binding_size) = if world
+            .get_resource::<WgpuOptions>()
+            .unwrap()
+            .limits
+            .max_storage_buffers_per_shader_stage
+            >= 3
+        {
+            (BufferBindingType::Storage { read_only: true }, None)
+        } else {
+            (BufferBindingType::Uniform, BufferSize::new(16384))
+        };
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[
                 // View
@@ -237,11 +249,12 @@ impl FromWorld for MeshPipeline {
                     binding: 6,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
+                        ty: cluster_buffer_binding_type,
                         has_dynamic_offset: false,
-                        // NOTE: Static size for uniform buffers. GpuPointLight has a padded
-                        // size of 64 bytes, so 16384 / 64 = 256 point lights max
-                        min_binding_size: BufferSize::new(16384),
+                        // NOTE (when no storage buffers): Static size for uniform buffers.
+                        // GpuPointLight has a padded size of 64 bytes, so 16384 / 64 = 256
+                        // point lights max
+                        min_binding_size: cluster_min_binding_size,
                     },
                     count: None,
                 },
@@ -250,10 +263,11 @@ impl FromWorld for MeshPipeline {
                     binding: 7,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
+                        ty: cluster_buffer_binding_type,
                         has_dynamic_offset: false,
-                        // NOTE: With 256 point lights max, indices need 8 bits so use u8
-                        min_binding_size: BufferSize::new(16384),
+                        // NOTE (when no storage buffers): With 256 point lights max, indices
+                        // need 8 bits so use u8
+                        min_binding_size: cluster_min_binding_size,
                     },
                     count: None,
                 },
@@ -262,13 +276,13 @@ impl FromWorld for MeshPipeline {
                     binding: 8,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
+                        ty: cluster_buffer_binding_type,
                         has_dynamic_offset: false,
-                        // NOTE: The offset needs to address 16384 indices, which needs 14 bits.
-                        // The count can be at most all 256 lights so 8 bits.
-                        // Pack the offset into the upper 24 bits and the count into the
+                        // NOTE (when no storage buffers): The offset needs to address 16384
+                        // indices, which needs 14 bits. The count can be at most all 256 lights
+                        // so 8 bits. Pack the offset into the upper 24 bits and the count into the
                         // lower 8 bits.
-                        min_binding_size: BufferSize::new(16384),
+                        min_binding_size: cluster_min_binding_size,
                     },
                     count: None,
                 },
@@ -634,17 +648,11 @@ pub fn queue_mesh_view_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 7,
-                        resource: view_cluster_bindings
-                            .cluster_light_index_lists
-                            .binding()
-                            .unwrap(),
+                        resource: view_cluster_bindings.light_index_lists_binding().unwrap(),
                     },
                     BindGroupEntry {
                         binding: 8,
-                        resource: view_cluster_bindings
-                            .cluster_offsets_and_counts
-                            .binding()
-                            .unwrap(),
+                        resource: view_cluster_bindings.offsets_and_counts_binding().unwrap(),
                     },
                 ],
                 label: Some("mesh_view_bind_group"),

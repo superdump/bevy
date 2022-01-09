@@ -5,6 +5,7 @@ use bevy_math::Vec4;
 use bevy_reflect::TypeUuid;
 use bevy_render::{
     color::Color,
+    options::WgpuOptions,
     prelude::Shader,
     render_asset::{PrepareAssetError, RenderAsset, RenderAssets},
     render_resource::{
@@ -327,14 +328,19 @@ impl RenderAsset for StandardMaterial {
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StandardMaterialKey {
     normal_map: bool,
+    storage_buffers: bool,
 }
 
 impl SpecializedMaterial for StandardMaterial {
     type Key = StandardMaterialKey;
 
-    fn key(render_asset: &<Self as RenderAsset>::PreparedAsset) -> Self::Key {
+    fn key(
+        wgpu_options: &WgpuOptions,
+        render_asset: &<Self as RenderAsset>::PreparedAsset,
+    ) -> Self::Key {
         StandardMaterialKey {
             normal_map: render_asset.has_normal_map,
+            storage_buffers: wgpu_options.limits.max_storage_buffers_per_shader_stage >= 3,
         }
     }
 
@@ -346,6 +352,14 @@ impl SpecializedMaterial for StandardMaterial {
                 .unwrap()
                 .shader_defs
                 .push(String::from("STANDARDMATERIAL_NORMAL_MAP"));
+        }
+        if !key.storage_buffers {
+            descriptor
+                .fragment
+                .as_mut()
+                .unwrap()
+                .shader_defs
+                .push(String::from("NO_STORAGE_BUFFERS_SUPPORT"));
         }
         if let Some(label) = &mut descriptor.label {
             *label = format!("pbr_{}", *label).into();

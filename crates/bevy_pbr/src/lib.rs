@@ -37,6 +37,7 @@ use bevy_asset::{load_internal_asset, Assets, Handle, HandleUntyped};
 use bevy_ecs::prelude::*;
 use bevy_reflect::TypeUuid;
 use bevy_render::{
+    options::WgpuOptions,
     prelude::Color,
     render_graph::RenderGraph,
     render_phase::{sort_phase_system, AddRenderCommand, DrawFunctions},
@@ -135,6 +136,16 @@ impl Plugin for PbrPlugin {
                 },
             );
 
+        // FIXME: What would be a good way of managing storage buffer limitations per
+        // stage?
+        let use_storage_buffers = app
+            .world
+            .get_resource::<WgpuOptions>()
+            .unwrap()
+            .limits
+            .max_storage_buffers_per_shader_stage
+            >= 3;
+
         let render_app = match app.get_sub_app_mut(RenderApp) {
             Ok(render_app) => render_app,
             Err(_) => return,
@@ -175,7 +186,7 @@ impl Plugin for PbrPlugin {
             .init_resource::<ShadowPipeline>()
             .init_resource::<DrawFunctions<Shadow>>()
             .init_resource::<LightMeta>()
-            .init_resource::<GlobalLightMeta>()
+            .insert_resource(GlobalLightMeta::new(use_storage_buffers))
             .init_resource::<SpecializedPipelines<ShadowPipeline>>();
 
         let shadow_pass_node = ShadowPassNode::new(&mut render_app.world);

@@ -6,6 +6,7 @@ mod pipeline;
 mod pipeline_cache;
 mod pipeline_specializer;
 mod shader;
+mod storage_vec;
 mod texture;
 mod uniform_vec;
 
@@ -17,6 +18,7 @@ pub use pipeline::*;
 pub use pipeline_cache::*;
 pub use pipeline_specializer::*;
 pub use shader::*;
+pub use storage_vec::*;
 pub use texture::*;
 pub use uniform_vec::*;
 

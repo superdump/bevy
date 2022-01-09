@@ -10,7 +10,7 @@ use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemParamItem},
 };
-use bevy_math::{const_vec3, Mat4, UVec3, UVec4, Vec2, Vec3, Vec4, Vec4Swizzles};
+use bevy_math::{const_vec3, Mat4, UVec2, UVec3, UVec4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use bevy_render::{
     camera::{Camera, CameraProjection},
     color::Color,
@@ -22,7 +22,7 @@ use bevy_render::{
         EntityRenderCommand, PhaseItem, RenderCommandResult, RenderPhase, SetItemPipeline,
         TrackedRenderPass,
     },
-    render_resource::{std140::AsStd140, *},
+    render_resource::{std140::AsStd140, std430::AsStd430, *},
     renderer::{RenderContext, RenderDevice, RenderQueue},
     texture::*,
     view::{ExtractedView, ViewUniform, ViewUniformOffset, ViewUniforms, VisibleEntities},
@@ -76,7 +76,7 @@ pub struct ExtractedDirectionalLight {
 pub type ExtractedDirectionalLightShadowMap = DirectionalLightShadowMap;
 
 #[repr(C)]
-#[derive(Copy, Clone, AsStd140, Default, Debug)]
+#[derive(Copy, Clone, AsStd140, AsStd430, Default, Debug)]
 pub struct GpuPointLight {
     // The lower-right 2x2 values of the projection matrix 22 23 32 33
     projection_lr: Vec4,
@@ -87,9 +87,76 @@ pub struct GpuPointLight {
     shadow_normal_bias: f32,
 }
 
-#[derive(AsStd140)]
-pub struct GpuPointLights {
-    data: [GpuPointLight; MAX_POINT_LIGHTS],
+pub enum GpuPointLights {
+    Uniform {
+        buffer: UniformVec<[GpuPointLight; MAX_POINT_LIGHTS]>,
+    },
+    Storage {
+        buffer: StorageVec<GpuPointLight>,
+    },
+}
+
+impl GpuPointLights {
+    fn new(use_storage_buffers: bool) -> Self {
+        if use_storage_buffers {
+            Self::storage()
+        } else {
+            Self::uniform()
+        }
+    }
+
+    fn uniform() -> Self {
+        Self::Uniform {
+            buffer: UniformVec::default(),
+        }
+    }
+
+    fn storage() -> Self {
+        Self::Storage {
+            buffer: StorageVec::default(),
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            GpuPointLights::Uniform { buffer } => buffer.clear(),
+            GpuPointLights::Storage { buffer } => buffer.clear(),
+        }
+    }
+
+    fn push(&mut self, mut lights: Vec<GpuPointLight>) {
+        match self {
+            GpuPointLights::Uniform { buffer } => {
+                // NOTE: This iterator construction allows moving and padding with default
+                // values and is like this to avoid unnecessary cloning.
+                let gpu_point_lights = lights
+                    .drain(..)
+                    .chain(std::iter::repeat_with(GpuPointLight::default))
+                    .take(MAX_POINT_LIGHTS)
+                    .collect::<Vec<_>>();
+                buffer.push(gpu_point_lights.try_into().unwrap());
+            }
+            GpuPointLights::Storage { buffer } => {
+                for light in lights.drain(..) {
+                    buffer.push(light);
+                }
+            }
+        }
+    }
+
+    fn write_buffer(&mut self, render_device: &RenderDevice, render_queue: &RenderQueue) {
+        match self {
+            GpuPointLights::Uniform { buffer } => buffer.write_buffer(render_device, render_queue),
+            GpuPointLights::Storage { buffer } => buffer.write_buffer(render_device, render_queue),
+        }
+    }
+
+    pub fn binding(&self) -> Option<BindingResource> {
+        match self {
+            GpuPointLights::Uniform { buffer } => buffer.binding(),
+            GpuPointLights::Storage { buffer } => buffer.binding(),
+        }
+    }
 }
 
 // NOTE: These must match the bit flags in bevy_pbr2/src/render/pbr.frag!
@@ -550,10 +617,18 @@ pub struct ViewLightsUniformOffset {
     pub offset: u32,
 }
 
-#[derive(Default)]
 pub struct GlobalLightMeta {
-    pub gpu_point_lights: UniformVec<GpuPointLights>,
+    pub gpu_point_lights: GpuPointLights,
     pub entity_to_index: HashMap<Entity, usize>,
+}
+
+impl GlobalLightMeta {
+    pub fn new(use_storage_buffers: bool) -> Self {
+        Self {
+            gpu_point_lights: GpuPointLights::new(use_storage_buffers),
+            entity_to_index: HashMap::default(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -638,14 +713,14 @@ pub fn prepare_lights(
             .reserve(point_lights.len());
     }
 
-    let mut gpu_point_lights = [GpuPointLight::default(); MAX_POINT_LIGHTS];
-    for (index, &(entity, light)) in point_lights.iter().enumerate().take(MAX_POINT_LIGHTS) {
+    let mut gpu_point_lights = Vec::new();
+    for (index, &(entity, light)) in point_lights.iter().enumerate() {
         let mut flags = PointLightFlags::NONE;
         // Lights are sorted, shadow enabled lights are first
         if light.shadows_enabled && index < MAX_POINT_LIGHT_SHADOW_MAPS {
             flags |= PointLightFlags::SHADOWS_ENABLED;
         }
-        gpu_point_lights[index] = GpuPointLight {
+        gpu_point_lights.push(GpuPointLight {
             projection_lr: Vec4::new(
                 cube_face_projection.z_axis.z,
                 cube_face_projection.z_axis.w,
@@ -662,12 +737,10 @@ pub fn prepare_lights(
             flags: flags.bits,
             shadow_depth_bias: light.shadow_depth_bias,
             shadow_normal_bias: light.shadow_normal_bias,
-        };
+        });
         global_light_meta.entity_to_index.insert(entity, index);
     }
-    global_light_meta.gpu_point_lights.push(GpuPointLights {
-        data: gpu_point_lights,
-    });
+    global_light_meta.gpu_point_lights.push(gpu_point_lights);
     global_light_meta
         .gpu_point_lights
         .write_buffer(&render_device, &render_queue);
@@ -949,14 +1022,48 @@ fn pack_offset_and_count(offset: usize, count: usize) -> u32 {
         | (count as u32 & CLUSTER_COUNT_MASK)
 }
 
-#[derive(Component, Default)]
+enum ViewClusterBuffers {
+    Uniform {
+        // NOTE: UVec4 is because all arrays in Std140 layout have 16-byte alignment
+        cluster_light_index_lists: UniformVec<[UVec4; ViewClusterBindings::MAX_UNIFORM_ITEMS]>,
+        // NOTE: UVec4 is because all arrays in Std140 layout have 16-byte alignment
+        cluster_offsets_and_counts: UniformVec<[UVec4; ViewClusterBindings::MAX_UNIFORM_ITEMS]>,
+    },
+    Storage {
+        cluster_light_index_lists: StorageVec<u32>,
+        cluster_offsets_and_counts: StorageVec<UVec2>,
+    },
+}
+
+impl ViewClusterBuffers {
+    fn new(use_storage_buffers: bool) -> Self {
+        if use_storage_buffers {
+            Self::storage()
+        } else {
+            Self::uniform()
+        }
+    }
+
+    fn uniform() -> Self {
+        ViewClusterBuffers::Uniform {
+            cluster_light_index_lists: UniformVec::default(),
+            cluster_offsets_and_counts: UniformVec::default(),
+        }
+    }
+
+    fn storage() -> Self {
+        ViewClusterBuffers::Storage {
+            cluster_light_index_lists: StorageVec::default(),
+            cluster_offsets_and_counts: StorageVec::default(),
+        }
+    }
+}
+
+#[derive(Component)]
 pub struct ViewClusterBindings {
     n_indices: usize,
-    // NOTE: UVec4 is because all arrays in Std140 layout have 16-byte alignment
-    pub cluster_light_index_lists: UniformVec<[UVec4; Self::MAX_UNIFORM_ITEMS]>,
     n_offsets: usize,
-    // NOTE: UVec4 is because all arrays in Std140 layout have 16-byte alignment
-    pub cluster_offsets_and_counts: UniformVec<[UVec4; Self::MAX_UNIFORM_ITEMS]>,
+    buffers: ViewClusterBuffers,
 }
 
 impl ViewClusterBindings {
@@ -964,25 +1071,58 @@ impl ViewClusterBindings {
     const MAX_UNIFORM_ITEMS: usize = Self::MAX_OFFSETS / 4;
     const MAX_INDICES: usize = 16384;
 
+    pub fn new(use_storage_buffers: bool) -> Self {
+        Self {
+            n_indices: 0,
+            n_offsets: 0,
+            buffers: ViewClusterBuffers::new(use_storage_buffers),
+        }
+    }
+
     pub fn reserve_and_clear(&mut self) {
-        self.cluster_light_index_lists.clear();
-        self.cluster_light_index_lists
-            .push([UVec4::ZERO; Self::MAX_UNIFORM_ITEMS]);
-        self.cluster_offsets_and_counts.clear();
-        self.cluster_offsets_and_counts
-            .push([UVec4::ZERO; Self::MAX_UNIFORM_ITEMS]);
+        match &mut self.buffers {
+            ViewClusterBuffers::Uniform {
+                cluster_light_index_lists,
+                cluster_offsets_and_counts,
+            } => {
+                cluster_light_index_lists.clear();
+                cluster_light_index_lists.push([UVec4::ZERO; Self::MAX_UNIFORM_ITEMS]);
+                cluster_offsets_and_counts.clear();
+                cluster_offsets_and_counts.push([UVec4::ZERO; Self::MAX_UNIFORM_ITEMS]);
+            }
+            ViewClusterBuffers::Storage {
+                cluster_light_index_lists,
+                cluster_offsets_and_counts,
+            } => {
+                cluster_light_index_lists.clear();
+                cluster_offsets_and_counts.clear();
+            }
+        }
     }
 
     pub fn push_offset_and_count(&mut self, offset: usize, count: usize) {
-        let array_index = self.n_offsets >> 2; // >> 2 is equivalent to / 4
-        if array_index >= Self::MAX_UNIFORM_ITEMS {
-            warn!("cluster offset and count out of bounds!");
-            return;
-        }
-        let component = self.n_offsets & ((1 << 2) - 1);
-        let packed = pack_offset_and_count(offset, count);
+        match &mut self.buffers {
+            ViewClusterBuffers::Uniform {
+                cluster_light_index_lists: _,
+                cluster_offsets_and_counts,
+            } => {
+                let array_index = self.n_offsets >> 2; // >> 2 is equivalent to / 4
+                if array_index >= Self::MAX_UNIFORM_ITEMS {
+                    warn!("cluster offset and count out of bounds!");
+                    return;
+                }
+                let component = self.n_offsets & ((1 << 2) - 1);
+                let packed = pack_offset_and_count(offset, count);
 
-        self.cluster_offsets_and_counts.get_mut(0)[array_index][component] = packed;
+                cluster_offsets_and_counts.get_mut(0)[array_index][component] = packed;
+            }
+            ViewClusterBuffers::Storage {
+                cluster_light_index_lists: _,
+                cluster_offsets_and_counts,
+            } => {
+                cluster_offsets_and_counts.push(UVec2::new(offset as u32, count as u32));
+            }
+        }
 
         self.n_offsets += 1;
     }
@@ -992,20 +1132,79 @@ impl ViewClusterBindings {
     }
 
     pub fn push_index(&mut self, index: usize) {
-        let array_index = self.n_indices >> 4; // >> 4 is equivalent to / 16
-        let component = (self.n_indices >> 2) & ((1 << 2) - 1);
-        let sub_index = self.n_indices & ((1 << 2) - 1);
-        let index = index as u32 & POINT_LIGHT_INDEX_MASK;
+        match &mut self.buffers {
+            ViewClusterBuffers::Uniform {
+                cluster_light_index_lists,
+                cluster_offsets_and_counts: _,
+            } => {
+                let array_index = self.n_indices >> 4; // >> 4 is equivalent to / 16
+                let component = (self.n_indices >> 2) & ((1 << 2) - 1);
+                let sub_index = self.n_indices & ((1 << 2) - 1);
+                let index = index as u32 & POINT_LIGHT_INDEX_MASK;
 
-        self.cluster_light_index_lists.get_mut(0)[array_index][component] |=
-            index << (8 * sub_index);
+                cluster_light_index_lists.get_mut(0)[array_index][component] |=
+                    index << (8 * sub_index);
+            }
+            ViewClusterBuffers::Storage {
+                cluster_light_index_lists,
+                cluster_offsets_and_counts: _,
+            } => {
+                cluster_light_index_lists.push(index as u32);
+            }
+        }
 
         self.n_indices += 1;
+    }
+
+    pub fn write_buffers(&mut self, render_device: &RenderDevice, render_queue: &RenderQueue) {
+        match &mut self.buffers {
+            ViewClusterBuffers::Uniform {
+                cluster_light_index_lists,
+                cluster_offsets_and_counts,
+            } => {
+                cluster_light_index_lists.write_buffer(render_device, render_queue);
+                cluster_offsets_and_counts.write_buffer(render_device, render_queue);
+            }
+            ViewClusterBuffers::Storage {
+                cluster_light_index_lists,
+                cluster_offsets_and_counts,
+            } => {
+                cluster_light_index_lists.write_buffer(render_device, render_queue);
+                cluster_offsets_and_counts.write_buffer(render_device, render_queue);
+            }
+        }
+    }
+
+    pub fn light_index_lists_binding(&self) -> Option<BindingResource> {
+        match &self.buffers {
+            ViewClusterBuffers::Uniform {
+                cluster_light_index_lists,
+                cluster_offsets_and_counts: _,
+            } => cluster_light_index_lists.binding(),
+            ViewClusterBuffers::Storage {
+                cluster_light_index_lists,
+                cluster_offsets_and_counts: _,
+            } => cluster_light_index_lists.binding(),
+        }
+    }
+
+    pub fn offsets_and_counts_binding(&self) -> Option<BindingResource> {
+        match &self.buffers {
+            ViewClusterBuffers::Uniform {
+                cluster_light_index_lists: _,
+                cluster_offsets_and_counts,
+            } => cluster_offsets_and_counts.binding(),
+            ViewClusterBuffers::Storage {
+                cluster_light_index_lists: _,
+                cluster_offsets_and_counts,
+            } => cluster_offsets_and_counts.binding(),
+        }
     }
 }
 
 pub fn prepare_clusters(
     mut commands: Commands,
+    wgpu_options: Res<WgpuOptions>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     global_light_meta: Res<GlobalLightMeta>,
@@ -1018,8 +1217,9 @@ pub fn prepare_clusters(
         With<RenderPhase<Transparent3d>>,
     >,
 ) {
+    let use_storage_buffers = wgpu_options.limits.max_storage_buffers_per_shader_stage >= 3;
     for (entity, cluster_config, extracted_clusters) in views.iter() {
-        let mut view_clusters_bindings = ViewClusterBindings::default();
+        let mut view_clusters_bindings = ViewClusterBindings::new(use_storage_buffers);
         view_clusters_bindings.reserve_and_clear();
 
         let mut indices_full = false;
@@ -1037,8 +1237,9 @@ pub fn prepare_clusters(
                         for entity in cluster_lights.iter() {
                             if let Some(light_index) = global_light_meta.entity_to_index.get(entity)
                             {
-                                if view_clusters_bindings.n_indices()
-                                    >= ViewClusterBindings::MAX_INDICES
+                                if !use_storage_buffers
+                                    && view_clusters_bindings.n_indices()
+                                        >= ViewClusterBindings::MAX_INDICES
                                 {
                                     warn!("Cluster light index lists is full! The PointLights in the view are affecting too many clusters.");
                                     indices_full = true;
@@ -1054,12 +1255,7 @@ pub fn prepare_clusters(
             }
         }
 
-        view_clusters_bindings
-            .cluster_light_index_lists
-            .write_buffer(&render_device, &render_queue);
-        view_clusters_bindings
-            .cluster_offsets_and_counts
-            .write_buffer(&render_device, &render_queue);
+        view_clusters_bindings.write_buffers(&render_device, &render_queue);
 
         commands.get_or_spawn(entity).insert(view_clusters_bindings);
     }

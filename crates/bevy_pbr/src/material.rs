@@ -16,6 +16,7 @@ use bevy_ecs::{
 };
 use bevy_render::{
     mesh::Mesh,
+    options::WgpuOptions,
     render_asset::{RenderAsset, RenderAssetPlugin, RenderAssets},
     render_component::ExtractComponentPlugin,
     render_phase::{
@@ -78,7 +79,11 @@ impl<M: Material> SpecializedMaterial for M {
     type Key = ();
 
     #[inline]
-    fn key(_material: &<Self as RenderAsset>::PreparedAsset) -> Self::Key {}
+    fn key(
+        _wgpu_options: &WgpuOptions,
+        _material: &<Self as RenderAsset>::PreparedAsset,
+    ) -> Self::Key {
+    }
 
     #[inline]
     fn specialize(_key: Self::Key, _descriptor: &mut RenderPipelineDescriptor) {}
@@ -127,7 +132,10 @@ pub trait SpecializedMaterial: Asset + RenderAsset {
     /// Extract the [`SpecializedMaterial::Key`] for the "prepared" version of this material. This key will be
     /// passed in to the [`SpecializedMaterial::specialize`] function when compiling the [`RenderPipeline`](bevy_render::render_resource::RenderPipeline)
     /// for a given entity's material.
-    fn key(material: &<Self as RenderAsset>::PreparedAsset) -> Self::Key;
+    fn key(
+        wgpu_options: &WgpuOptions,
+        material: &<Self as RenderAsset>::PreparedAsset,
+    ) -> Self::Key;
 
     /// Specializes the given `descriptor` according to the given `key`.
     fn specialize(key: Self::Key, descriptor: &mut RenderPipelineDescriptor);
@@ -271,6 +279,7 @@ impl<M: SpecializedMaterial, const I: usize> EntityRenderCommand for SetMaterial
 
 #[allow(clippy::too_many_arguments)]
 pub fn queue_material_meshes<M: SpecializedMaterial>(
+    wgpu_options: Res<WgpuOptions>,
     opaque_draw_functions: Res<DrawFunctions<Opaque3d>>,
     alpha_mask_draw_functions: Res<DrawFunctions<AlphaMask3d>>,
     transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
@@ -289,6 +298,7 @@ pub fn queue_material_meshes<M: SpecializedMaterial>(
         &mut RenderPhase<Transparent3d>,
     )>,
 ) {
+    let wgpu_options = wgpu_options.into_inner();
     for (view, visible_entities, mut opaque_phase, mut alpha_mask_phase, mut transparent_phase) in
         views.iter_mut()
     {
@@ -327,7 +337,7 @@ pub fn queue_material_meshes<M: SpecializedMaterial>(
                         mesh_key |= MeshPipelineKey::TRANSPARENT_MAIN_PASS;
                     }
 
-                    let specialized_key = M::key(material);
+                    let specialized_key = M::key(wgpu_options, material);
                     let pipeline_id = pipelines.specialize(
                         &mut pipeline_cache,
                         &material_pipeline,
