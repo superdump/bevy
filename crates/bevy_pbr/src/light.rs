@@ -9,6 +9,7 @@ use bevy_render::{
     primitives::{Aabb, CubemapFrusta, Frustum, Sphere},
     view::{ComputedVisibility, RenderLayers, Visibility, VisibleEntities},
 };
+use bevy_tasks::ComputeTaskPool;
 use bevy_transform::components::GlobalTransform;
 use bevy_window::Windows;
 
@@ -483,6 +484,7 @@ fn cluster_to_index(cluster_dimensions: UVec3, cluster: UVec3) -> usize {
 // NOTE: Run this before update_point_light_frusta!
 pub fn assign_lights_to_clusters(
     mut commands: Commands,
+    task_pool: Res<ComputeTaskPool>,
     mut global_lights: ResMut<VisiblePointLights>,
     mut views: Query<(Entity, &GlobalTransform, &Camera, &Frustum, &mut Clusters)>,
     lights: Query<(Entity, &GlobalTransform, &PointLight)>,
@@ -506,102 +508,116 @@ pub fn assign_lights_to_clusters(
             vec![VisiblePointLights::from_light_count(light_count); cluster_count];
         let mut visible_lights_set = HashSet::with_capacity(light_count);
 
-        for (light_entity, light_transform, light) in lights.iter() {
-            let light_sphere = Sphere {
-                center: light_transform.translation,
-                radius: light.range,
-            };
+        let lights_vec = lights.iter().collect::<Vec<_>>();
+        let indices_entities = task_pool.scope(|scope| {
+            let clusters = &*clusters;
+            for chunk in lights_vec.chunks(32) {
+                scope.spawn(async move {
+                    let mut indices_entities = Vec::new();
+                    for (light_entity, light_transform, light) in chunk {
+                        let light_sphere = Sphere {
+                            center: light_transform.translation,
+                            radius: light.range,
+                        };
 
-            // Check if the light is within the view frustum
-            if !frustum.intersects_sphere(&light_sphere) {
-                continue;
-            }
+                        // Check if the light is within the view frustum
+                        if !frustum.intersects_sphere(&light_sphere) {
+                            continue;
+                        }
 
-            // Calculate an AABB for the light in view space, find the corresponding clusters for the min and max
-            // points of the AABB, then iterate over just those clusters for this light
-            let light_aabb_view = Aabb {
-                center: (inverse_view_transform * light_sphere.center.extend(1.0)).xyz(),
-                half_extents: Vec3::splat(light_sphere.radius),
-            };
-            let (light_aabb_view_min, light_aabb_view_max) =
-                (light_aabb_view.min(), light_aabb_view.max());
-            // Is there a cheaper way to do this? The problem is that because of perspective
-            // the point at max z but min xy may be less xy in screenspace, and similar. As
-            // such, projecting the min and max xy at both the closer and further z and taking
-            // the min and max of those projected points addresses this.
-            let (
-                light_aabb_view_xymin_near,
-                light_aabb_view_xymin_far,
-                light_aabb_view_xymax_near,
-                light_aabb_view_xymax_far,
-            ) = (
-                light_aabb_view_min,
-                light_aabb_view_min.xy().extend(light_aabb_view_max.z),
-                light_aabb_view_max.xy().extend(light_aabb_view_min.z),
-                light_aabb_view_max,
-            );
-            let (
-                light_aabb_clip_xymin_near,
-                light_aabb_clip_xymin_far,
-                light_aabb_clip_xymax_near,
-                light_aabb_clip_xymax_far,
-            ) = (
-                camera.projection_matrix * light_aabb_view_xymin_near.extend(1.0),
-                camera.projection_matrix * light_aabb_view_xymin_far.extend(1.0),
-                camera.projection_matrix * light_aabb_view_xymax_near.extend(1.0),
-                camera.projection_matrix * light_aabb_view_xymax_far.extend(1.0),
-            );
-            let (
-                light_aabb_ndc_xymin_near,
-                light_aabb_ndc_xymin_far,
-                light_aabb_ndc_xymax_near,
-                light_aabb_ndc_xymax_far,
-            ) = (
-                light_aabb_clip_xymin_near.xyz() / light_aabb_clip_xymin_near.w,
-                light_aabb_clip_xymin_far.xyz() / light_aabb_clip_xymin_far.w,
-                light_aabb_clip_xymax_near.xyz() / light_aabb_clip_xymax_near.w,
-                light_aabb_clip_xymax_far.xyz() / light_aabb_clip_xymax_far.w,
-            );
-            let (light_aabb_ndc_min, light_aabb_ndc_max) = (
-                light_aabb_ndc_xymin_near
-                    .min(light_aabb_ndc_xymin_far)
-                    .min(light_aabb_ndc_xymax_near)
-                    .min(light_aabb_ndc_xymax_far),
-                light_aabb_ndc_xymin_near
-                    .max(light_aabb_ndc_xymin_far)
-                    .max(light_aabb_ndc_xymax_near)
-                    .max(light_aabb_ndc_xymax_far),
-            );
-            let min_cluster = ndc_position_to_cluster(
-                clusters.axis_slices,
-                cluster_factors,
-                is_orthographic,
-                light_aabb_ndc_min,
-                light_aabb_view_min.z,
-            );
-            let max_cluster = ndc_position_to_cluster(
-                clusters.axis_slices,
-                cluster_factors,
-                is_orthographic,
-                light_aabb_ndc_max,
-                light_aabb_view_max.z,
-            );
-            let (min_cluster, max_cluster) =
-                (min_cluster.min(max_cluster), min_cluster.max(max_cluster));
-            for y in min_cluster.y..=max_cluster.y {
-                for x in min_cluster.x..=max_cluster.x {
-                    for z in min_cluster.z..=max_cluster.z {
-                        let cluster_index =
-                            cluster_to_index(clusters.axis_slices, UVec3::new(x, y, z));
-                        let cluster_aabb = &clusters.aabbs[cluster_index];
-                        if light_sphere.intersects_obb(cluster_aabb, &view_transform) {
-                            global_lights_set.insert(light_entity);
-                            visible_lights_set.insert(light_entity);
-                            clusters_lights[cluster_index].entities.push(light_entity);
+                        // Calculate an AABB for the light in view space, find the corresponding clusters for the min and max
+                        // points of the AABB, then iterate over just those clusters for this light
+                        let light_aabb_view = Aabb {
+                            center: (inverse_view_transform * light_sphere.center.extend(1.0))
+                                .xyz(),
+                            half_extents: Vec3::splat(light_sphere.radius),
+                        };
+                        let (light_aabb_view_min, light_aabb_view_max) =
+                            (light_aabb_view.min(), light_aabb_view.max());
+                        // Is there a cheaper way to do this? The problem is that because of perspective
+                        // the point at max z but min xy may be less xy in screenspace, and similar. As
+                        // such, projecting the min and max xy at both the closer and further z and taking
+                        // the min and max of those projected points addresses this.
+                        let (
+                            light_aabb_view_xymin_near,
+                            light_aabb_view_xymin_far,
+                            light_aabb_view_xymax_near,
+                            light_aabb_view_xymax_far,
+                        ) = (
+                            light_aabb_view_min,
+                            light_aabb_view_min.xy().extend(light_aabb_view_max.z),
+                            light_aabb_view_max.xy().extend(light_aabb_view_min.z),
+                            light_aabb_view_max,
+                        );
+                        let (
+                            light_aabb_clip_xymin_near,
+                            light_aabb_clip_xymin_far,
+                            light_aabb_clip_xymax_near,
+                            light_aabb_clip_xymax_far,
+                        ) = (
+                            camera.projection_matrix * light_aabb_view_xymin_near.extend(1.0),
+                            camera.projection_matrix * light_aabb_view_xymin_far.extend(1.0),
+                            camera.projection_matrix * light_aabb_view_xymax_near.extend(1.0),
+                            camera.projection_matrix * light_aabb_view_xymax_far.extend(1.0),
+                        );
+                        let (
+                            light_aabb_ndc_xymin_near,
+                            light_aabb_ndc_xymin_far,
+                            light_aabb_ndc_xymax_near,
+                            light_aabb_ndc_xymax_far,
+                        ) = (
+                            light_aabb_clip_xymin_near.xyz() / light_aabb_clip_xymin_near.w,
+                            light_aabb_clip_xymin_far.xyz() / light_aabb_clip_xymin_far.w,
+                            light_aabb_clip_xymax_near.xyz() / light_aabb_clip_xymax_near.w,
+                            light_aabb_clip_xymax_far.xyz() / light_aabb_clip_xymax_far.w,
+                        );
+                        let (light_aabb_ndc_min, light_aabb_ndc_max) = (
+                            light_aabb_ndc_xymin_near
+                                .min(light_aabb_ndc_xymin_far)
+                                .min(light_aabb_ndc_xymax_near)
+                                .min(light_aabb_ndc_xymax_far),
+                            light_aabb_ndc_xymin_near
+                                .max(light_aabb_ndc_xymin_far)
+                                .max(light_aabb_ndc_xymax_near)
+                                .max(light_aabb_ndc_xymax_far),
+                        );
+                        let min_cluster = ndc_position_to_cluster(
+                            clusters.axis_slices,
+                            cluster_factors,
+                            is_orthographic,
+                            light_aabb_ndc_min,
+                            light_aabb_view_min.z,
+                        );
+                        let max_cluster = ndc_position_to_cluster(
+                            clusters.axis_slices,
+                            cluster_factors,
+                            is_orthographic,
+                            light_aabb_ndc_max,
+                            light_aabb_view_max.z,
+                        );
+                        let (min_cluster, max_cluster) =
+                            (min_cluster.min(max_cluster), min_cluster.max(max_cluster));
+                        for y in min_cluster.y..=max_cluster.y {
+                            for x in min_cluster.x..=max_cluster.x {
+                                for z in min_cluster.z..=max_cluster.z {
+                                    let cluster_index =
+                                        cluster_to_index(clusters.axis_slices, UVec3::new(x, y, z));
+                                    let cluster_aabb = &clusters.aabbs[cluster_index];
+                                    if light_sphere.intersects_obb(cluster_aabb, &view_transform) {
+                                        indices_entities.push((cluster_index, *light_entity));
+                                    }
+                                }
+                            }
                         }
                     }
-                }
+                    indices_entities
+                });
             }
+        });
+        for (cluster_index, light_entity) in indices_entities.into_iter().flatten() {
+            global_lights_set.insert(light_entity);
+            visible_lights_set.insert(light_entity);
+            clusters_lights[cluster_index].entities.push(light_entity);
         }
 
         for cluster_lights in &mut clusters_lights {
