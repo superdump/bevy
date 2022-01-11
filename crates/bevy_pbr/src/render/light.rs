@@ -448,7 +448,7 @@ pub fn extract_lights(
     point_light_shadow_map: Res<PointLightShadowMap>,
     directional_light_shadow_map: Res<DirectionalLightShadowMap>,
     global_point_lights: Res<VisiblePointLights>,
-    // visible_point_lights: Query<&VisiblePointLights>,
+    mut previous_point_lights_len: Local<usize>,
     mut point_lights: Query<(&PointLight, &mut CubemapVisibleEntities, &GlobalTransform)>,
     mut directional_lights: Query<(
         Entity,
@@ -474,32 +474,38 @@ pub fn extract_lights(
     // https://catlikecoding.com/unity/tutorials/custom-srp/point-and-spot-shadows/
     let point_light_texel_size = 2.0 / point_light_shadow_map.size as f32;
 
+    let mut point_lights_values = Vec::with_capacity(*previous_point_lights_len);
     for entity in global_point_lights.iter().copied() {
         if let Ok((point_light, cubemap_visible_entities, transform)) = point_lights.get_mut(entity)
         {
             let render_cubemap_visible_entities =
                 std::mem::take(cubemap_visible_entities.into_inner());
-            commands.get_or_spawn(entity).insert_bundle((
-                ExtractedPointLight {
-                    color: point_light.color,
-                    // NOTE: Map from luminous power in lumens to luminous intensity in lumens per steradian
-                    // for a point light. See https://google.github.io/filament/Filament.html#mjx-eqn-pointLightLuminousPower
-                    // for details.
-                    intensity: point_light.intensity / (4.0 * std::f32::consts::PI),
-                    range: point_light.range,
-                    radius: point_light.radius,
-                    transform: *transform,
-                    shadows_enabled: point_light.shadows_enabled,
-                    shadow_depth_bias: point_light.shadow_depth_bias,
-                    // The factor of SQRT_2 is for the worst-case diagonal offset
-                    shadow_normal_bias: point_light.shadow_normal_bias
-                        * point_light_texel_size
-                        * std::f32::consts::SQRT_2,
-                },
-                render_cubemap_visible_entities,
+            point_lights_values.push((
+                entity,
+                (
+                    ExtractedPointLight {
+                        color: point_light.color,
+                        // NOTE: Map from luminous power in lumens to luminous intensity in lumens per steradian
+                        // for a point light. See https://google.github.io/filament/Filament.html#mjx-eqn-pointLightLuminousPower
+                        // for details.
+                        intensity: point_light.intensity / (4.0 * std::f32::consts::PI),
+                        range: point_light.range,
+                        radius: point_light.radius,
+                        transform: *transform,
+                        shadows_enabled: point_light.shadows_enabled,
+                        shadow_depth_bias: point_light.shadow_depth_bias,
+                        // The factor of SQRT_2 is for the worst-case diagonal offset
+                        shadow_normal_bias: point_light.shadow_normal_bias
+                            * point_light_texel_size
+                            * std::f32::consts::SQRT_2,
+                    },
+                    render_cubemap_visible_entities,
+                ),
             ));
         }
     }
+    *previous_point_lights_len = point_lights_values.len();
+    commands.insert_or_spawn_batch(point_lights_values);
 
     for (entity, directional_light, visible_entities, transform) in directional_lights.iter_mut() {
         // Calulate the directional light shadow map texel size using the largest x,y dimension of
