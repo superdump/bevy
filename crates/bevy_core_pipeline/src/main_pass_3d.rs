@@ -3,8 +3,11 @@ use bevy_ecs::prelude::*;
 use bevy_render::{
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
     render_phase::{DrawFunctions, RenderPhase, TrackedRenderPass},
-    render_resource::{LoadOp, Operations, RenderPassDepthStencilAttachment, RenderPassDescriptor},
-    renderer::RenderContext,
+    render_resource::{
+        BufferInitDescriptor, BufferUsages, LoadOp, Operations, RenderPassDepthStencilAttachment,
+        RenderPassDescriptor, WgpuQuerySetDescriptor, WgpuQueryType,
+    },
+    renderer::{RenderContext, RenderQueue},
     view::{ExtractedView, ViewDepthTexture, ViewTarget},
 };
 
@@ -53,6 +56,24 @@ impl Node for MainPass3dNode {
                 Err(_) => return Ok(()), // No window
             };
 
+        let render_pass_query_set_buffer =
+            render_context
+                .render_device
+                .create_buffer_with_data(&BufferInitDescriptor {
+                    label: Some("render_pass_query_set_buffer"),
+                    contents: &[0u8; 8],
+                    usage: BufferUsages::MAP_READ,
+                });
+        let render_pass_query_set =
+            render_context
+                .render_device
+                .wgpu_device()
+                .create_query_set(&WgpuQuerySetDescriptor {
+                    label: Some("opaque_pass_query_set"),
+                    ty: WgpuQueryType::Timestamp,
+                    count: 1,
+                });
+
         {
             // Run the opaque pass, sorted front-to-back
             // NOTE: Scoped to drop the mutable borrow of render_context
@@ -86,7 +107,24 @@ impl Node for MainPass3dNode {
                 let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
                 draw_function.draw(world, &mut tracked_pass, view_entity, item);
             }
+
+            tracked_pass.write_timestamp(&render_pass_query_set, 0);
         }
+
+        render_context.command_encoder.resolve_query_set(
+            &render_pass_query_set,
+            0..1,
+            &render_pass_query_set_buffer,
+            0,
+        );
+        let render_queue = world.get_resource::<RenderQueue>().unwrap();
+        let time_query_result = u64::from_le_bytes(
+            render_pass_query_set_buffer.slice(0..8).get_mapped_range()[0..8]
+                .try_into()
+                .unwrap(),
+        );
+        let dt = time_query_result as f32 * render_queue.get_timestamp_period();
+        dbg!(&dt);
 
         {
             // Run the alpha mask pass, sorted front-to-back

@@ -2,7 +2,7 @@ use crate::{
     prelude::Color,
     render_resource::{
         BindGroup, BindGroupId, BufferId, BufferSlice, RenderPipeline, RenderPipelineId,
-        ShaderStages,
+        ShaderStages, WgpuQuerySet,
     },
 };
 use bevy_utils::tracing::trace;
@@ -338,5 +338,10 @@ impl<'a> TrackedRenderPass<'a> {
     pub fn set_blend_constant(&mut self, color: Color) {
         trace!("set blend constant: {:?}", color);
         self.pass.set_blend_constant(wgpu::Color::from(color));
+    }
+
+    pub fn write_timestamp(&mut self, query_set: &WgpuQuerySet, query_index: u32) {
+        trace!("write_timestamp");
+        self.pass.write_timestamp(query_set, query_index);
     }
 }
