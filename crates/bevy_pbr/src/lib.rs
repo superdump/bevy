@@ -56,10 +56,10 @@ pub const PBR_TYPES_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 14465578778686805602);
 const PBR_TYPES_IMPORT_PATH: &str = "bevy_pbr::pbr_types";
 pub const PBR_BINDINGS_HANDLE: HandleUntyped =
-HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1501114814264999179);
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1501114814264999179);
 const PBR_BINDINGS_IMPORT_PATH: &str = "bevy_pbr::pbr_bindings";
 pub const PBR_FUNCTIONS_HANDLE: HandleUntyped =
-HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1167493567156271479);
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1167493567156271479);
 const PBR_FUNCTIONS_IMPORT_PATH: &str = "bevy_pbr::pbr_functions";
 pub const SHADOW_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1836745567947005696);
@@ -79,18 +79,24 @@ impl Plugin for PbrPlugin {
             );
             shaders.set_untracked(
                 PBR_TYPES_HANDLE,
-                Shader::from_wgsl(include_str!("../../../assets/shaders/bevy_pbr/pbr_types.wgsl"))
-                    .with_import_path(PBR_TYPES_IMPORT_PATH),
+                Shader::from_wgsl(include_str!(
+                    "../../../assets/shaders/bevy_pbr/pbr_types.wgsl"
+                ))
+                .with_import_path(PBR_TYPES_IMPORT_PATH),
             );
             shaders.set_untracked(
                 PBR_BINDINGS_HANDLE,
-                Shader::from_wgsl(include_str!("../../../assets/shaders/bevy_pbr/pbr_bindings.wgsl"))
-                    .with_import_path(PBR_BINDINGS_IMPORT_PATH),
+                Shader::from_wgsl(include_str!(
+                    "../../../assets/shaders/bevy_pbr/pbr_bindings.wgsl"
+                ))
+                .with_import_path(PBR_BINDINGS_IMPORT_PATH),
             );
             shaders.set_untracked(
                 PBR_FUNCTIONS_HANDLE,
-                Shader::from_wgsl(include_str!("../../../assets/shaders/bevy_pbr/pbr_functions.wgsl"))
-                    .with_import_path(PBR_FUNCTIONS_IMPORT_PATH),
+                Shader::from_wgsl(include_str!(
+                    "../../../assets/shaders/bevy_pbr/pbr_functions.wgsl"
+                ))
+                .with_import_path(PBR_FUNCTIONS_IMPORT_PATH),
             );
             shaders.set_untracked(
                 SHADOW_SHADER_HANDLE,
@@ -101,9 +107,12 @@ impl Plugin for PbrPlugin {
         {
             let asset_server = app.world.get_resource::<AssetServer>().unwrap();
             let pbr_shader_handle: Handle<Shader> = asset_server.load("shaders/bevy_pbr/pbr.wgsl");
-            let pbr_types_handle: Handle<Shader> = asset_server.load("shaders/bevy_pbr/pbr_types.wgsl");
-            let pbr_bindings_handle: Handle<Shader> = asset_server.load("shaders/bevy_pbr/pbr_bindings.wgsl");
-            let pbr_functions_handle: Handle<Shader> = asset_server.load("shaders/bevy_pbr/pbr_functions.wgsl");
+            let pbr_types_handle: Handle<Shader> =
+                asset_server.load("shaders/bevy_pbr/pbr_types.wgsl");
+            let pbr_bindings_handle: Handle<Shader> =
+                asset_server.load("shaders/bevy_pbr/pbr_bindings.wgsl");
+            let pbr_functions_handle: Handle<Shader> =
+                asset_server.load("shaders/bevy_pbr/pbr_functions.wgsl");
             let shadow_shader_handle: Handle<Shader> =
                 asset_server.load("shaders/bevy_pbr/depth.wgsl");
 
@@ -117,9 +126,12 @@ impl Plugin for PbrPlugin {
             // NOTE: We need to store the strong handles created from the asset paths
             let mut hot_reload_shaders = app.world.get_resource_mut::<HotReloadShaders>().unwrap();
             hot_reload_shaders.keep_shader_alive(pbr_shader_handle);
-            hot_reload_shaders.add_hot_reload_shader(pbr_types_handle, PBR_TYPES_IMPORT_PATH.to_string());
-            hot_reload_shaders.add_hot_reload_shader(pbr_bindings_handle, PBR_BINDINGS_IMPORT_PATH.to_string());
-            hot_reload_shaders.add_hot_reload_shader(pbr_functions_handle, PBR_FUNCTIONS_IMPORT_PATH.to_string());
+            hot_reload_shaders
+                .add_hot_reload_shader(pbr_types_handle, PBR_TYPES_IMPORT_PATH.to_string());
+            hot_reload_shaders
+                .add_hot_reload_shader(pbr_bindings_handle, PBR_BINDINGS_IMPORT_PATH.to_string());
+            hot_reload_shaders
+                .add_hot_reload_shader(pbr_functions_handle, PBR_FUNCTIONS_IMPORT_PATH.to_string());
             hot_reload_shaders.keep_shader_alive(shadow_shader_handle);
         }
 

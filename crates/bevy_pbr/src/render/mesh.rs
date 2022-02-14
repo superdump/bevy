@@ -53,32 +53,44 @@ impl Plugin for MeshRenderPlugin {
             let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
             shaders.set_untracked(
                 MESH_SHADER_HANDLE,
-                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh.wgsl")),
+                Shader::from_wgsl(include_str!(
+                    "../../../../assets/shaders/bevy_pbr/mesh.wgsl"
+                )),
             );
             shaders.set_untracked(
                 MESH_VIEW_TYPES_HANDLE,
-                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_view_types.wgsl"))
-                    .with_import_path(MESH_VIEW_TYPES_IMPORT_PATH.to_string()),
+                Shader::from_wgsl(include_str!(
+                    "../../../../assets/shaders/bevy_pbr/mesh_view_types.wgsl"
+                ))
+                .with_import_path(MESH_VIEW_TYPES_IMPORT_PATH.to_string()),
             );
             shaders.set_untracked(
                 MESH_VIEW_BINDINGS_HANDLE,
-                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_view_bindings.wgsl"))
-                    .with_import_path(MESH_VIEW_BINDINGS_IMPORT_PATH.to_string()),
+                Shader::from_wgsl(include_str!(
+                    "../../../../assets/shaders/bevy_pbr/mesh_view_bindings.wgsl"
+                ))
+                .with_import_path(MESH_VIEW_BINDINGS_IMPORT_PATH.to_string()),
             );
             shaders.set_untracked(
                 MESH_TYPES_HANDLE,
-                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_types.wgsl"))
-                    .with_import_path(MESH_TYPES_IMPORT_PATH.to_string()),
+                Shader::from_wgsl(include_str!(
+                    "../../../../assets/shaders/bevy_pbr/mesh_types.wgsl"
+                ))
+                .with_import_path(MESH_TYPES_IMPORT_PATH.to_string()),
             );
             shaders.set_untracked(
                 MESH_BINDINGS_HANDLE,
-                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_bindings.wgsl"))
-                    .with_import_path(MESH_BINDINGS_IMPORT_PATH.to_string()),
+                Shader::from_wgsl(include_str!(
+                    "../../../../assets/shaders/bevy_pbr/mesh_bindings.wgsl"
+                ))
+                .with_import_path(MESH_BINDINGS_IMPORT_PATH.to_string()),
             );
             shaders.set_untracked(
                 MESH_FUNCTIONS_HANDLE,
-                Shader::from_wgsl(include_str!("../../../../assets/shaders/bevy_pbr/mesh_functions.wgsl"))
-                    .with_import_path(MESH_FUNCTIONS_IMPORT_PATH.to_string()),
+                Shader::from_wgsl(include_str!(
+                    "../../../../assets/shaders/bevy_pbr/mesh_functions.wgsl"
+                ))
+                .with_import_path(MESH_FUNCTIONS_IMPORT_PATH.to_string()),
             );
         }
         #[cfg(feature = "bevy_shader_hot_reloading")]
@@ -116,14 +128,10 @@ impl Plugin for MeshRenderPlugin {
                 mesh_view_bindings_handle,
                 MESH_VIEW_BINDINGS_IMPORT_PATH.to_string(),
             );
-            hot_reload_shaders.add_hot_reload_shader(
-                mesh_types_handle,
-                MESH_TYPES_IMPORT_PATH.to_string(),
-            );
-            hot_reload_shaders.add_hot_reload_shader(
-                mesh_bindings_handle,
-                MESH_BINDINGS_IMPORT_PATH.to_string(),
-            );
+            hot_reload_shaders
+                .add_hot_reload_shader(mesh_types_handle, MESH_TYPES_IMPORT_PATH.to_string());
+            hot_reload_shaders
+                .add_hot_reload_shader(mesh_bindings_handle, MESH_BINDINGS_IMPORT_PATH.to_string());
             hot_reload_shaders.add_hot_reload_shader(
                 mesh_functions_handle,
                 MESH_FUNCTIONS_IMPORT_PATH.to_string(),
