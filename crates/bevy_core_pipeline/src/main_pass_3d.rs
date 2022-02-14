@@ -3,12 +3,10 @@ use bevy_ecs::prelude::*;
 use bevy_render::{
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
     render_phase::{DrawFunctions, RenderPhase, TrackedRenderPass},
-    render_resource::{
-        BufferInitDescriptor, BufferUsages, LoadOp, Operations, RenderPassDepthStencilAttachment,
-        RenderPassDescriptor, WgpuQuerySetDescriptor, WgpuQueryType,
-    },
-    renderer::{RenderContext, RenderQueue},
+    render_resource::{LoadOp, Operations, RenderPassDepthStencilAttachment, RenderPassDescriptor},
+    renderer::RenderContext,
     view::{ExtractedView, ViewDepthTexture, ViewTarget},
+    wgpu_profiler,
 };
 
 pub struct MainPass3dNode {
@@ -50,29 +48,16 @@ impl Node for MainPass3dNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
+        let RenderContext {
+            command_encoder,
+            render_device,
+            profiler,
+        } = render_context;
         let (opaque_phase, alpha_mask_phase, transparent_phase, target, depth) =
             match self.query.get_manual(world, view_entity) {
                 Ok(query) => query,
                 Err(_) => return Ok(()), // No window
             };
-
-        let render_pass_query_set_buffer =
-            render_context
-                .render_device
-                .create_buffer_with_data(&BufferInitDescriptor {
-                    label: Some("render_pass_query_set_buffer"),
-                    contents: &[0u8; 8],
-                    usage: BufferUsages::MAP_READ,
-                });
-        let render_pass_query_set =
-            render_context
-                .render_device
-                .wgpu_device()
-                .create_query_set(&WgpuQuerySetDescriptor {
-                    label: Some("opaque_pass_query_set"),
-                    ty: WgpuQueryType::Timestamp,
-                    count: 1,
-                });
 
         {
             // Run the opaque pass, sorted front-to-back
@@ -98,33 +83,22 @@ impl Node for MainPass3dNode {
 
             let draw_functions = world.get_resource::<DrawFunctions<Opaque3d>>().unwrap();
 
-            let render_pass = render_context
-                .command_encoder
-                .begin_render_pass(&pass_descriptor);
-            let mut draw_functions = draw_functions.write();
-            let mut tracked_pass = TrackedRenderPass::new(render_pass);
-            for item in &opaque_phase.items {
-                let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
-                draw_function.draw(world, &mut tracked_pass, view_entity, item);
-            }
-
-            tracked_pass.write_timestamp(&render_pass_query_set, 0);
+            wgpu_profiler!(
+                "opaque_3d_pass",
+                profiler,
+                command_encoder,
+                render_device.wgpu_device(),
+                {
+                    let render_pass = command_encoder.begin_render_pass(&pass_descriptor);
+                    let mut draw_functions = draw_functions.write();
+                    let mut tracked_pass = TrackedRenderPass::new(render_pass);
+                    for item in &opaque_phase.items {
+                        let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
+                        draw_function.draw(world, &mut tracked_pass, view_entity, item);
+                    }
+                }
+            );
         }
-
-        render_context.command_encoder.resolve_query_set(
-            &render_pass_query_set,
-            0..1,
-            &render_pass_query_set_buffer,
-            0,
-        );
-        let render_queue = world.get_resource::<RenderQueue>().unwrap();
-        let time_query_result = u64::from_le_bytes(
-            render_pass_query_set_buffer.slice(0..8).get_mapped_range()[0..8]
-                .try_into()
-                .unwrap(),
-        );
-        let dt = time_query_result as f32 * render_queue.get_timestamp_period();
-        dbg!(&dt);
 
         {
             // Run the alpha mask pass, sorted front-to-back
@@ -149,15 +123,21 @@ impl Node for MainPass3dNode {
 
             let draw_functions = world.get_resource::<DrawFunctions<AlphaMask3d>>().unwrap();
 
-            let render_pass = render_context
-                .command_encoder
-                .begin_render_pass(&pass_descriptor);
-            let mut draw_functions = draw_functions.write();
-            let mut tracked_pass = TrackedRenderPass::new(render_pass);
-            for item in &alpha_mask_phase.items {
-                let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
-                draw_function.draw(world, &mut tracked_pass, view_entity, item);
-            }
+            wgpu_profiler!(
+                "alpha_mask_3d_pass",
+                profiler,
+                command_encoder,
+                render_device.wgpu_device(),
+                {
+                    let render_pass = command_encoder.begin_render_pass(&pass_descriptor);
+                    let mut draw_functions = draw_functions.write();
+                    let mut tracked_pass = TrackedRenderPass::new(render_pass);
+                    for item in &alpha_mask_phase.items {
+                        let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
+                        draw_function.draw(world, &mut tracked_pass, view_entity, item);
+                    }
+                }
+            );
         }
 
         {
@@ -187,15 +167,21 @@ impl Node for MainPass3dNode {
                 .get_resource::<DrawFunctions<Transparent3d>>()
                 .unwrap();
 
-            let render_pass = render_context
-                .command_encoder
-                .begin_render_pass(&pass_descriptor);
-            let mut draw_functions = draw_functions.write();
-            let mut tracked_pass = TrackedRenderPass::new(render_pass);
-            for item in &transparent_phase.items {
-                let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
-                draw_function.draw(world, &mut tracked_pass, view_entity, item);
-            }
+            wgpu_profiler!(
+                "transparent_3d_pass",
+                profiler,
+                command_encoder,
+                render_device.wgpu_device(),
+                {
+                    let render_pass = command_encoder.begin_render_pass(&pass_descriptor);
+                    let mut draw_functions = draw_functions.write();
+                    let mut tracked_pass = TrackedRenderPass::new(render_pass);
+                    for item in &transparent_phase.items {
+                        let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
+                        draw_function.draw(world, &mut tracked_pass, view_entity, item);
+                    }
+                }
+            );
         }
 
         Ok(())

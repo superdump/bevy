@@ -45,6 +45,7 @@ use bevy_app::{App, AppLabel, Plugin};
 use bevy_asset::{AddAsset, AssetServer};
 use bevy_ecs::prelude::*;
 use std::ops::{Deref, DerefMut};
+pub use wgpu_profiler::{wgpu_profiler, GpuProfiler as WgpuProfiler};
 
 /// Contains the default Bevy rendering backend based on wgpu.
 #[derive(Default)]
@@ -156,7 +157,9 @@ impl Plugin for RenderPlugin {
             // don't apply buffers when the stage finishes running
             // extract stage runs on the app world, but the buffers are applied to the render world
             extract_stage.set_apply_buffers(false);
+            let queue_timestamp_period = queue.get_timestamp_period();
             render_app
+                .insert_non_send_resource(WgpuProfiler::new(4, queue_timestamp_period))
                 .add_stage(RenderStage::Extract, extract_stage)
                 .add_stage(RenderStage::Prepare, SystemStage::parallel())
                 .add_stage(RenderStage::Queue, SystemStage::parallel())

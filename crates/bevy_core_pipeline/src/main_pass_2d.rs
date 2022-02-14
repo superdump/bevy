@@ -6,6 +6,7 @@ use bevy_render::{
     render_resource::{LoadOp, Operations, RenderPassDescriptor},
     renderer::RenderContext,
     view::{ExtractedView, ViewTarget},
+    wgpu_profiler,
 };
 
 pub struct MainPass2dNode {
@@ -57,16 +58,28 @@ impl Node for MainPass2dNode {
             .get_resource::<DrawFunctions<Transparent2d>>()
             .unwrap();
 
-        let render_pass = render_context
-            .command_encoder
-            .begin_render_pass(&pass_descriptor);
+        let RenderContext {
+            command_encoder,
+            render_device,
+            profiler,
+        } = render_context;
 
-        let mut draw_functions = draw_functions.write();
-        let mut tracked_pass = TrackedRenderPass::new(render_pass);
-        for item in &transparent_phase.items {
-            let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
-            draw_function.draw(world, &mut tracked_pass, view_entity, item);
-        }
+        wgpu_profiler!(
+            "transparent_2d_pass",
+            profiler,
+            command_encoder,
+            render_device.wgpu_device(),
+            {
+                let render_pass = command_encoder.begin_render_pass(&pass_descriptor);
+
+                let mut draw_functions = draw_functions.write();
+                let mut tracked_pass = TrackedRenderPass::new(render_pass);
+                for item in transparent_phase.items.iter() {
+                    let draw_function = draw_functions.get_mut(item.draw_function).unwrap();
+                    draw_function.draw(world, &mut tracked_pass, view_entity, item);
+                }
+            }
+        );
         Ok(())
     }
 }

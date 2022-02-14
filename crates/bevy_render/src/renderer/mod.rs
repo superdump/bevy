@@ -13,12 +13,14 @@ use crate::{
 use bevy_ecs::prelude::*;
 use std::sync::Arc;
 use wgpu::{CommandEncoder, Instance, Queue, RequestAdapterOptions};
+use wgpu_profiler::GpuProfiler as WgpuProfiler;
 
 /// Updates the [`RenderGraph`] with all of its nodes and then runs it to render the entire frame.
 pub fn render_system(world: &mut World) {
     world.resource_scope(|world, mut graph: Mut<RenderGraph>| {
         graph.update(world);
     });
+    let mut profiler = world.remove_non_send_resource::<WgpuProfiler>().unwrap();
     let graph = world.get_resource::<RenderGraph>().unwrap();
     let render_device = world.get_resource::<RenderDevice>().unwrap();
     let render_queue = world.get_resource::<RenderQueue>().unwrap();
@@ -26,9 +28,11 @@ pub fn render_system(world: &mut World) {
         graph,
         render_device.clone(), // TODO: is this clone really necessary?
         render_queue,
+        &mut profiler,
         world,
     )
     .unwrap();
+    world.insert_non_send_resource(profiler);
     {
         let span = info_span!("present_frames");
         let _guard = span.enter();
@@ -222,7 +226,8 @@ pub async fn initialize_renderer(
 ///
 /// The [`RenderDevice`] is used to create render resources and the
 /// the [`CommandEncoder`] is used to record a series of GPU operations.
-pub struct RenderContext {
+pub struct RenderContext<'a> {
     pub render_device: RenderDevice,
     pub command_encoder: CommandEncoder,
+    pub profiler: &'a mut WgpuProfiler,
 }

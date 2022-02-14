@@ -7,6 +7,7 @@ use smallvec::{smallvec, SmallVec};
 use std::ops::Deref;
 use std::{borrow::Cow, collections::VecDeque};
 use thiserror::Error;
+use wgpu_profiler::GpuProfiler as WgpuProfiler;
 
 use crate::{
     render_graph::{
@@ -48,6 +49,7 @@ impl RenderGraphRunner {
         graph: &RenderGraph,
         render_device: RenderDevice,
         queue: &wgpu::Queue,
+        profiler: &mut WgpuProfiler,
         world: &World,
     ) -> Result<(), RenderGraphRunnerError> {
         let command_encoder =
@@ -55,9 +57,15 @@ impl RenderGraphRunner {
         let mut render_context = RenderContext {
             render_device,
             command_encoder,
+            profiler,
         };
 
         Self::run_graph(graph, None, &mut render_context, world, &[])?;
+
+        render_context
+            .profiler
+            .resolve_queries(&mut render_context.command_encoder);
+
         {
             #[cfg(feature = "trace")]
             let span = info_span!("submit_graph_commands");
@@ -65,6 +73,19 @@ impl RenderGraphRunner {
             let _guard = span.enter();
             queue.submit(vec![render_context.command_encoder.finish()]);
         }
+
+        render_context.profiler.end_frame().unwrap();
+
+        if let Some(mut results) = render_context.profiler.process_finished_frame() {
+            for result in results.drain(..) {
+                println!(
+                    "{}: {:.2}ms",
+                    result.label,
+                    (result.time.end - result.time.start) * 1000.0
+                );
+            }
+        }
+
         Ok(())
     }
 
