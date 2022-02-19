@@ -1210,7 +1210,6 @@ impl ViewClusterBindings {
 
 pub fn prepare_clusters(
     mut commands: Commands,
-    wgpu_options: Res<WgpuOptions>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     global_light_meta: Res<GlobalLightMeta>,
@@ -1223,7 +1222,7 @@ pub fn prepare_clusters(
         With<RenderPhase<Transparent3d>>,
     >,
 ) {
-    let use_storage_buffers = wgpu_options.limits.max_storage_buffers_per_shader_stage >= 3;
+    let use_storage_buffers = render_device.limits().max_storage_buffers_per_shader_stage >= 3;
     for (entity, cluster_config, extracted_clusters) in views.iter() {
         let mut view_clusters_bindings = ViewClusterBindings::new(use_storage_buffers);
         view_clusters_bindings.reserve_and_clear();

@@ -12,7 +12,6 @@ use bevy_math::{Mat4, Size};
 use bevy_reflect::TypeUuid;
 use bevy_render::{
     mesh::{GpuBufferInfo, Mesh},
-    options::WgpuOptions,
     render_asset::RenderAssets,
     render_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
     render_phase::{EntityRenderCommand, RenderCommandResult, TrackedRenderPass},
@@ -168,9 +167,9 @@ impl FromWorld for MeshPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
         let (cluster_buffer_binding_type, cluster_min_binding_size) = if world
-            .get_resource::<WgpuOptions>()
+            .get_resource::<RenderDevice>()
             .unwrap()
-            .limits
+            .limits()
             .max_storage_buffers_per_shader_stage
             >= 3
         {

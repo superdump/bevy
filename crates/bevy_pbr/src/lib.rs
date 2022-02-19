@@ -37,11 +37,11 @@ use bevy_asset::{load_internal_asset, Assets, Handle, HandleUntyped};
 use bevy_ecs::prelude::*;
 use bevy_reflect::TypeUuid;
 use bevy_render::{
-    options::WgpuOptions,
     prelude::Color,
     render_graph::RenderGraph,
     render_phase::{sort_phase_system, AddRenderCommand, DrawFunctions},
     render_resource::{Shader, SpecializedPipelines},
+    renderer::RenderDevice,
     view::VisibilitySystems,
     RenderApp, RenderStage,
 };
@@ -140,9 +140,9 @@ impl Plugin for PbrPlugin {
         // stage?
         let use_storage_buffers = app
             .world
-            .get_resource::<WgpuOptions>()
+            .get_resource::<RenderDevice>()
             .unwrap()
-            .limits
+            .limits()
             .max_storage_buffers_per_shader_stage
             >= 3;
 
