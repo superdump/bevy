@@ -7,7 +7,7 @@ use bevy_render::{
     camera::{Camera, CameraProjection, OrthographicProjection},
     color::Color,
     primitives::{Aabb, CubemapFrusta, Frustum, Sphere},
-    view::{ComputedVisibility, RenderLayers, Visibility, VisibleEntities},
+    view::{ComputedVisibility, RenderLayers, Visibility, VisibleEntities}, renderer::RenderDevice,
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_window::Windows;
@@ -705,6 +705,7 @@ pub fn assign_lights_to_clusters(
         &ClusterDebug,
     )>,
     lights: Query<(Entity, &GlobalTransform, &PointLight)>,
+    render_device: Res<RenderDevice>,
 ) {
     let light_count = lights.iter().count();
     let mut global_lights_set = HashSet::with_capacity(light_count);
@@ -801,15 +802,21 @@ pub fn assign_lights_to_clusters(
             cluster_index_estimate += (xy_count.x + x_overlap) * (xy_count.y + y_overlap) * z_count as f32;
         }
 
+        let max_indices = if render_device.limits().max_storage_buffers_per_shader_stage >= 3 {
+            usize::MAX
+        } else {
+            ViewClusterBindings::MAX_INDICES
+        };
+
         let mut index_estimate = cluster_index_estimate as usize;
-        if cluster_index_estimate > ViewClusterBindings::MAX_INDICES as f32 {
+        if cluster_index_estimate > max_indices as f32 {
             // scale x and y cluster count to be able to fit all our indices
 
             // we take the ratio of the actual indices over the index estimate. 
             // this not not guaranteed to be small enough due to overlapped tiles, but 
             // the tolerance in the estimate is more than sufficient to cover the 
             // difference
-            let index_ratio = ViewClusterBindings::MAX_INDICES as f32 / cluster_index_estimate as f32;
+            let index_ratio = max_indices as f32 / cluster_index_estimate as f32;
             let xy_ratio = index_ratio.sqrt();
 
             cluster_dimensions.x = ((cluster_dimensions.x as f32 * xy_ratio).floor() as u32).max(1);
