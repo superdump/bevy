@@ -33,7 +33,7 @@ pub mod draw_3d_graph {
 }
 
 use bevy_app::prelude::*;
-use bevy_asset::{Assets, Handle, HandleUntyped};
+use bevy_asset::{load_internal_asset, Assets, Handle, HandleUntyped};
 use bevy_ecs::prelude::*;
 use bevy_reflect::TypeUuid;
 use bevy_render::{
@@ -41,6 +41,7 @@ use bevy_render::{
     render_graph::RenderGraph,
     render_phase::{sort_phase_system, AddRenderCommand, DrawFunctions},
     render_resource::{Shader, SpecializedPipelines},
+    renderer::RenderDevice,
     view::VisibilitySystems,
     RenderApp, RenderStage,
 };
@@ -57,14 +58,12 @@ pub struct PbrPlugin;
 
 impl Plugin for PbrPlugin {
     fn build(&self, app: &mut App) {
-        let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
-        shaders.set_untracked(
-            PBR_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("render/pbr.wgsl")),
-        );
-        shaders.set_untracked(
+        load_internal_asset!(app, PBR_SHADER_HANDLE, "render/pbr.wgsl", Shader::from_wgsl);
+        load_internal_asset!(
+            app,
             SHADOW_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("render/depth.wgsl")),
+            "render/depth.wgsl",
+            Shader::from_wgsl
         );
 
         app.register_type::<CubemapVisibleEntities>()
@@ -129,6 +128,16 @@ impl Plugin for PbrPlugin {
                 },
             );
 
+        // FIXME: What would be a good way of managing storage buffer limitations per
+        // stage?
+        let use_storage_buffers = app
+            .world
+            .get_resource::<RenderDevice>()
+            .unwrap()
+            .limits()
+            .max_storage_buffers_per_shader_stage
+            >= 3;
+
         let render_app = match app.get_sub_app_mut(RenderApp) {
             Ok(render_app) => render_app,
             Err(_) => return,
@@ -153,12 +162,10 @@ impl Plugin for PbrPlugin {
             )
             .add_system_to_stage(
                 RenderStage::Prepare,
-                // this is added as an exclusive system because it contributes new views. it must run (and have Commands applied)
-                // _before_ the `prepare_views()` system is run. ideally this becomes a normal system when "stageless" features come out
-                render::prepare_clusters
-                    .exclusive_system()
-                    .label(RenderLightSystems::PrepareClusters)
-                    .after(RenderLightSystems::PrepareLights),
+                // NOTE: This needs to run after prepare_lights. As prepare_lights is an exclusive system,
+                // just adding it to the non-exclusive systems in the Prepare stage means it runs after
+                // prepare_lights.
+                render::prepare_clusters.label(RenderLightSystems::PrepareClusters),
             )
             .add_system_to_stage(
                 RenderStage::Queue,
@@ -169,7 +176,7 @@ impl Plugin for PbrPlugin {
             .init_resource::<ShadowPipeline>()
             .init_resource::<DrawFunctions<Shadow>>()
             .init_resource::<LightMeta>()
-            .init_resource::<GlobalLightMeta>()
+            .insert_resource(GlobalLightMeta::new(use_storage_buffers))
             .init_resource::<SpecializedPipelines<ShadowPipeline>>();
 
         let shadow_pass_node = ShadowPassNode::new(&mut render_app.world);

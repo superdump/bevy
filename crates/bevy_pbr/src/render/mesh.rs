@@ -3,7 +3,7 @@ use crate::{
     ViewClusterBindings, ViewLightsUniformOffset, ViewShadowBindings,
 };
 use bevy_app::Plugin;
-use bevy_asset::{Assets, Handle, HandleUntyped};
+use bevy_asset::{load_internal_asset, Handle, HandleUntyped};
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemParamItem},
@@ -35,20 +35,18 @@ pub const MESH_SHADER_HANDLE: HandleUntyped =
 
 impl Plugin for MeshRenderPlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
-        shaders.set_untracked(
-            MESH_SHADER_HANDLE,
-            Shader::from_wgsl(include_str!("mesh.wgsl")),
-        );
-        shaders.set_untracked(
+        load_internal_asset!(app, MESH_SHADER_HANDLE, "mesh.wgsl", Shader::from_wgsl);
+        load_internal_asset!(
+            app,
             MESH_STRUCT_HANDLE,
-            Shader::from_wgsl(include_str!("mesh_struct.wgsl"))
-                .with_import_path("bevy_pbr::mesh_struct"),
+            "mesh_struct.wgsl",
+            Shader::from_wgsl
         );
-        shaders.set_untracked(
+        load_internal_asset!(
+            app,
             MESH_VIEW_BIND_GROUP_HANDLE,
-            Shader::from_wgsl(include_str!("mesh_view_bind_group.wgsl"))
-                .with_import_path("bevy_pbr::mesh_view_bind_group"),
+            "mesh_view_bind_group.wgsl",
+            Shader::from_wgsl
         );
 
         app.add_plugin(UniformComponentPlugin::<MeshUniform>::default());
@@ -168,6 +166,17 @@ pub struct MeshPipeline {
 impl FromWorld for MeshPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.get_resource::<RenderDevice>().unwrap();
+        let (cluster_buffer_binding_type, cluster_min_binding_size) = if world
+            .get_resource::<RenderDevice>()
+            .unwrap()
+            .limits()
+            .max_storage_buffers_per_shader_stage
+            >= 3
+        {
+            (BufferBindingType::Storage { read_only: true }, None)
+        } else {
+            (BufferBindingType::Uniform, BufferSize::new(16384))
+        };
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[
                 // View
@@ -239,11 +248,12 @@ impl FromWorld for MeshPipeline {
                     binding: 6,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
+                        ty: cluster_buffer_binding_type,
                         has_dynamic_offset: false,
-                        // NOTE: Static size for uniform buffers. GpuPointLight has a padded
-                        // size of 64 bytes, so 16384 / 64 = 256 point lights max
-                        min_binding_size: BufferSize::new(16384),
+                        // NOTE (when no storage buffers): Static size for uniform buffers.
+                        // GpuPointLight has a padded size of 64 bytes, so 16384 / 64 = 256
+                        // point lights max
+                        min_binding_size: cluster_min_binding_size,
                     },
                     count: None,
                 },
@@ -252,10 +262,11 @@ impl FromWorld for MeshPipeline {
                     binding: 7,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
+                        ty: cluster_buffer_binding_type,
                         has_dynamic_offset: false,
-                        // NOTE: With 256 point lights max, indices need 8 bits so use u8
-                        min_binding_size: BufferSize::new(16384),
+                        // NOTE (when no storage buffers): With 256 point lights max, indices
+                        // need 8 bits so use u8
+                        min_binding_size: cluster_min_binding_size,
                     },
                     count: None,
                 },
@@ -264,13 +275,13 @@ impl FromWorld for MeshPipeline {
                     binding: 8,
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
+                        ty: cluster_buffer_binding_type,
                         has_dynamic_offset: false,
-                        // NOTE: The offset needs to address 16384 indices, which needs 14 bits.
-                        // The count can be at most all 256 lights so 8 bits.
-                        // Pack the offset into the upper 24 bits and the count into the
+                        // NOTE (when no storage buffers): The offset needs to address 16384
+                        // indices, which needs 14 bits. The count can be at most all 256 lights
+                        // so 8 bits. Pack the offset into the upper 24 bits and the count into the
                         // lower 8 bits.
-                        min_binding_size: BufferSize::new(16384),
+                        min_binding_size: cluster_min_binding_size,
                     },
                     count: None,
                 },
@@ -636,17 +647,11 @@ pub fn queue_mesh_view_bind_groups(
                     },
                     BindGroupEntry {
                         binding: 7,
-                        resource: view_cluster_bindings
-                            .cluster_light_index_lists
-                            .binding()
-                            .unwrap(),
+                        resource: view_cluster_bindings.light_index_lists_binding().unwrap(),
                     },
                     BindGroupEntry {
                         binding: 8,
-                        resource: view_cluster_bindings
-                            .cluster_offsets_and_counts
-                            .binding()
-                            .unwrap(),
+                        resource: view_cluster_bindings.offsets_and_counts_binding().unwrap(),
                     },
                 ],
                 label: Some("mesh_view_bind_group"),
