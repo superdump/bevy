@@ -4,7 +4,7 @@ use bevy::{
         Diagnostic, DiagnosticId, Diagnostics, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin,
     },
     input::mouse::MouseMotion,
-    pbr::{ClusterConfig, ClusterFarZMode, ClusterZConfig, Clusters, VisiblePointLights},
+    pbr::{ClusterConfig, ClusterFarZMode, ClusterZConfig, Clusters, VisiblePointLights, ClusterDebug, IntersectTestType},
     prelude::*,
     window::{PresentMode, WindowMode},
 };
@@ -13,10 +13,10 @@ fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(WindowDescriptor {
-            width: 1280.0,
-            height: 720.0,
+            // width: 1280.0,
+            // height: 720.0,
             present_mode: PresentMode::Mailbox,
-            // mode: WindowMode::BorderlessFullscreen,
+            mode: WindowMode::BorderlessFullscreen,
             ..Default::default()
         })
         .add_plugins(DefaultPlugins)
@@ -25,6 +25,7 @@ fn main() {
         .add_startup_system(setup)
         .add_system(camera_controller)
         .add_system(cluster_style)
+        .add_system(debug_settings)
         .add_system(animate_light_direction)
         .add_startup_system(setup_cluster_diagnostics)
         .add_system(cluster_diagnostics)
@@ -119,6 +120,8 @@ fn setup(
             transform: Transform::from_xyz(1.0, 2.0, 0.0),
             point_light: PointLight {
                 intensity: 1600.0, // lumens - roughly a 100W non-halogen incandescent bulb
+                range: f32::sqrt(1600.0 * 10.0 / (4.0 * std::f32::consts::PI)),
+                // range: 5.0,
                 color: Color::RED,
                 shadows_enabled: true,
                 ..Default::default()
@@ -263,6 +266,7 @@ fn setup(
     commands
         .spawn_bundle(PerspectiveCameraBundle {
             // transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+            // transform: Transform::from_xyz(-8.0, 10.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
             transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         })
@@ -320,6 +324,26 @@ impl Default for CameraController {
     }
 }
 
+fn debug_settings(
+    mut q: Query<&mut ClusterDebug>,
+    key_input: Res<Input<KeyCode>>,
+    mut mode: Local<usize>,
+) {
+    let modes = vec![
+        IntersectTestType::OBB,
+        IntersectTestType::ScreenSpaceAABB,
+        IntersectTestType::RunningSS,
+        IntersectTestType::RuuningSSPrecomputeView,
+    ];
+
+    if key_input.just_pressed(KeyCode::B) {
+        *mode = (*mode + 1) % modes.len();
+        let mut d = q.single_mut();
+        d.test = modes[*mode];
+        println!("mode: {:?}", d.test);
+    }
+}
+
 fn cluster_style(
     mut q: Query<&mut ClusterConfig>,
     key_input: Res<Input<KeyCode>>,
@@ -327,6 +351,14 @@ fn cluster_style(
 ) {
     let configs = vec![
         ClusterConfig::Single,
+        ClusterConfig::FixedZ {
+            total: 4096,
+            z_slices: 1,
+            z_config: ClusterZConfig {
+                first_slice_depth: 5.0,
+                far_z_mode: ClusterFarZMode::MaxLightRange,
+            },
+        },
         ClusterConfig::FixedZ {
             total: 4096,
             z_slices: 24,
