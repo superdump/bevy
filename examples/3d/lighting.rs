@@ -267,7 +267,8 @@ fn setup(
         .spawn_bundle(PerspectiveCameraBundle {
             // transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             // transform: Transform::from_xyz(-8.0, 10.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
-            transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
+            // transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y).with_scale(Vec3::new(0.5,0.5,1.0)),
             ..Default::default()
         })
         .insert(CameraController::default());
@@ -333,7 +334,8 @@ fn debug_settings(
         IntersectTestType::OBB,
         IntersectTestType::ScreenSpaceAABB,
         IntersectTestType::RunningSS,
-        IntersectTestType::RuuningSSPrecomputeView,
+        IntersectTestType::RunningSSPrecomputeView,
+        IntersectTestType::None,
     ];
 
     if key_input.just_pressed(KeyCode::B) {

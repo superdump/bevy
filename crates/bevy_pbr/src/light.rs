@@ -673,10 +673,11 @@ fn viewspace_light_aabb(
 
 #[derive(Clone, Copy, Debug)]
 pub enum IntersectTestType {
+    None,
     OBB,
     ScreenSpaceAABB,
     RunningSS,
-    RuuningSSPrecomputeView,
+    RunningSSPrecomputeView,
 }
 
 #[derive(Component)]
@@ -708,11 +709,11 @@ pub fn assign_lights_to_clusters(
 ) {
     let light_count = lights.iter().count();
     let mut global_lights_set = HashSet::with_capacity(light_count);
-    for (view_entity, view_transform, camera, frustum, config, mut clusters, debug) in views.iter_mut() {
+    for (view_entity, view_transform_component, camera, frustum, config, mut clusters, debug) in views.iter_mut() {
         // FIXME remove - just for diagnostics
         let mut index_count = 0;
 
-        let view_transform = view_transform.compute_matrix();
+        let view_transform = view_transform_component.compute_matrix();
         let inverse_view_transform = view_transform.inverse();
         let is_orthographic = camera.projection_matrix.w_axis.w == 1.0;
 
@@ -876,9 +877,25 @@ pub fn assign_lights_to_clusters(
             let clip_light = clip_light.xyz() / clip_light.w;
 
             let clip_to_view = camera.projection_matrix.inverse();
+            let clip_to_world = view_transform * camera.projection_matrix.inverse();
+
             let light_range_squared = light.range * light.range;
 
             match debug.test {
+                IntersectTestType::None => {
+                    for y in min_cluster.y..=max_cluster.y {
+                        let row_offset = y * clusters.axis_slices.x;
+                        for x in min_cluster.x..=max_cluster.x {
+                            let col_offset = (row_offset + x) * clusters.axis_slices.z;
+                            for z in min_cluster.z..=max_cluster.z {
+                                // NOTE: cluster_index = (y * dim.x + x) * dim.z + z
+                                let cluster_index = (col_offset + z) as usize;
+                                clusters_lights[cluster_index].entities.push(light_entity);
+                                index_count += 1;
+                            }
+                        }
+                    }                    
+                },
                 IntersectTestType::OBB => {
                     for y in min_cluster.y..=max_cluster.y {
                         let row_offset = y * clusters.axis_slices.x;
@@ -918,13 +935,12 @@ pub fn assign_lights_to_clusters(
                                 let clip_cluster_max = Vec3::new((x+1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0, y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0, cluster_near);
         
                                 let closest_point = clip_light.clamp(clip_cluster_min, clip_cluster_max);
-                                let closest_point_view = clip_to_view * closest_point.extend(1.0);
-                                let closest_point_view = closest_point_view.xyz() / closest_point_view.w;
-        
-                                let dist_vec = closest_point_view - viewspace_light;
-                                let test = dist_vec.dot(dist_vec) < light_range_squared;
-        
-                                if test {
+                                let closest_point_world = clip_to_world * closest_point.extend(1.0);
+                                let closest_point_world = closest_point_world.xyz() / closest_point_world.w;
+
+                                let dist_vec = closest_point_world - light_sphere.center;
+       
+                                if dist_vec.dot(dist_vec) < light_range_squared {
                                     clusters_lights[cluster_index].entities.push(light_entity);
                                     index_count += 1;
                                 }
@@ -950,25 +966,20 @@ pub fn assign_lights_to_clusters(
                         clip_cluster_max.z = cluster_near;
 
                         for y in min_cluster.y..=max_cluster.y {
-                            let cluster_top = (y+1) as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
-                            let cluster_bottom = y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
-                            clip_cluster_min.y = cluster_top;
-                            clip_cluster_max.y = cluster_bottom;
+                            clip_cluster_min.y = (y+1) as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
+                            clip_cluster_max.y = y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
         
                             for x in min_cluster.x..=max_cluster.x {
-                                let cluster_left = x as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
-                                let cluster_right = (x+1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
-                                clip_cluster_min.x = cluster_left;
-                                clip_cluster_max.x = cluster_right;
+                                clip_cluster_min.x = x as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
+                                clip_cluster_max.x = (x+1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
             
                                 let closest_point = clip_light.clamp(clip_cluster_min, clip_cluster_max);
-                                let closest_point_view = clip_to_view * closest_point.extend(1.0);
-                                let closest_point_view = closest_point_view.xyz() / closest_point_view.w;
+                                let closest_point_world = clip_to_world * closest_point.extend(1.0);
+                                let closest_point_world = closest_point_world.xyz() / closest_point_world.w;
         
-                                let dist_vec = closest_point_view - viewspace_light;
-                                let test = dist_vec.dot(dist_vec) < light_range_squared;
-        
-                                if test {
+                                let dist_vec = closest_point_world - light_sphere.center;
+
+                                if dist_vec.dot(dist_vec) < light_range_squared {
                                     let cluster_index = ((y * clusters.axis_slices.x + x) * clusters.axis_slices.z + z) as usize;
                                     clusters_lights[cluster_index].entities.push(light_entity);
                                     index_count += 1;
@@ -977,81 +988,52 @@ pub fn assign_lights_to_clusters(
                         }
                     }
                 },
-                IntersectTestType::RuuningSSPrecomputeView => {
+                IntersectTestType::RunningSSPrecomputeView => {
                     for z in min_cluster.z..=max_cluster.z {
-                        let cluster_near = if z == 0 { 0.0 } else {
+                        let view_cluster_near = if z == 0 { 0.0 } else {
                             -first_slice_depth * f32::powf(far_z / first_slice_depth, (z-1) as f32 / (cluster_dimensions.z-1) as f32)
                         };
-                        let cluster_near = camera.projection_matrix * Vec4::new(0.0, 0.0, cluster_near, 1.0);
-                        let cluster_near = cluster_near.z / cluster_near.w;
-                        let cluster_far = -first_slice_depth * f32::powf(far_z / first_slice_depth, z as f32 / (cluster_dimensions.z-1) as f32);
-                        let cluster_far = camera.projection_matrix * Vec4::new(0.0, 0.0, cluster_far, 1.0);
-                        let cluster_far = cluster_far.z / cluster_far.w;
+                        let clip_cluster_near = camera.projection_matrix * Vec4::new(0.0, 0.0, view_cluster_near, 1.0);
+                        let clip_cluster_near = clip_cluster_near.z / clip_cluster_near.w;
 
-                        let nearest_z = clip_light.z.clamp(cluster_far, cluster_near);
+                        let view_cluster_far = -first_slice_depth * f32::powf(far_z / first_slice_depth, z as f32 / (cluster_dimensions.z-1) as f32);
+                        let clip_cluster_far = camera.projection_matrix * Vec4::new(0.0, 0.0, view_cluster_far, 1.0);
+                        let clip_cluster_far = clip_cluster_far.z / clip_cluster_far.w;
 
-                        let viewspace_unit = clip_to_view * Vec4::new(1.0, 1.0, nearest_z, 1.0);
-                        let viewspace_unit = viewspace_unit.xyz() / viewspace_unit.w;
+                        let clip_nearest_z = clip_light.z.clamp(clip_cluster_far, clip_cluster_near);
+                        let viewspace_unit_xy = clip_to_view * Vec4::new(1.0, 1.0, clip_nearest_z, 1.0);
+                        let viewspace_unit_xy = viewspace_unit_xy.xyz() / viewspace_unit_xy.w;
 
-                        let z_dist_nearest = clip_to_view * Vec4::new(clip_light.x, clip_light.y, nearest_z, 1.0);
-                        let z_dist_nearest = z_dist_nearest.z / z_dist_nearest.w;
-                        let z_dist_sq = (z_dist_nearest - viewspace_light.z) * (z_dist_nearest - viewspace_light.z);
+                        let view_nearest_z = viewspace_light.z.clamp(view_cluster_far, view_cluster_near);
+                        let z_dist = (view_nearest_z - viewspace_light.z) * view_transform_component.scale.z;
+                        let z_dist_sq = z_dist * z_dist;
 
-                        if z_dist_sq > light_range_squared {
-                            continue;
-                        }
-
+                        let remaining_range_squared = light_range_squared - z_dist_sq;
+                        
                         for y in min_cluster.y..=max_cluster.y {
                             let clip_cluster_top = (y+1) as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
                             let clip_cluster_bottom = y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
 
                             let clip_nearest_y = clip_light.y.clamp(clip_cluster_top, clip_cluster_bottom);
-                            let nearest_y = clip_nearest_y * viewspace_unit.y;
-                            let y_dist_sq = (nearest_y - viewspace_light.y) * (nearest_y - viewspace_light.y);
+                            let view_nearest_y = clip_nearest_y * viewspace_unit_xy.y;
+                            let y_dist = (view_nearest_y - viewspace_light.y) * view_transform_component.scale.y;
+                            let y_dist_sq = y_dist * y_dist;
 
-                            if y_dist_sq + z_dist_sq > light_range_squared {
+                            if y_dist_sq > remaining_range_squared {
                                 continue;
                             }
+                            let remaining_range_squared = remaining_range_squared - y_dist_sq;
 
                             for x in min_cluster.x..=max_cluster.x {
                                 let clip_cluster_left = x as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
                                 let clip_cluster_right = (x+1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
 
                                 let clip_nearest_x = clip_light.x.clamp(clip_cluster_left, clip_cluster_right);
-                                let nearest_x = clip_nearest_x * viewspace_unit.x;
-                                let x_dist_sq = (nearest_x - viewspace_light.x) * (nearest_x - viewspace_light.x);
-
-                                let test = x_dist_sq + y_dist_sq + z_dist_sq <= light_range_squared;
-
-                                // {
-                                //     let cluster_near = if z == 0 { 0.0 } else {
-                                //         -first_slice_depth * f32::powf(far_z / first_slice_depth, (z-1) as f32 / (cluster_dimensions.z-1) as f32)
-                                //     };
-                                //     let cluster_near = camera.projection_matrix * Vec4::new(0.0, 0.0, cluster_near, 1.0);
-                                //     let cluster_near = cluster_near.z / cluster_near.w;
-                                //     let cluster_far = -first_slice_depth * f32::powf(far_z / first_slice_depth, z as f32 / (cluster_dimensions.z-1) as f32);
-                                //     let cluster_far = camera.projection_matrix * Vec4::new(0.0, 0.0, cluster_far, 1.0);
-                                //     let cluster_far = cluster_far.z / cluster_far.w;
-            
-                                //     let clip_cluster_min = Vec3::new(x as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0, (y+1) as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0, cluster_far);
-                                //     let clip_cluster_max = Vec3::new((x+1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0, y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0, cluster_near);
-            
-                                //     let closest_point = clip_light.clamp(clip_cluster_min, clip_cluster_max);
-                                //     let closest_point_view = clip_to_view * closest_point.extend(1.0);
-                                //     let closest_point_view = closest_point_view.xyz() / closest_point_view.w;
-            
-                                //     let dist_vec = closest_point_view - viewspace_light;
-                                //     let ssaabb_test = dist_vec.dot(dist_vec) <= light_range_squared;
-
-                                //     if ssaabb_test != test {
-                                //         println!("[{}, {}, {}]", x, y, z);
-                                //         println!("closest point view: {}, light_view: {}, dist_sq: {}, light_range_sq: {}", closest_point_view, viewspace_light, dist_vec.dot(dist_vec), light_range_squared);
-                                //         println!("cpv: x_dist_sq: {}, y_dist_sq: {}, z_dist_sq: {}", dist_vec.x * dist_vec.x, dist_vec.y * dist_vec.y, dist_vec.z * dist_vec.z);
-                                //         println!("use: x_dist_sq: {}, y_dist_sq: {}, z_dist_sq: {}, sum_sq: {}", x_dist_sq, y_dist_sq, z_dist_sq, x_dist_sq + y_dist_sq + z_dist_sq);
-                                //     }
-                                // }
-    
-                                if test {
+                                let view_nearest_x = clip_nearest_x * viewspace_unit_xy.x;
+                                let x_dist = (view_nearest_x - viewspace_light.x) * view_transform_component.scale.x;
+                                let x_dist_sq = x_dist * x_dist;
+                                
+                                if x_dist_sq < remaining_range_squared {
                                     let cluster_index = ((y * clusters.axis_slices.x + x) * clusters.axis_slices.z + z) as usize;
                                     clusters_lights[cluster_index].entities.push(light_entity);
                                     index_count += 1;
@@ -1059,11 +1041,12 @@ pub fn assign_lights_to_clusters(
                            }
                         }
                     }
-                },                
+                },
             }
         }
 
         for cluster_lights in &mut clusters_lights {
+            // cluster_lights.entities.clear();
             cluster_lights.entities.shrink_to_fit();
         }
 
