@@ -1438,21 +1438,25 @@ pub fn assign_lights_to_clusters(
                     }
                 }
                 IntersectTestType::IterativeSphereRefinement => {
+                    let view_light_sphere = Sphere {
+                        center: (inverse_view_transform * light_sphere.center.extend(1.0)).xyz(),
+                        radius: light_sphere.radius,
+                    };
                     // FIXME: Calculate the screen space and depth extents of the light in terms of clusters
                     let light_center_clip =
-                        camera.projection_matrix * light_sphere.center.extend(1.0);
+                        camera.projection_matrix * view_light_sphere.center.extend(1.0);
                     let light_center_ndc = light_center_clip.xyz() / light_center_clip.w;
                     let cluster_coordinates = ndc_position_to_cluster(
                         clusters.axis_slices,
                         cluster_factors,
                         is_orthographic,
                         light_center_ndc,
-                        light_sphere.center.z,
+                        view_light_sphere.center.z,
                     );
                     let z_center = cluster_coordinates.z;
                     let y_center = cluster_coordinates.y;
                     for z in min_cluster.z..=max_cluster.z {
-                        let mut z_light = light_sphere.clone();
+                        let mut z_light = view_light_sphere.clone();
                         if z != z_center {
                             let z_plane = if z < z_center {
                                 z_planes[(z + 1) as usize]
