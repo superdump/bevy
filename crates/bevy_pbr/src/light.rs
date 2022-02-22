@@ -1479,7 +1479,8 @@ pub fn assign_lights_to_clusters(
                             loop {
                                 if min_x >= max_cluster.x
                                     || get_distance_x(x_planes[min_x as usize], y_light.center)
-                                        < y_light.radius
+                                        + y_light.radius
+                                        > 0.0
                                 {
                                     break;
                                 }
@@ -1489,7 +1490,8 @@ pub fn assign_lights_to_clusters(
                             loop {
                                 if max_x <= min_x
                                     || -get_distance_x(x_planes[max_x as usize], y_light.center)
-                                        < y_light.radius
+                                        + y_light.radius
+                                        > 0.0
                                 {
                                     break;
                                 }
