@@ -4,7 +4,10 @@ use bevy::{
         Diagnostic, DiagnosticId, Diagnostics, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin,
     },
     input::mouse::MouseMotion,
-    pbr::{ClusterConfig, ClusterFarZMode, ClusterZConfig, Clusters, VisiblePointLights, ClusterDebug, IntersectTestType},
+    pbr::{
+        ClusterConfig, ClusterDebug, ClusterFarZMode, ClusterZConfig, Clusters, IntersectTestType,
+        VisiblePointLights,
+    },
     prelude::*,
     window::{PresentMode, WindowMode},
 };
@@ -224,9 +227,10 @@ fn setup(
     //     ..Default::default()
     // });
 
-    for x in 0..6 {
-        for y in 0..6 {
-            for z in 0..6 {
+    let extras = 6;
+    for x in 0..extras {
+        for y in 0..extras {
+            for z in 0..extras {
                 // red point light
                 commands
                     .spawn_bundle(PointLightBundle {
@@ -267,8 +271,8 @@ fn setup(
         .spawn_bundle(PerspectiveCameraBundle {
             // transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             // transform: Transform::from_xyz(-8.0, 10.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
-            // transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
-            transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y).with_scale(Vec3::new(0.5,0.5,1.0)),
+            transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
+            // transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y).with_scale(Vec3::new(0.5,0.5,1.0)),
             ..Default::default()
         })
         .insert(CameraController::default());
@@ -333,8 +337,14 @@ fn debug_settings(
     let modes = vec![
         IntersectTestType::OBB,
         IntersectTestType::ScreenSpaceAABB,
+        IntersectTestType::ScreenSpaceAABBPrecache,
         IntersectTestType::RunningSS,
         IntersectTestType::RunningSSPrecomputeView,
+        IntersectTestType::RunningSSPrecomputeViewPrecacheDepth,
+        // doesn't work
+        // IntersectTestType::RunningSSPrecomputeViewPrecacheDepthLimitXTesting,
+        IntersectTestType::SimpleJCClip,
+        IntersectTestType::JustCause1DClip,
         IntersectTestType::IterativeSphereRefinement,
         IntersectTestType::None,
     ];
@@ -344,6 +354,12 @@ fn debug_settings(
         let mut d = q.single_mut();
         d.test = modes[*mode];
         println!("mode: {:?}", d.test);
+    }
+
+    if key_input.just_pressed(KeyCode::N) {
+        let mut d = q.single_mut();
+        d.clear_lights = !d.clear_lights;
+        println!("clear_lights: {:?}", d.clear_lights);
     }
 }
 
