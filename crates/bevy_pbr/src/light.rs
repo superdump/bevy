@@ -677,6 +677,7 @@ pub enum IntersectTestType {
     None,
     // original viewspace aabb test
     OBB,
+    // all these screenspace tests are broken as clip closest != view closest
     // screenspace aabb test
     ScreenSpaceAABB,
     // screenspace aabb test with precomputed aabb
@@ -692,6 +693,11 @@ pub enum IntersectTestType {
     // plus early break of inner loop
     // doesn't work
     // RunningSSPrecomputeViewPrecacheDepthLimitXTesting,
+    
+    // SSAABB with correct algo for closest point in clip space 
+    SimpleJCClip,
+    // just cause does make sense after all.
+    JustCause1DClip,
 }
 
 #[derive(Component)]
@@ -1168,6 +1174,82 @@ pub fn assign_lights_to_clusters(
                         }
                     }
                 },
+                IntersectTestType::SimpleJCClip => {
+                    for z in min_cluster.z..=max_cluster.z {
+                        let (_, _, view_cluster_near, view_cluster_far) = precache_depth[z as usize];
+                        let view_nearest_z = viewspace_light.z.clamp(view_cluster_near, view_cluster_far);
+                        let view_light_position_at_depth = Vec3::new(viewspace_light.x, viewspace_light.y, view_nearest_z);
+                        let clip_light_at_depth = camera.projection_matrix * view_light_position_at_depth.extend(1.0);
+                        let clip_light_at_depth = clip_light_at_depth.xyz() / clip_light_at_depth.w;
+
+                        for y in min_cluster.y..=max_cluster.y {
+                            for x in min_cluster.x..=max_cluster.x {
+                                let cluster_index = ((y * clusters.axis_slices.x + x) * clusters.axis_slices.z + z) as usize;
+                                let (clip_cluster_min, clip_cluster_max) = clip_minmax[cluster_index];
+
+                                let closest_point = clip_light_at_depth.clamp(clip_cluster_min, clip_cluster_max);
+                                let closest_point_world = clip_to_world * closest_point.extend(1.0);
+                                let closest_point_world = closest_point_world.xyz() / closest_point_world.w;
+
+                                let dist_vec = closest_point_world - light_sphere.center;
+        
+                                if dist_vec.dot(dist_vec) < light_range_squared {
+                                    clusters_lights[cluster_index].entities.push(light_entity);
+                                    index_count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                IntersectTestType::JustCause1DClip => {
+                    for z in min_cluster.z..=max_cluster.z {
+                        let (_, _, view_cluster_near, view_cluster_far) = precache_depth[z as usize];
+                        let view_nearest_z = viewspace_light.z.clamp(view_cluster_near, view_cluster_far);
+                        let view_light_position_at_depth = Vec3::new(viewspace_light.x, viewspace_light.y, view_nearest_z);
+                        let clip_light_at_depth = camera.projection_matrix * view_light_position_at_depth.extend(1.0);
+                        let clip_light_at_depth = clip_light_at_depth.xyz() / clip_light_at_depth.w;
+
+                        let (min_cluster_at_depth, max_cluster_at_depth) = if view_nearest_z != viewspace_light.z {
+                            let z_distance_sq = (view_nearest_z - viewspace_light.z) * (view_nearest_z - viewspace_light.z);
+
+                            let circle_radius = f32::sqrt(light_range_squared - z_distance_sq);
+                            let cluster_dimensions_f32 = cluster_dimensions.as_vec3();
+    
+                            let view_top_left = view_light_position_at_depth + Vec3::new(-circle_radius, circle_radius, 0.0);
+                            let clip_top_left = camera.projection_matrix * view_top_left.extend(1.0);
+                            let clip_top_left = clip_top_left.xyz() / clip_top_left.w;
+                            let frag_coord_top_left = (clip_top_left.xy() * Vec2::new(0.5, -0.5) + Vec2::splat(0.5)).clamp(Vec2::ZERO, Vec2::ONE);
+                            let xy_top_left = (frag_coord_top_left * cluster_dimensions_f32.xy()).floor();
+
+                            let view_bottom_right = view_light_position_at_depth + Vec3::new(circle_radius, -circle_radius, 0.0);
+                            let clip_bottom_right = camera.projection_matrix * view_bottom_right.extend(1.0);
+                            let clip_bottom_right = clip_bottom_right.xyz() / clip_bottom_right.w;
+                            let frag_coord_bottom_right = (clip_bottom_right.xy() * Vec2::new(0.5, -0.5) + Vec2::splat(0.5)).clamp(Vec2::ZERO, Vec2::ONE);
+                            let xy_bottom_right = (frag_coord_bottom_right * cluster_dimensions_f32.xy()).floor();
+                            (xy_top_left.as_uvec2(), xy_bottom_right.as_uvec2())
+                        } else {
+                            (min_cluster.xy(), max_cluster.xy())
+                        };
+
+                        for y in min_cluster_at_depth.y..=max_cluster_at_depth.y {
+                            for x in min_cluster_at_depth.x..=max_cluster_at_depth.x {
+                                let cluster_index = ((y * clusters.axis_slices.x + x) * clusters.axis_slices.z + z) as usize;
+                                let (clip_cluster_min, clip_cluster_max) = clip_minmax[cluster_index];
+
+                                let closest_point = clip_light_at_depth.clamp(clip_cluster_min, clip_cluster_max);
+                                let closest_point_world = clip_to_world * closest_point.extend(1.0);
+                                let closest_point_world = closest_point_world.xyz() / closest_point_world.w;
+
+                                let dist_vec = closest_point_world - light_sphere.center;
+        
+                                if dist_vec.dot(dist_vec) < light_range_squared {
+                                    clusters_lights[cluster_index].entities.push(light_entity);
+                                    index_count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

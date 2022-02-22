@@ -224,9 +224,10 @@ fn setup(
     //     ..Default::default()
     // });
 
-    for x in 0..6 {
-        for y in 0..6 {
-            for z in 0..6 {
+    let extras = 6;
+    for x in 0..extras {
+        for y in 0..extras {
+            for z in 0..extras {
                 // red point light
                 commands
                     .spawn_bundle(PointLightBundle {
@@ -339,6 +340,8 @@ fn debug_settings(
         IntersectTestType::RunningSSPrecomputeViewPrecacheDepth,
         // doesn't work
         // IntersectTestType::RunningSSPrecomputeViewPrecacheDepthLimitXTesting,
+        IntersectTestType::SimpleJCClip,
+        IntersectTestType::JustCause1DClip,
         IntersectTestType::None,
     ];
 
