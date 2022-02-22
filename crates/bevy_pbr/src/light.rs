@@ -1595,7 +1595,7 @@ pub fn assign_lights_to_clusters(
                         let z_distance_sq = (view_nearest_z - viewspace_light.z)
                             * (view_nearest_z - viewspace_light.z);
                         let circle_radius_squared = light_range_squared - z_distance_sq;
-                        let clusters_axis_slices_f32 = clusters.axis_slices.as_vec3();
+                        let cluster_dimensions_f32 = clusters.axis_slices.as_vec3();
 
                         let cluster_range_y = if view_nearest_z != viewspace_light.z {
                             let circle_radius = f32::sqrt(circle_radius_squared);
@@ -1606,7 +1606,7 @@ pub fn assign_lights_to_clusters(
                                 let clip_pos = camera.projection_matrix * view_pos.extend(1.0);
                                 let clip_pos = clip_pos.y / clip_pos.w;
                                 let frag_coord = (clip_pos * -0.5 + 0.5).clamp(0.0, 1.0);
-                                ((frag_coord * clusters_axis_slices_f32.y).floor() as u32)
+                                ((frag_coord * cluster_dimensions_f32.y).floor() as u32)
                                     .min(clusters.axis_slices.y - 1)
                             });
                             min_y..=max_y
@@ -1637,7 +1637,7 @@ pub fn assign_lights_to_clusters(
                                     let clip_pos = camera.projection_matrix * view_pos.extend(1.0);
                                     let clip_pos = clip_pos.x / clip_pos.w;
                                     let frag_coord = (clip_pos * 0.5 + 0.5).clamp(0.0, 1.0);
-                                    ((frag_coord * clusters_axis_slices_f32.x).floor() as u32)
+                                    ((frag_coord * cluster_dimensions_f32.x).floor() as u32)
                                         .min(clusters.axis_slices.x - 1)
                                 });
                                 min_x..=max_x
