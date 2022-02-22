@@ -82,6 +82,12 @@ pub struct Plane {
     pub normal_d: Vec4,
 }
 
+impl Plane {
+    pub fn intersects_sphere(&self, sphere: &Sphere) -> bool {
+        self.normal_d.dot(sphere.center.extend(1.0)) + sphere.radius > 0.0
+    }
+}
+
 impl Neg for Plane {
     type Output = Self;
 
@@ -130,7 +136,8 @@ impl Frustum {
 
     pub fn intersects_sphere(&self, sphere: &Sphere) -> bool {
         for plane in &self.planes {
-            if plane.normal_d.dot(sphere.center.extend(1.0)) + sphere.radius <= 0.0 {
+            // If the sphere is outside any of the planes then it does not intersect
+            if !plane.intersects_sphere(sphere) {
                 return false;
             }
         }
