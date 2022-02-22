@@ -920,9 +920,18 @@ pub fn assign_lights_to_clusters(
         }
         let z_far_over_z_near = -far_z / -first_slice_depth;
         for z in 0..=clusters.axis_slices.z {
-            let clip_z = if is_orthographic {
+            let view_z = if is_orthographic {
                 // Use linear depth slicing for orthographic
-                1.0 - (z as f32 / clusters.axis_slices.z as f32)
+                clip_to_view(
+                    inverse_projection,
+                    Vec4::new(
+                        0.0,
+                        0.0,
+                        1.0 - (z as f32 / clusters.axis_slices.z as f32),
+                        1.0,
+                    ),
+                )
+                .z
             } else {
                 // Perspective
                 if z == 0 {
@@ -934,14 +943,8 @@ pub fn assign_lights_to_clusters(
                 }
             };
 
-            let tl = clip_to_view(inverse_projection, Vec4::new(-1.0, 1.0, clip_z, 1.0)).xyz();
-            let bl = clip_to_view(inverse_projection, Vec4::new(-1.0, -1.0, clip_z, 1.0)).xyz();
-            let br = clip_to_view(inverse_projection, Vec4::new(1.0, -1.0, clip_z, 1.0)).xyz();
-
-            let right = br - bl;
-            let up = tl - bl;
-            let normal = right.cross(up).normalize();
-            let d = br.dot(normal);
+            let normal = -Vec3::Z;
+            let d = view_z * normal.z;
             z_planes.push(Plane {
                 normal_d: normal.extend(d),
             });
