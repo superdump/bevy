@@ -702,8 +702,10 @@ pub enum IntersectTestType {
 
     // SSAABB with correct algo for closest point in clip space
     SimpleJCClip,
-    // just cause does make sense after all.
+    // just cause does make sense after all
     JustCause1DClip,
+    // even sqrting on y is good?
+    JustCause2DClip,
 }
 
 #[derive(Component)]
@@ -1539,7 +1541,14 @@ pub fn assign_lights_to_clusters(
                                     .clamp(Vec2::ZERO, Vec2::ONE);
                             let xy_bottom_right =
                                 (frag_coord_bottom_right * clusters_axis_slices_f32.xy()).floor();
-                            (xy_top_left.as_uvec2(), xy_bottom_right.as_uvec2())
+                            (
+                                xy_top_left
+                                    .as_uvec2()
+                                    .min(clusters.axis_slices.xy() - UVec2::ONE),
+                                xy_bottom_right
+                                    .as_uvec2()
+                                    .min(clusters.axis_slices.xy() - UVec2::ONE),
+                            )
                         } else {
                             (min_cluster.xy(), max_cluster.xy())
                         };
@@ -1564,6 +1573,82 @@ pub fn assign_lights_to_clusters(
                                     clusters_lights[cluster_index].entities.push(light_entity);
                                     index_count += 1;
                                 }
+                            }
+                        }
+                    }
+                }
+                IntersectTestType::JustCause2DClip => {
+                    for z in min_cluster.z..=max_cluster.z {
+                        let (_, _, view_cluster_near, view_cluster_far) =
+                            precache_depth[z as usize];
+                        let view_nearest_z =
+                            viewspace_light.z.clamp(view_cluster_near, view_cluster_far);
+                        let view_light_position_at_depth =
+                            Vec3::new(viewspace_light.x, viewspace_light.y, view_nearest_z);
+                        let clip_light_at_depth =
+                            camera.projection_matrix * view_light_position_at_depth.extend(1.0);
+                        let clip_light_at_depth = clip_light_at_depth.xyz() / clip_light_at_depth.w;
+
+                        let viewspace_unit_xy =
+                            inverse_projection * Vec4::new(1.0, 1.0, clip_light_at_depth.z, 1.0);
+                        let viewspace_unit_xy = viewspace_unit_xy.xy() / viewspace_unit_xy.w;
+                        let z_distance_sq = (view_nearest_z - viewspace_light.z)
+                            * (view_nearest_z - viewspace_light.z);
+                        let circle_radius_squared = light_range_squared - z_distance_sq;
+                        let clusters_axis_slices_f32 = clusters.axis_slices.as_vec3();
+
+                        let cluster_range_y = if view_nearest_z != viewspace_light.z {
+                            let circle_radius = f32::sqrt(circle_radius_squared);
+
+                            let [min_y, max_y] = [1.0, -1.0].map(|dir| {
+                                let view_pos =
+                                    view_light_position_at_depth + Vec3::Y * circle_radius * dir;
+                                let clip_pos = camera.projection_matrix * view_pos.extend(1.0);
+                                let clip_pos = clip_pos.y / clip_pos.w;
+                                let frag_coord = (clip_pos * -0.5 + 0.5).clamp(0.0, 1.0);
+                                ((frag_coord * clusters_axis_slices_f32.y).floor() as u32)
+                                    .min(clusters.axis_slices.y - 1)
+                            });
+                            min_y..=max_y
+                        } else {
+                            min_cluster.y..=max_cluster.y
+                        };
+
+                        for y in cluster_range_y {
+                            let clip_cluster_top =
+                                (y + 1) as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0;
+                            let clip_cluster_bottom =
+                                y as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0;
+                            let clip_nearest_y = clip_light_at_depth
+                                .y
+                                .clamp(clip_cluster_top, clip_cluster_bottom);
+                            let view_nearest_y = clip_nearest_y * viewspace_unit_xy.y;
+                            let y_distance = (view_nearest_y - viewspace_light.y)
+                                * view_transform_component.scale.y;
+                            let y_distance_sq = y_distance * y_distance;
+                            let circle_radius_squared = circle_radius_squared - y_distance_sq;
+
+                            let cluster_range_x = {
+                                let circle_radius = f32::sqrt(circle_radius_squared);
+
+                                let [min_x, max_x] = [-1.0, 1.0].map(|dir| {
+                                    let view_pos = view_light_position_at_depth
+                                        + Vec3::X * circle_radius * dir;
+                                    let clip_pos = camera.projection_matrix * view_pos.extend(1.0);
+                                    let clip_pos = clip_pos.x / clip_pos.w;
+                                    let frag_coord = (clip_pos * 0.5 + 0.5).clamp(0.0, 1.0);
+                                    ((frag_coord * clusters_axis_slices_f32.x).floor() as u32)
+                                        .min(clusters.axis_slices.x - 1)
+                                });
+                                min_x..=max_x
+                            };
+
+                            for x in cluster_range_x {
+                                let cluster_index =
+                                    ((y * clusters.axis_slices.x + x) * clusters.axis_slices.z + z)
+                                        as usize;
+                                clusters_lights[cluster_index].entities.push(light_entity);
+                                index_count += 1;
                             }
                         }
                     }

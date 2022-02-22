@@ -345,6 +345,7 @@ fn debug_settings(
         // IntersectTestType::RunningSSPrecomputeViewPrecacheDepthLimitXTesting,
         IntersectTestType::SimpleJCClip,
         IntersectTestType::JustCause1DClip,
+        IntersectTestType::JustCause2DClip,
         IntersectTestType::IterativeSphereRefinement,
         IntersectTestType::None,
     ];
