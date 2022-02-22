@@ -267,8 +267,8 @@ fn setup(
         .spawn_bundle(PerspectiveCameraBundle {
             // transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             // transform: Transform::from_xyz(-8.0, 10.5, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
-            // transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
-            transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y).with_scale(Vec3::new(0.5,0.5,1.0)),
+            transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
+            // transform: Transform::from_xyz(-25.0, 65.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y).with_scale(Vec3::new(0.5,0.5,1.0)),
             ..Default::default()
         })
         .insert(CameraController::default());
@@ -333,8 +333,12 @@ fn debug_settings(
     let modes = vec![
         IntersectTestType::OBB,
         IntersectTestType::ScreenSpaceAABB,
+        IntersectTestType::ScreenSpaceAABBPrecache,
         IntersectTestType::RunningSS,
         IntersectTestType::RunningSSPrecomputeView,
+        IntersectTestType::RunningSSPrecomputeViewPrecacheDepth,
+        // doesn't work
+        // IntersectTestType::RunningSSPrecomputeViewPrecacheDepthLimitXTesting,
         IntersectTestType::None,
     ];
 
@@ -343,6 +347,12 @@ fn debug_settings(
         let mut d = q.single_mut();
         d.test = modes[*mode];
         println!("mode: {:?}", d.test);
+    }
+
+    if key_input.just_pressed(KeyCode::N) {
+        let mut d = q.single_mut();
+        d.clear_lights = !d.clear_lights;
+        println!("clear_lights: {:?}", d.clear_lights);
     }
 }
 
