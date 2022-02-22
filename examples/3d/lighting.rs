@@ -4,7 +4,10 @@ use bevy::{
         Diagnostic, DiagnosticId, Diagnostics, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin,
     },
     input::mouse::MouseMotion,
-    pbr::{ClusterConfig, ClusterFarZMode, ClusterZConfig, Clusters, VisiblePointLights, ClusterDebug, IntersectTestType},
+    pbr::{
+        ClusterConfig, ClusterDebug, ClusterFarZMode, ClusterZConfig, Clusters, IntersectTestType,
+        VisiblePointLights,
+    },
     prelude::*,
     window::{PresentMode, WindowMode},
 };
