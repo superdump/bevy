@@ -1003,7 +1003,7 @@ pub fn assign_lights_to_clusters(
             let clip_light = camera.projection_matrix * viewspace_light.extend(1.0);
             let clip_light = clip_light.xyz() / clip_light.w;
 
-            let clip_to_view = camera.projection_matrix.inverse();
+            let inverse_projection = camera.projection_matrix.inverse();
             let clip_to_world = view_transform * camera.projection_matrix.inverse();
 
             let light_range_squared = light.range * light.range;
@@ -1212,7 +1212,7 @@ pub fn assign_lights_to_clusters(
                             clip_cluster_far.max(clip_cluster_near),
                         );
                         let viewspace_unit_xy =
-                            clip_to_view * Vec4::new(1.0, 1.0, clip_nearest_z, 1.0);
+                            inverse_projection * Vec4::new(1.0, 1.0, clip_nearest_z, 1.0);
                         let viewspace_unit_xy = viewspace_unit_xy.xyz() / viewspace_unit_xy.w;
 
                         let view_nearest_z = viewspace_light.z.clamp(
@@ -1279,7 +1279,7 @@ pub fn assign_lights_to_clusters(
                         let clip_nearest_z =
                             clip_light.z.clamp(clip_cluster_near, clip_cluster_far);
                         let viewspace_unit_xy =
-                            clip_to_view * Vec4::new(1.0, 1.0, clip_nearest_z, 1.0);
+                            inverse_projection * Vec4::new(1.0, 1.0, clip_nearest_z, 1.0);
                         let viewspace_unit_xy = viewspace_unit_xy.xyz() / viewspace_unit_xy.w;
 
                         let view_nearest_z =
@@ -1413,10 +1413,10 @@ pub fn assign_lights_to_clusters(
                             (
                                 xy_top_left
                                     .as_uvec2()
-                                    .min(cluster_dimensions.xy() - UVec2::ONE),
+                                    .min(clusters.axis_slices.xy() - UVec2::ONE),
                                 xy_bottom_right
                                     .as_uvec2()
-                                    .min(cluster_dimensions.xy() - UVec2::ONE),
+                                    .min(clusters.axis_slices.xy() - UVec2::ONE),
                             )
                         } else {
                             (min_cluster.xy(), max_cluster.xy())
@@ -1459,12 +1459,12 @@ pub fn assign_lights_to_clusters(
                         let clip_light_at_depth = clip_light_at_depth.xyz() / clip_light_at_depth.w;
 
                         let viewspace_unit_xy =
-                            clip_to_view * Vec4::new(1.0, 1.0, clip_light_at_depth.z, 1.0);
+                            inverse_projection * Vec4::new(1.0, 1.0, clip_light_at_depth.z, 1.0);
                         let viewspace_unit_xy = viewspace_unit_xy.xy() / viewspace_unit_xy.w;
                         let z_distance_sq = (view_nearest_z - viewspace_light.z)
                             * (view_nearest_z - viewspace_light.z);
                         let circle_radius_squared = light_range_squared - z_distance_sq;
-                        let cluster_dimensions_f32 = cluster_dimensions.as_vec3();
+                        let cluster_dimensions_f32 = clusters.axis_slices.as_vec3();
 
                         let cluster_range_y = if view_nearest_z != viewspace_light.z {
                             let circle_radius = f32::sqrt(circle_radius_squared);
@@ -1476,7 +1476,7 @@ pub fn assign_lights_to_clusters(
                                 let clip_pos = clip_pos.y / clip_pos.w;
                                 let frag_coord = (clip_pos * -0.5 + 0.5).clamp(0.0, 1.0);
                                 ((frag_coord * cluster_dimensions_f32.y).floor() as u32)
-                                    .min(cluster_dimensions.y - 1)
+                                    .min(clusters.axis_slices.y - 1)
                             });
                             min_y..=max_y
                         } else {
@@ -1507,7 +1507,7 @@ pub fn assign_lights_to_clusters(
                                     let clip_pos = clip_pos.x / clip_pos.w;
                                     let frag_coord = (clip_pos * 0.5 + 0.5).clamp(0.0, 1.0);
                                     ((frag_coord * cluster_dimensions_f32.x).floor() as u32)
-                                        .min(cluster_dimensions.x - 1)
+                                        .min(clusters.axis_slices.x - 1)
                                 });
                                 min_x..=max_x
                             };
