@@ -1,5 +1,7 @@
+use std::ops::Neg;
+
 use bevy_ecs::{component::Component, reflect::ReflectComponent};
-use bevy_math::{Mat4, Vec3, Vec3A, Vec4};
+use bevy_math::{Mat4, Vec3, Vec3A, Vec4, Vec4Swizzles};
 use bevy_reflect::Reflect;
 
 /// An Axis-Aligned Bounding Box
@@ -51,7 +53,7 @@ impl From<Sphere> for Aabb {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Sphere {
     pub center: Vec3,
     pub radius: f32,
@@ -78,6 +80,16 @@ impl Sphere {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Plane {
     pub normal_d: Vec4,
+}
+
+impl Neg for Plane {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self {
+            normal_d: (-self.normal_d.xyz()).extend(self.normal_d.w),
+        }
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, Reflect)]

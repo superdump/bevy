@@ -335,6 +335,7 @@ fn debug_settings(
         IntersectTestType::ScreenSpaceAABB,
         IntersectTestType::RunningSS,
         IntersectTestType::RunningSSPrecomputeView,
+        IntersectTestType::IterativeSphereRefinement,
         IntersectTestType::None,
     ];
 
