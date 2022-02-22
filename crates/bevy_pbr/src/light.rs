@@ -882,6 +882,7 @@ pub fn assign_lights_to_clusters(
             first_slice_depth,
             far_z,
         );
+
         let cluster_count = clusters.aabbs.len();
 
         let inverse_projection = camera.projection_matrix.inverse();
@@ -950,9 +951,9 @@ pub fn assign_lights_to_clusters(
 
         // accel for ScreenSpaceAABBPrecache
         let mut clip_minmax = Vec::with_capacity(cluster_count);
-        for y in 0..cluster_dimensions.y {
-            for x in 0..cluster_dimensions.x {
-                for z in 0..cluster_dimensions.z {
+        for y in 0..clusters.axis_slices.y {
+            for x in 0..clusters.axis_slices.x {
+                for z in 0..clusters.axis_slices.z {
                     clip_minmax.push({
                         let cluster_near = if z == 0 {
                             0.0
@@ -960,7 +961,7 @@ pub fn assign_lights_to_clusters(
                             -first_slice_depth
                                 * f32::powf(
                                     far_z / first_slice_depth,
-                                    (z - 1) as f32 / (cluster_dimensions.z - 1) as f32,
+                                    (z - 1) as f32 / (clusters.axis_slices.z - 1) as f32,
                                 )
                         };
                         let cluster_near =
@@ -969,20 +970,20 @@ pub fn assign_lights_to_clusters(
                         let cluster_far = -first_slice_depth
                             * f32::powf(
                                 far_z / first_slice_depth,
-                                z as f32 / (cluster_dimensions.z - 1) as f32,
+                                z as f32 / (clusters.axis_slices.z - 1) as f32,
                             );
                         let cluster_far =
                             camera.projection_matrix * Vec4::new(0.0, 0.0, cluster_far, 1.0);
                         let cluster_far = cluster_far.z / cluster_far.w;
 
                         let clip_cluster_min = Vec3::new(
-                            x as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0,
-                            (y + 1) as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0,
+                            x as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0,
+                            (y + 1) as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0,
                             cluster_far,
                         );
                         let clip_cluster_max = Vec3::new(
-                            (x + 1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0,
-                            y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0,
+                            (x + 1) as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0,
+                            y as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0,
                             cluster_near,
                         );
                         (clip_cluster_min, clip_cluster_max)
@@ -992,8 +993,8 @@ pub fn assign_lights_to_clusters(
         }
 
         // accel for PrecacheView
-        let mut precache_depth = Vec::with_capacity(cluster_dimensions.z as usize);
-        for z in 0..cluster_dimensions.z {
+        let mut precache_depth = Vec::with_capacity(clusters.axis_slices.z as usize);
+        for z in 0..clusters.axis_slices.z {
             precache_depth.push({
                 let view_cluster_near = if z == 0 {
                     0.0
@@ -1001,7 +1002,7 @@ pub fn assign_lights_to_clusters(
                     -first_slice_depth
                         * f32::powf(
                             far_z / first_slice_depth,
-                            (z - 1) as f32 / (cluster_dimensions.z - 1) as f32,
+                            (z - 1) as f32 / (clusters.axis_slices.z - 1) as f32,
                         )
                 };
                 let clip_cluster_near =
@@ -1011,7 +1012,7 @@ pub fn assign_lights_to_clusters(
                 let view_cluster_far = -first_slice_depth
                     * f32::powf(
                         far_z / first_slice_depth,
-                        z as f32 / (cluster_dimensions.z - 1) as f32,
+                        z as f32 / (clusters.axis_slices.z - 1) as f32,
                     );
                 let clip_cluster_far =
                     camera.projection_matrix * Vec4::new(0.0, 0.0, view_cluster_far, 1.0);
@@ -1118,7 +1119,7 @@ pub fn assign_lights_to_clusters(
                                     -first_slice_depth
                                         * f32::powf(
                                             far_z / first_slice_depth,
-                                            (z - 1) as f32 / (cluster_dimensions.z - 1) as f32,
+                                            (z - 1) as f32 / (clusters.axis_slices.z - 1) as f32,
                                         )
                                 };
                                 let cluster_near = camera.projection_matrix
@@ -1127,20 +1128,20 @@ pub fn assign_lights_to_clusters(
                                 let cluster_far = -first_slice_depth
                                     * f32::powf(
                                         far_z / first_slice_depth,
-                                        z as f32 / (cluster_dimensions.z - 1) as f32,
+                                        z as f32 / (clusters.axis_slices.z - 1) as f32,
                                     );
                                 let cluster_far = camera.projection_matrix
                                     * Vec4::new(0.0, 0.0, cluster_far, 1.0);
                                 let cluster_far = cluster_far.z / cluster_far.w;
 
                                 let clip_cluster_min = Vec3::new(
-                                    x as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0,
-                                    (y + 1) as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0,
+                                    x as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0,
+                                    (y + 1) as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0,
                                     cluster_far,
                                 );
                                 let clip_cluster_max = Vec3::new(
-                                    (x + 1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0,
-                                    y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0,
+                                    (x + 1) as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0,
+                                    y as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0,
                                     cluster_near,
                                 );
 
@@ -1197,7 +1198,7 @@ pub fn assign_lights_to_clusters(
                             -first_slice_depth
                                 * f32::powf(
                                     far_z / first_slice_depth,
-                                    (z - 1) as f32 / (cluster_dimensions.z - 1) as f32,
+                                    (z - 1) as f32 / (clusters.axis_slices.z - 1) as f32,
                                 )
                         };
                         let cluster_near =
@@ -1206,7 +1207,7 @@ pub fn assign_lights_to_clusters(
                         let cluster_far = -first_slice_depth
                             * f32::powf(
                                 far_z / first_slice_depth,
-                                z as f32 / (cluster_dimensions.z - 1) as f32,
+                                z as f32 / (clusters.axis_slices.z - 1) as f32,
                             );
                         let cluster_far =
                             camera.projection_matrix * Vec4::new(0.0, 0.0, cluster_far, 1.0);
@@ -1217,15 +1218,15 @@ pub fn assign_lights_to_clusters(
 
                         for y in min_cluster.y..=max_cluster.y {
                             clip_cluster_min.y =
-                                (y + 1) as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
+                                (y + 1) as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0;
                             clip_cluster_max.y =
-                                y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
+                                y as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0;
 
                             for x in min_cluster.x..=max_cluster.x {
                                 clip_cluster_min.x =
-                                    x as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
+                                    x as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0;
                                 clip_cluster_max.x =
-                                    (x + 1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
+                                    (x + 1) as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0;
 
                                 let closest_point =
                                     clip_light.clamp(clip_cluster_min, clip_cluster_max);
@@ -1254,7 +1255,7 @@ pub fn assign_lights_to_clusters(
                             -first_slice_depth
                                 * f32::powf(
                                     far_z / first_slice_depth,
-                                    (z - 1) as f32 / (cluster_dimensions.z - 1) as f32,
+                                    (z - 1) as f32 / (clusters.axis_slices.z - 1) as f32,
                                 )
                         };
                         let clip_cluster_near =
@@ -1264,7 +1265,7 @@ pub fn assign_lights_to_clusters(
                         let view_cluster_far = -first_slice_depth
                             * f32::powf(
                                 far_z / first_slice_depth,
-                                z as f32 / (cluster_dimensions.z - 1) as f32,
+                                z as f32 / (clusters.axis_slices.z - 1) as f32,
                             );
                         let clip_cluster_far =
                             camera.projection_matrix * Vec4::new(0.0, 0.0, view_cluster_far, 1.0);
@@ -1290,9 +1291,9 @@ pub fn assign_lights_to_clusters(
 
                         for y in min_cluster.y..=max_cluster.y {
                             let clip_cluster_top =
-                                (y + 1) as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
+                                (y + 1) as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0;
                             let clip_cluster_bottom =
-                                y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
+                                y as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0;
 
                             let clip_nearest_y =
                                 clip_light.y.clamp(clip_cluster_top, clip_cluster_bottom);
@@ -1308,9 +1309,9 @@ pub fn assign_lights_to_clusters(
 
                             for x in min_cluster.x..=max_cluster.x {
                                 let clip_cluster_left =
-                                    x as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
+                                    x as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0;
                                 let clip_cluster_right =
-                                    (x + 1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
+                                    (x + 1) as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0;
 
                                 let clip_nearest_x =
                                     clip_light.x.clamp(clip_cluster_left, clip_cluster_right);
@@ -1355,9 +1356,9 @@ pub fn assign_lights_to_clusters(
 
                         for y in min_cluster.y..=max_cluster.y {
                             let clip_cluster_top =
-                                (y + 1) as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
+                                (y + 1) as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0;
                             let clip_cluster_bottom =
-                                y as f32 / cluster_dimensions.y as f32 * -2.0 + 1.0;
+                                y as f32 / clusters.axis_slices.y as f32 * -2.0 + 1.0;
 
                             let clip_nearest_y =
                                 clip_light.y.clamp(clip_cluster_top, clip_cluster_bottom);
@@ -1373,9 +1374,9 @@ pub fn assign_lights_to_clusters(
 
                             for x in min_cluster.x..=max_cluster.x {
                                 let clip_cluster_left =
-                                    x as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
+                                    x as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0;
                                 let clip_cluster_right =
-                                    (x + 1) as f32 / cluster_dimensions.x as f32 * 2.0 - 1.0;
+                                    (x + 1) as f32 / clusters.axis_slices.x as f32 * 2.0 - 1.0;
 
                                 let clip_nearest_x =
                                     clip_light.x.clamp(clip_cluster_left, clip_cluster_right);
@@ -1515,7 +1516,7 @@ pub fn assign_lights_to_clusters(
                                 * (view_nearest_z - viewspace_light.z);
 
                             let circle_radius = f32::sqrt(light_range_squared - z_distance_sq);
-                            let cluster_dimensions_f32 = cluster_dimensions.as_vec3();
+                            let clusters_axis_slices_f32 = clusters.axis_slices.as_vec3();
 
                             let view_top_left = view_light_position_at_depth
                                 + Vec3::new(-circle_radius, circle_radius, 0.0);
@@ -1526,7 +1527,7 @@ pub fn assign_lights_to_clusters(
                                 + Vec2::splat(0.5))
                             .clamp(Vec2::ZERO, Vec2::ONE);
                             let xy_top_left =
-                                (frag_coord_top_left * cluster_dimensions_f32.xy()).floor();
+                                (frag_coord_top_left * clusters_axis_slices_f32.xy()).floor();
 
                             let view_bottom_right = view_light_position_at_depth
                                 + Vec3::new(circle_radius, -circle_radius, 0.0);
@@ -1537,7 +1538,7 @@ pub fn assign_lights_to_clusters(
                                 (clip_bottom_right.xy() * Vec2::new(0.5, -0.5) + Vec2::splat(0.5))
                                     .clamp(Vec2::ZERO, Vec2::ONE);
                             let xy_bottom_right =
-                                (frag_coord_bottom_right * cluster_dimensions_f32.xy()).floor();
+                                (frag_coord_bottom_right * clusters_axis_slices_f32.xy()).floor();
                             (xy_top_left.as_uvec2(), xy_bottom_right.as_uvec2())
                         } else {
                             (min_cluster.xy(), max_cluster.xy())
