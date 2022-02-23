@@ -908,7 +908,7 @@ pub fn assign_lights_to_clusters(
         }
         let y_slices = clusters.axis_slices.y as f32;
         for y in 0..=clusters.axis_slices.y {
-            let y_proportion = y as f32 / y_slices;
+            let y_proportion = 1.0 - y as f32 / y_slices;
             let y_pos = y_proportion * 2.0 - 1.0;
             let nl = clip_to_view(inverse_projection, Vec4::new(-1.0, y_pos, 1.0, 1.0)).xyz();
             let nr = clip_to_view(inverse_projection, Vec4::new(1.0, y_pos, 1.0, 1.0)).xyz();
@@ -1459,9 +1459,9 @@ pub fn assign_lights_to_clusters(
                         let mut z_light = view_light_sphere.clone();
                         if z != z_center {
                             let z_plane = if z < z_center {
-                                z_planes[(z + 1) as usize]
+                                -z_planes[(z + 1) as usize]
                             } else {
-                                -z_planes[z as usize]
+                                z_planes[z as usize]
                             };
                             if let Some(projected) = project_to_plane_z(z_light, z_plane) {
                                 z_light = projected;
@@ -1499,7 +1499,7 @@ pub fn assign_lights_to_clusters(
                             let mut max_x = max_cluster.x;
                             loop {
                                 if max_x <= min_x
-                                    || -get_distance_x(x_planes[max_x as usize], y_light.center)
+                                    || get_distance_x(x_planes[max_x as usize], y_light.center)
                                         + y_light.radius
                                         > 0.0
                                 {
