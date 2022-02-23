@@ -1732,7 +1732,7 @@ fn project_to_plane_y(y_light: Sphere, y_plane: Plane) -> Option<Sphere> {
     // d = px * nx + py * ny + pz * nz
     // 0 = py * ny + pz * nz
     // => py = - (pz * nz) / ny
-    let y = - (y_light.center.z * y_plane.normal_d.z) / y_plane.normal_d.y;
+    let y = -(y_light.center.z * y_plane.normal_d.z) / y_plane.normal_d.y;
     let center = Vec3::new(y_light.center.x, y, y_light.center.z);
     let distance_to_plane = (center.y - y_light.center.y).abs();
     if distance_to_plane > y_light.radius {
