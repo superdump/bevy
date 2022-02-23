@@ -1463,7 +1463,11 @@ pub fn assign_lights_to_clusters(
                             } else {
                                 -z_planes[z as usize]
                             };
-                            z_light = project_to_plane_z(z_light, z_plane);
+                            if let Some(projected) = project_to_plane_z(z_light, z_plane) {
+                                z_light = projected;
+                            } else {
+                                continue;
+                            }
                         }
                         for y in min_cluster.y..=max_cluster.y {
                             let mut y_light = z_light.clone();
@@ -1473,7 +1477,11 @@ pub fn assign_lights_to_clusters(
                                 } else {
                                     -y_planes[y as usize]
                                 };
-                                y_light = project_to_plane_y(y_light, y_plane);
+                                if let Some(projected) = project_to_plane_y(y_light, y_plane) {
+                                    y_light = projected;
+                                } else {
+                                    continue;
+                                }
                             }
                             let mut min_x = min_cluster.x;
                             loop {
@@ -1693,7 +1701,7 @@ fn get_distance_x(plane: Plane, point: Vec3) -> f32 {
 }
 
 // NOTE: This exploits the fact that a z-plane normal has only a z component
-fn project_to_plane_z(z_light: Sphere, z_plane: Plane) -> Sphere {
+fn project_to_plane_z(z_light: Sphere, z_plane: Plane) -> Option<Sphere> {
     // p = sphere center
     // n = plane normal
     // d = n.p if p is in the plane
@@ -1703,18 +1711,20 @@ fn project_to_plane_z(z_light: Sphere, z_plane: Plane) -> Sphere {
     // => pz = d / nz
     let z = z_plane.normal_d.w / z_plane.normal_d.z;
     // hypotenuse length = radius
-    // pythagorus = (signed distance to plane)^2 + b^2 = radius^2
-    let signed_distance_to_plane = z - z_light.center.z;
-    Sphere {
-        center: z_light.center.xy().extend(z),
-        radius: (z_light.radius * z_light.radius
-            - signed_distance_to_plane * signed_distance_to_plane)
-            .sqrt(),
+    // pythagorus = (distance to plane)^2 + b^2 = radius^2
+    let distance_to_plane = (z - z_light.center.z).abs();
+    if distance_to_plane > z_light.radius {
+        None
+    } else {
+        let center = z_light.center.xy().extend(z);
+        let radius =
+            (z_light.radius * z_light.radius - distance_to_plane * distance_to_plane).sqrt();
+        Some(Sphere { center, radius })
     }
 }
 
 // NOTE: This exploits the fact that a y-plane normal has only y and z components
-fn project_to_plane_y(y_light: Sphere, y_plane: Plane) -> Sphere {
+fn project_to_plane_y(y_light: Sphere, y_plane: Plane) -> Option<Sphere> {
     // p = sphere center
     // n = plane normal
     // d = n.p if p is in the plane
@@ -1728,12 +1738,13 @@ fn project_to_plane_y(y_light: Sphere, y_plane: Plane) -> Sphere {
     // signed distance to plane = (nx * px + ny * py + nz * pz + d) / n.length()
     // NOTE: For a y-plane, nx is 0 and we have a unit normal
     //                          = ny * py + nz * pz + d
-    let signed_distance_to_plane = y_plane.normal_d.yz().dot(center.yz()) + y_plane.normal_d.w;
-    Sphere {
-        center,
-        radius: (y_light.radius * y_light.radius
-            - signed_distance_to_plane * signed_distance_to_plane)
-            .sqrt(),
+    let distance_to_plane = (center.y - y_light.center.y).abs();
+    if distance_to_plane > y_light.radius {
+        None
+    } else {
+        let radius =
+            (y_light.radius * y_light.radius - distance_to_plane * distance_to_plane).sqrt();
+        Some(Sphere { center, radius })
     }
 }
 
