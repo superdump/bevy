@@ -1695,9 +1695,9 @@ pub fn assign_lights_to_clusters(
 fn get_distance_x(plane: Plane, point: Vec3) -> f32 {
     // Distance from a point to a plane:
     // signed distance to plane = (nx * px + ny * py + nz * pz + d) / n.length()
-    // NOTE: For a x-plane, ny is 0 and we have a unit normal
-    //                          = nx * px + nz * pz + d
-    plane.normal_d.xz().dot(point.xz()) + plane.normal_d.w
+    // NOTE: For a x-plane, ny and d are 0 and we have a unit normal
+    //                          = nx * px + nz * pz
+    plane.normal_d.xz().dot(point.xz())
 }
 
 // NOTE: This exploits the fact that a z-plane normal has only a z component
@@ -1728,16 +1728,12 @@ fn project_to_plane_y(y_light: Sphere, y_plane: Plane) -> Option<Sphere> {
     // p = sphere center
     // n = plane normal
     // d = n.p if p is in the plane
-    // NOTE: For a y-plane, nx is 0
+    // NOTE: For a y-plane, nx and d are 0
     // d = px * nx + py * ny + pz * nz
-    //   = py * ny + pz * nz
-    // => py = (d - (pz * nz)) / ny
-    let y = (y_plane.normal_d.w - (y_light.center.z * y_plane.normal_d.z)) / y_plane.normal_d.y;
+    // 0 = py * ny + pz * nz
+    // => py = - (pz * nz) / ny
+    let y = - (y_light.center.z * y_plane.normal_d.z) / y_plane.normal_d.y;
     let center = Vec3::new(y_light.center.x, y, y_light.center.z);
-    // Distance from a point to a plane:
-    // signed distance to plane = (nx * px + ny * py + nz * pz + d) / n.length()
-    // NOTE: For a y-plane, nx is 0 and we have a unit normal
-    //                          = ny * py + nz * pz + d
     let distance_to_plane = (center.y - y_light.center.y).abs();
     if distance_to_plane > y_light.radius {
         None
