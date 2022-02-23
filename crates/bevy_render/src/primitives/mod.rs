@@ -1,7 +1,5 @@
-use std::ops::Neg;
-
 use bevy_ecs::{component::Component, reflect::ReflectComponent};
-use bevy_math::{Mat4, Vec3, Vec3A, Vec4, Vec4Swizzles};
+use bevy_math::{Mat4, Vec3, Vec3A, Vec4};
 use bevy_reflect::Reflect;
 
 /// An Axis-Aligned Bounding Box
@@ -85,16 +83,6 @@ pub struct Plane {
 impl Plane {
     pub fn intersects_sphere(&self, sphere: &Sphere) -> bool {
         self.normal_d.dot(sphere.center.extend(1.0)) + sphere.radius > 0.0
-    }
-}
-
-impl Neg for Plane {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Self {
-            normal_d: (-self.normal_d.xyz()).extend(self.normal_d.w),
-        }
     }
 }
 

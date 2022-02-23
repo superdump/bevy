@@ -1459,7 +1459,7 @@ pub fn assign_lights_to_clusters(
                         let mut z_light = view_light_sphere.clone();
                         if z != z_center {
                             let z_plane = if z < z_center {
-                                -z_planes[(z + 1) as usize]
+                                z_planes[(z + 1) as usize]
                             } else {
                                 z_planes[z as usize]
                             };
@@ -1475,7 +1475,7 @@ pub fn assign_lights_to_clusters(
                                 let y_plane = if y < y_center {
                                     y_planes[(y + 1) as usize]
                                 } else {
-                                    -y_planes[y as usize]
+                                    y_planes[y as usize]
                                 };
                                 if let Some(projected) = project_to_plane_y(y_light, y_plane) {
                                     y_light = projected;
@@ -1486,8 +1486,8 @@ pub fn assign_lights_to_clusters(
                             let mut min_x = min_cluster.x;
                             loop {
                                 if min_x >= max_cluster.x
-                                    || get_distance_x(
-                                        -x_planes[(min_x + 1) as usize],
+                                    || -get_distance_x(
+                                        x_planes[(min_x + 1) as usize],
                                         y_light.center,
                                     ) + y_light.radius
                                         > 0.0
