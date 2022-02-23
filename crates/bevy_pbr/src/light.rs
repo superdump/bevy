@@ -1614,7 +1614,7 @@ pub fn assign_lights_to_clusters(
                         let circle_radius_squared = light_range_squared - z_distance_sq;
                         let cluster_dimensions_f32 = clusters.axis_slices.as_vec3();
 
-                        let cluster_range_y = if view_nearest_z != viewspace_light.z {
+                        let cluster_range_y = {
                             let circle_radius = f32::sqrt(circle_radius_squared);
 
                             let [min_y, max_y] = [1.0, -1.0].map(|dir| {
@@ -1627,8 +1627,6 @@ pub fn assign_lights_to_clusters(
                                     .min(clusters.axis_slices.y - 1)
                             });
                             min_y..=max_y
-                        } else {
-                            min_cluster.y..=max_cluster.y
                         };
 
                         for y in cluster_range_y {
