@@ -1486,8 +1486,10 @@ pub fn assign_lights_to_clusters(
                             let mut min_x = min_cluster.x;
                             loop {
                                 if min_x >= max_cluster.x
-                                    || get_distance_x(x_planes[min_x as usize], y_light.center)
-                                        + y_light.radius
+                                    || get_distance_x(
+                                        -x_planes[(min_x + 1) as usize],
+                                        y_light.center,
+                                    ) + y_light.radius
                                         > 0.0
                                 {
                                     break;
