@@ -8,7 +8,7 @@ use crate::renderer::{RenderDevice, RenderQueue};
 
 use super::Buffer;
 
-pub struct StorageVec<T: AsStd430> {
+pub struct StorageVec<T: AsStd430 + Default> {
     values: Vec<T>,
     scratch: Vec<u8>,
     storage_buffer: Option<Buffer>,
@@ -16,7 +16,7 @@ pub struct StorageVec<T: AsStd430> {
     item_size: usize,
 }
 
-impl<T: AsStd430> Default for StorageVec<T> {
+impl<T: AsStd430 + Default> Default for StorageVec<T> {
     fn default() -> Self {
         Self {
             values: Vec::new(),
@@ -30,7 +30,7 @@ impl<T: AsStd430> Default for StorageVec<T> {
     }
 }
 
-impl<T: AsStd430> StorageVec<T> {
+impl<T: AsStd430 + Default> StorageVec<T> {
     #[inline]
     pub fn storage_buffer(&self) -> Option<&Buffer> {
         self.storage_buffer.as_ref()
@@ -89,7 +89,7 @@ impl<T: AsStd430> StorageVec<T> {
 
     pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
         if self.values.is_empty() {
-            return;
+            self.values.push(T::default());
         }
         self.reserve(self.values.len(), device);
         if let Some(storage_buffer) = &self.storage_buffer {
