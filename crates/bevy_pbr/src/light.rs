@@ -1453,12 +1453,22 @@ pub fn assign_lights_to_clusters(
                         light_center_ndc,
                         view_light_sphere.center.z,
                     );
-                    let z_center = cluster_coordinates.z;
-                    let y_center = cluster_coordinates.y;
+                    let z_center = if light_center_ndc.z <= 1.0 {
+                        Some(cluster_coordinates.z)
+                    } else {
+                        None
+                    };
+                    let y_center = if light_center_ndc.y > 1.0 {
+                        None
+                    } else if light_center_ndc.y < -1.0 {
+                        Some(clusters.axis_slices.y + 1)
+                    } else {
+                        Some(cluster_coordinates.y)
+                    };
                     for z in min_cluster.z..=max_cluster.z {
                         let mut z_light = view_light_sphere.clone();
-                        if z != z_center {
-                            let z_plane = if z < z_center {
+                        if z_center.is_none() || z != z_center.unwrap() {
+                            let z_plane = if z_center.is_some() && z < z_center.unwrap() {
                                 z_planes[(z + 1) as usize]
                             } else {
                                 z_planes[z as usize]
@@ -1471,8 +1481,8 @@ pub fn assign_lights_to_clusters(
                         }
                         for y in min_cluster.y..=max_cluster.y {
                             let mut y_light = z_light.clone();
-                            if y != y_center {
-                                let y_plane = if y < y_center {
+                            if y_center.is_none() || y != y_center.unwrap() {
+                                let y_plane = if y_center.is_some() && y < y_center.unwrap() {
                                     y_planes[(y + 1) as usize]
                                 } else {
                                     y_planes[y as usize]
