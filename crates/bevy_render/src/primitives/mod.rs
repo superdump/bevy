@@ -1,5 +1,5 @@
 use bevy_ecs::{component::Component, reflect::ReflectComponent};
-use bevy_math::{Mat4, Vec3, Vec3A, Vec4};
+use bevy_math::{Mat4, Vec3, Vec3A, Vec4, Vec4Swizzles};
 use bevy_reflect::Reflect;
 
 /// An Axis-Aligned Bounding Box
@@ -112,13 +112,12 @@ impl Frustum {
                 row3 + row
             } else {
                 row3 - row
-            }
-            .normalize();
+            };
+            plane.normal_d *= 1.0 / plane.normal_d.xyz().length();
         }
         let far_center = *view_translation - far * *view_backward;
-        planes[5].normal_d = view_backward
-            .extend(-view_backward.dot(far_center))
-            .normalize();
+        planes[5].normal_d = view_backward.extend(-view_backward.dot(far_center));
+        planes[5].normal_d *= 1.0 / planes[5].normal_d.xyz().length();
         Self { planes }
     }
 
