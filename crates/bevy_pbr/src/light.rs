@@ -455,17 +455,20 @@ fn compute_aabb_for_cluster(
 
 pub fn add_clusters(
     mut commands: Commands,
-    cameras: Query<(Entity, Option<&ClusterConfig>), (With<Camera>, Without<Clusters>)>,
+    cameras: Query<
+        (Entity, Option<&ClusterConfig>, Option<&ClusterDebug>),
+        (With<Camera>, Without<Clusters>),
+    >,
 ) {
-    for (entity, config) in cameras.iter() {
+    for (entity, config, debug) in cameras.iter() {
         let config = config.copied().unwrap_or_default();
         // actual settings here don't matter - they will be overwritten in assign_lights_to_clusters
         let clusters = Clusters::from_screen_size_and_dimensions(UVec2::ONE, UVec3::ONE, 1.0, 1.0);
-        commands
-            .entity(entity)
-            .insert(clusters)
-            .insert(config)
-            .insert(ClusterDebug::default());
+        commands.entity(entity).insert_bundle((
+            clusters,
+            config,
+            debug.cloned().unwrap_or_default(),
+        ));
     }
 }
 
@@ -708,7 +711,7 @@ pub enum IntersectTestType {
     JustCause2DClip,
 }
 
-#[derive(Component)]
+#[derive(Clone, Component, Debug)]
 pub struct ClusterDebug {
     pub test: IntersectTestType,
     pub clear_lights: bool,
