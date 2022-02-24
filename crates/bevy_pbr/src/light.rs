@@ -1720,38 +1720,28 @@ fn project_to_plane_z(z_light: Sphere, z_plane: Plane) -> Option<Sphere> {
     //   = pz * nz
     // => pz = d / nz
     let z = z_plane.normal_d.w / z_plane.normal_d.z;
-    // hypotenuse length = radius
-    // pythagorus = (distance to plane)^2 + b^2 = radius^2
-    let distance_to_plane = (z - z_light.center.z).abs();
-    if distance_to_plane > z_light.radius {
-        None
-    } else {
-        let center = z_light.center.xy().extend(z);
-        let radius =
-            (z_light.radius * z_light.radius - distance_to_plane * distance_to_plane).sqrt();
-        Some(Sphere { center, radius })
+    let distance_to_plane = z - z_light.center.z;
+    if distance_to_plane.abs() > z_light.radius {
+        return None;
     }
+    Some(Sphere {
+        center: z_light.center.xy().extend(z),
+        // hypotenuse length = radius
+        // pythagorus = (distance to plane)^2 + b^2 = radius^2
+        radius: (z_light.radius * z_light.radius - distance_to_plane * distance_to_plane).sqrt(),
+    })
 }
 
 // NOTE: This exploits the fact that a y-plane normal has only y and z components
 fn project_to_plane_y(y_light: Sphere, y_plane: Plane) -> Option<Sphere> {
-    // p = sphere center
-    // n = plane normal
-    // d = n.p if p is in the plane
-    // NOTE: For a y-plane, nx and d are 0
-    // d = px * nx + py * ny + pz * nz
-    // 0 = py * ny + pz * nz
-    // => py = - (pz * nz) / ny
-    let y = -(y_light.center.z * y_plane.normal_d.z) / y_plane.normal_d.y;
-    let center = Vec3::new(y_light.center.x, y, y_light.center.z);
-    let distance_to_plane = (center.y - y_light.center.y).abs();
-    if distance_to_plane > y_light.radius {
-        None
-    } else {
-        let radius =
-            (y_light.radius * y_light.radius - distance_to_plane * distance_to_plane).sqrt();
-        Some(Sphere { center, radius })
+    let distance_to_plane = -y_light.center.yz().dot(y_plane.normal_d.yz());
+    if distance_to_plane.abs() > y_light.radius {
+        return None;
     }
+    Some(Sphere {
+        center: y_light.center + distance_to_plane * y_plane.normal_d.xyz(),
+        radius: (y_light.radius * y_light.radius - distance_to_plane * distance_to_plane).sqrt(),
+    })
 }
 
 pub fn update_directional_light_frusta(
