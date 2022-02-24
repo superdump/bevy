@@ -336,16 +336,6 @@ fn debug_settings(
 ) {
     let modes = vec![
         IntersectTestType::OBB,
-        IntersectTestType::ScreenSpaceAABB,
-        IntersectTestType::ScreenSpaceAABBPrecache,
-        IntersectTestType::RunningSS,
-        IntersectTestType::RunningSSPrecomputeView,
-        IntersectTestType::RunningSSPrecomputeViewPrecacheDepth,
-        // doesn't work
-        // IntersectTestType::RunningSSPrecomputeViewPrecacheDepthLimitXTesting,
-        IntersectTestType::SimpleJCClip,
-        IntersectTestType::JustCause1DClip,
-        IntersectTestType::JustCause2DClip,
         IntersectTestType::IterativeSphereRefinement,
         IntersectTestType::None,
     ];
@@ -371,6 +361,27 @@ fn cluster_style(
 ) {
     let configs = vec![
         ClusterConfig::Single,
+        ClusterConfig::XYZ {
+            dimensions: UVec3::new(32, 1, 1),
+            z_config: ClusterZConfig {
+                first_slice_depth: 5.0,
+                far_z_mode: ClusterFarZMode::MaxLightRange,
+            },
+        },
+        ClusterConfig::XYZ {
+            dimensions: UVec3::new(1, 32, 1),
+            z_config: ClusterZConfig {
+                first_slice_depth: 5.0,
+                far_z_mode: ClusterFarZMode::MaxLightRange,
+            },
+        },
+        ClusterConfig::XYZ {
+            dimensions: UVec3::new(1, 1, 32),
+            z_config: ClusterZConfig {
+                first_slice_depth: 5.0,
+                far_z_mode: ClusterFarZMode::MaxLightRange,
+            },
+        },
         ClusterConfig::FixedZ {
             total: 4096,
             z_slices: 1,
