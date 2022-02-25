@@ -756,6 +756,7 @@ pub fn assign_lights_to_clusters(
             1 => far_z,
             _ => config.first_slice_depth(),
         };
+        let far_z = far_z.max(first_slice_depth);
 
         let cluster_factors = calculate_cluster_factors(
             // NOTE: Using the special cluster near value
