@@ -58,7 +58,7 @@ impl From<Sphere> for Aabb {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Component, Debug, Default)]
 pub struct Sphere {
     pub center: Vec3A,
     pub radius: f32,
@@ -77,6 +77,15 @@ impl Sphere {
         let d = v.length();
         let relative_radius = aabb.relative_radius(&(v / d), &axes);
         d < self.radius + relative_radius
+    }
+}
+
+impl From<&Aabb> for Sphere {
+    fn from(aabb: &Aabb) -> Self {
+        Self {
+            center: aabb.center,
+            radius: aabb.half_extents.length(),
+        }
     }
 }
 
@@ -155,6 +164,17 @@ impl Frustum {
         let far_center = *view_translation - far * *view_backward;
         planes[5] = Plane::new(view_backward.extend(-view_backward.dot(far_center)));
         Self { planes }
+    }
+
+    #[inline]
+    pub fn intersects_osphere(&self, sphere: &Sphere, model_to_world: &Mat4) -> bool {
+        let sphere_center = model_to_world.transform_point3a(sphere.center).extend(1.0);
+        for plane in &self.planes {
+            if plane.normal_d().dot(sphere_center) + sphere.radius <= 0.0 {
+                return false;
+            }
+        }
+        true
     }
 
     #[inline]
