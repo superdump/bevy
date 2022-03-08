@@ -110,19 +110,12 @@ impl Plugin for VisibilityPlugin {
 pub fn calculate_bounds(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
-    without_aabb: Query<
-        (Entity, &Handle<Mesh>),
-        (
-            Or<(Without<Aabb>, Without<Sphere>)>,
-            Without<NoFrustumCulling>,
-        ),
-    >,
+    without_aabb: Query<(Entity, &Handle<Mesh>), (Without<Aabb>, Without<NoFrustumCulling>)>,
 ) {
     for (entity, mesh_handle) in without_aabb.iter() {
         if let Some(mesh) = meshes.get(mesh_handle) {
             if let Some(aabb) = mesh.compute_aabb() {
-                let sphere = Sphere::from(&aabb);
-                commands.entity(entity).insert_bundle((aabb, sphere));
+                commands.entity(entity).insert(aabb);
             }
         }
     }
@@ -153,7 +146,6 @@ pub fn check_visibility(
             &mut ComputedVisibility,
             Option<&RenderLayers>,
             Option<&Aabb>,
-            Option<&Sphere>,
             Option<&NoFrustumCulling>,
             Option<&GlobalTransform>,
         )>,
@@ -174,7 +166,6 @@ pub fn check_visibility(
             mut computed_visibility,
             maybe_entity_mask,
             maybe_aabb,
-            maybe_sphere,
             maybe_no_frustum_culling,
             maybe_transform,
         ) in visible_entity_query.q1().iter_mut()
@@ -188,15 +179,17 @@ pub fn check_visibility(
                 continue;
             }
 
-            if let (Some(transform), None, Some(model_sphere), Some(model_aabb)) = (
-                maybe_transform,
-                maybe_no_frustum_culling,
-                maybe_sphere,
-                maybe_aabb,
-            ) {
+            // If we have an aabb and transform, do frustum culling
+            if let (Some(model_aabb), None, Some(transform)) =
+                (maybe_aabb, maybe_no_frustum_culling, maybe_transform)
+            {
                 let model = transform.compute_matrix();
-                // If we have a sphere, do quick sphere-based frustum culling
-                if !frustum.intersects_osphere(model_sphere, &model) {
+                let model_sphere = Sphere {
+                    center: model.transform_point3a(model_aabb.center),
+                    radius: model_aabb.half_extents.length(),
+                };
+                // Do quick sphere-based frustum culling
+                if !frustum.intersects_sphere(&model_sphere) {
                     continue;
                 }
                 // If we have an aabb, do aabb-based frustum culling
