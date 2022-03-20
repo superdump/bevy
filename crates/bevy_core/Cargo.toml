@@ -21,3 +21,4 @@ bevy_utils = { path = "../bevy_utils", version = "0.7.0-dev" }
 
 # other
 bytemuck = "1.5"
+radsort = "0.1.0"

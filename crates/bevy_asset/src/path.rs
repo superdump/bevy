@@ -103,11 +103,27 @@ impl<'a> From<Option<&'a str>> for LabelId {
     }
 }
 
+impl SourcePathId {
+    #[inline]
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+}
+
+impl LabelId {
+    #[inline]
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+}
+
 impl AssetPathId {
+    #[inline]
     pub fn source_path_id(&self) -> SourcePathId {
         self.0
     }
 
+    #[inline]
     pub fn label_id(&self) -> LabelId {
         self.1
     }

@@ -29,7 +29,7 @@ impl<I: PhaseItem> RenderPhase<I> {
 
     /// Sorts all of its [`PhaseItems`](PhaseItem).
     pub fn sort(&mut self) {
-        self.items.sort_by_key(|d| d.sort_key());
+        radsort::sort_by_key(&mut self.items, |d| d.sort_key());
     }
 }
 
@@ -91,9 +91,11 @@ mod tests {
             batch_range: Option<Range<u32>>,
         }
         impl PhaseItem for TestPhaseItem {
-            type SortKey = ();
+            type SortKey = f32;
 
-            fn sort_key(&self) -> Self::SortKey {}
+            fn sort_key(&self) -> Self::SortKey {
+                0.0f32
+            }
 
             fn draw_function(&self) -> DrawFunctionId {
                 unimplemented!();

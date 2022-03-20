@@ -1,11 +1,8 @@
-use std::cmp::Ordering;
-
 use crate::{
     texture_atlas::{TextureAtlas, TextureAtlasSprite},
     Rect, Sprite, SPRITE_SHADER_HANDLE,
 };
 use bevy_asset::{AssetEvent, Assets, Handle, HandleId};
-use bevy_core::FloatOrd;
 use bevy_core_pipeline::Transparent2d;
 use bevy_ecs::{
     prelude::*,
@@ -393,17 +390,31 @@ pub fn queue_sprites(
             transparent_phase.items.reserve(extracted_sprites.len());
 
             // Sort sprites by z for correct transparency and then by handle to improve batching
-            extracted_sprites.sort_unstable_by(|a, b| {
-                match a
-                    .transform
-                    .translation
-                    .z
-                    .partial_cmp(&b.transform.translation.z)
-                {
-                    Some(Ordering::Equal) | None => a.image_handle_id.cmp(&b.image_handle_id),
-                    Some(other) => other,
-                }
+            radsort::sort_by_key(extracted_sprites, |extracted_sprite| {
+                (
+                    extracted_sprite.transform.translation.z,
+                    match extracted_sprite.image_handle_id {
+                        HandleId::Id(uuid, id) => {
+                            ((uuid.as_u128() & ((1 << 64) - 1)) << 64) | (id as u128)
+                        }
+                        HandleId::AssetPathId(id) => {
+                            ((id.source_path_id().value() as u128) << 64)
+                                | (id.label_id().value() as u128)
+                        }
+                    },
+                )
             });
+            // extracted_sprites.sort_unstable_by(|a, b| {
+            //     match a
+            //         .transform
+            //         .translation
+            //         .z
+            //         .partial_cmp(&b.transform.translation.z)
+            //     {
+            //         Some(Ordering::Equal) | None => a.image_handle_id.cmp(&b.image_handle_id),
+            //         Some(other) => other,
+            //     }
+            // });
 
             // Impossible starting values that will be replaced on the first iteration
             let mut current_batch = SpriteBatch {
@@ -494,7 +505,7 @@ pub fn queue_sprites(
                 });
 
                 // These items will be sorted by depth with other phase items
-                let sort_key = FloatOrd(extracted_sprite.transform.translation.z);
+                let sort_key = extracted_sprite.transform.translation.z;
 
                 // Store the vertex data and add the item to the render phase
                 if current_batch.colored {

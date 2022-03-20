@@ -20,7 +20,6 @@ pub use main_pass_driver::*;
 use std::ops::Range;
 
 use bevy_app::{App, Plugin};
-use bevy_core::FloatOrd;
 use bevy_ecs::prelude::*;
 use bevy_render::{
     camera::{ActiveCamera, Camera2d, Camera3d, RenderTarget},
@@ -196,7 +195,7 @@ impl Plugin for CorePipelinePlugin {
 }
 
 pub struct Transparent2d {
-    pub sort_key: FloatOrd,
+    pub sort_key: f32,
     pub entity: Entity,
     pub pipeline: CachedPipelineId,
     pub draw_function: DrawFunctionId,
@@ -205,7 +204,7 @@ pub struct Transparent2d {
 }
 
 impl PhaseItem for Transparent2d {
-    type SortKey = FloatOrd;
+    type SortKey = f32;
 
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
@@ -250,11 +249,11 @@ pub struct Opaque3d {
 }
 
 impl PhaseItem for Opaque3d {
-    type SortKey = FloatOrd;
+    type SortKey = f32;
 
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
-        FloatOrd(self.distance)
+        self.distance
     }
 
     #[inline]
@@ -285,11 +284,11 @@ pub struct AlphaMask3d {
 }
 
 impl PhaseItem for AlphaMask3d {
-    type SortKey = FloatOrd;
+    type SortKey = f32;
 
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
-        FloatOrd(self.distance)
+        self.distance
     }
 
     #[inline]
@@ -320,11 +319,11 @@ pub struct Transparent3d {
 }
 
 impl PhaseItem for Transparent3d {
-    type SortKey = FloatOrd;
+    type SortKey = f32;
 
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
-        FloatOrd(self.distance)
+        self.distance
     }
 
     #[inline]

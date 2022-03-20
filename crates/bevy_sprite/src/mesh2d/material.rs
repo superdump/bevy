@@ -1,6 +1,5 @@
 use bevy_app::{App, Plugin};
 use bevy_asset::{AddAsset, Asset, AssetServer, Handle};
-use bevy_core::FloatOrd;
 use bevy_core_pipeline::Transparent2d;
 use bevy_ecs::{
     entity::Entity,
@@ -346,7 +345,7 @@ pub fn queue_material2d_meshes<M: SpecializedMaterial2d>(
                             // lowest sort key and getting closer should increase. As we have
                             // -z in front of the camera, the largest distance is -far with values increasing toward the
                             // camera. As such we can just use mesh_z as the distance
-                            sort_key: FloatOrd(mesh_z),
+                            sort_key: mesh_z,
                             // This material is not batched
                             batch_range: None,
                         });

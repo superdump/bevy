@@ -1,4 +1,3 @@
-use bevy_core::FloatOrd;
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemParamItem},
@@ -100,14 +99,14 @@ impl Node for UiPassNode {
 }
 
 pub struct TransparentUi {
-    pub sort_key: FloatOrd,
+    pub sort_key: f32,
     pub entity: Entity,
     pub pipeline: CachedPipelineId,
     pub draw_function: DrawFunctionId,
 }
 
 impl PhaseItem for TransparentUi {
-    type SortKey = FloatOrd;
+    type SortKey = f32;
 
     #[inline]
     fn sort_key(&self) -> Self::SortKey {

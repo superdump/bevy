@@ -4,7 +4,6 @@ use crate::{
     PointLightShadowMap, SetMeshBindGroup, VisiblePointLights, SHADOW_SHADER_HANDLE,
 };
 use bevy_asset::Handle;
-use bevy_core::FloatOrd;
 use bevy_core_pipeline::Transparent3d;
 use bevy_ecs::{
     prelude::*,
@@ -1124,11 +1123,11 @@ pub struct Shadow {
 }
 
 impl PhaseItem for Shadow {
-    type SortKey = FloatOrd;
+    type SortKey = f32;
 
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
-        FloatOrd(self.distance)
+        self.distance
     }
 
     #[inline]
