@@ -17,8 +17,6 @@ pub use main_pass_2d::*;
 pub use main_pass_3d::*;
 pub use main_pass_driver::*;
 
-use std::ops::Range;
-
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
 use bevy_render::{
@@ -26,8 +24,9 @@ use bevy_render::{
     color::Color,
     render_graph::{EmptyNode, RenderGraph, SlotInfo, SlotType},
     render_phase::{
-        batch_phase_system, sort_phase_system, BatchedPhaseItem, CachedPipelinePhaseItem,
-        DrawFunctionId, DrawFunctions, EntityPhaseItem, PhaseItem, RenderPhase,
+        batch_phase_system, sort_phase_system, BatchRange, BatchedPhaseItem,
+        CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions, EntityPhaseItem, PhaseItem,
+        RenderPhase,
     },
     render_resource::*,
     renderer::RenderDevice,
@@ -200,7 +199,7 @@ pub struct Transparent2d {
     pub pipeline: CachedPipelineId,
     pub draw_function: DrawFunctionId,
     /// Range in the vertex buffer of this item
-    pub batch_range: Option<Range<u32>>,
+    pub batch_range: Option<BatchRange>,
 }
 
 impl PhaseItem for Transparent2d {
@@ -232,11 +231,11 @@ impl CachedPipelinePhaseItem for Transparent2d {
 }
 
 impl BatchedPhaseItem for Transparent2d {
-    fn batch_range(&self) -> &Option<Range<u32>> {
+    fn batch_range(&self) -> &Option<BatchRange> {
         &self.batch_range
     }
 
-    fn batch_range_mut(&mut self) -> &mut Option<Range<u32>> {
+    fn batch_range_mut(&mut self) -> &mut Option<BatchRange> {
         &mut self.batch_range
     }
 }

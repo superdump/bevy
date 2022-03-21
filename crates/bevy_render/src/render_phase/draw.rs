@@ -166,16 +166,34 @@ pub trait CachedPipelinePhaseItem: PhaseItem {
     fn cached_pipeline(&self) -> CachedPipelineId;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BatchRange {
+    start: u32,
+    end: u32,
+}
+
+impl BatchRange {
+    #[inline]
+    pub fn new(start: u32, end: u32) -> Self {
+        Self { start, end }
+    }
+
+    #[inline]
+    pub fn as_range(&self) -> Range<u32> {
+        self.start..self.end
+    }
+}
+
 /// A [`PhaseItem`] that can be batched dynamically.
 ///
 /// Batching is an optimization that regroups multiple items in the same vertex buffer
 /// to render them in a single draw call.
 pub trait BatchedPhaseItem: EntityPhaseItem {
     /// Range in the vertex buffer of this item
-    fn batch_range(&self) -> &Option<Range<u32>>;
+    fn batch_range(&self) -> &Option<BatchRange>;
 
     /// Range in the vertex buffer of this item
-    fn batch_range_mut(&mut self) -> &mut Option<Range<u32>>;
+    fn batch_range_mut(&mut self) -> &mut Option<BatchRange>;
 
     /// Batches another item within this item if they are compatible.
     /// Items can be batched together if they have the same entity, and consecutive ranges.

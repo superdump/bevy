@@ -14,8 +14,8 @@ use bevy_render::{
     color::Color,
     render_asset::RenderAssets,
     render_phase::{
-        BatchedPhaseItem, DrawFunctions, EntityRenderCommand, RenderCommand, RenderCommandResult,
-        RenderPhase, SetItemPipeline, TrackedRenderPass,
+        BatchRange, BatchedPhaseItem, DrawFunctions, EntityRenderCommand, RenderCommand,
+        RenderCommandResult, RenderPhase, SetItemPipeline, TrackedRenderPass,
     },
     render_resource::{std140::AsStd140, *},
     renderer::{RenderDevice, RenderQueue},
@@ -531,7 +531,7 @@ pub fn queue_sprites(
                         pipeline: colored_pipeline,
                         entity: current_batch_entity,
                         sort_key,
-                        batch_range: Some(item_start..item_end),
+                        batch_range: Some(BatchRange::new(item_start, item_end)),
                     });
                 } else {
                     for i in QUAD_INDICES.iter() {
@@ -549,7 +549,7 @@ pub fn queue_sprites(
                         pipeline,
                         entity: current_batch_entity,
                         sort_key,
-                        batch_range: Some(item_start..item_end),
+                        batch_range: Some(BatchRange::new(item_start, item_end)),
                     });
                 }
             }
@@ -631,7 +631,7 @@ impl<P: BatchedPhaseItem> RenderCommand<P> for DrawSpriteBatch {
         } else {
             pass.set_vertex_buffer(0, sprite_meta.vertices.buffer().unwrap().slice(..));
         }
-        pass.draw(item.batch_range().as_ref().unwrap().clone(), 0..1);
+        pass.draw(item.batch_range().as_ref().unwrap().as_range(), 0..1);
         RenderCommandResult::Success
     }
 }

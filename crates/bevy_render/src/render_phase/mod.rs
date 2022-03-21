@@ -77,8 +77,6 @@ pub fn batch_phase_system<I: BatchedPhaseItem>(mut render_phases: Query<&mut Ren
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
-
     use bevy_ecs::entity::Entity;
 
     use super::*;
@@ -88,7 +86,7 @@ mod tests {
         #[derive(Debug, PartialEq)]
         struct TestPhaseItem {
             entity: Entity,
-            batch_range: Option<Range<u32>>,
+            batch_range: Option<BatchRange>,
         }
         impl PhaseItem for TestPhaseItem {
             type SortKey = f32;
@@ -107,11 +105,11 @@ mod tests {
             }
         }
         impl BatchedPhaseItem for TestPhaseItem {
-            fn batch_range(&self) -> &Option<std::ops::Range<u32>> {
+            fn batch_range(&self) -> &Option<BatchRange> {
                 &self.batch_range
             }
 
-            fn batch_range_mut(&mut self) -> &mut Option<std::ops::Range<u32>> {
+            fn batch_range_mut(&mut self) -> &mut Option<BatchRange> {
                 &mut self.batch_range
             }
         }
@@ -119,24 +117,24 @@ mod tests {
         let items = [
             TestPhaseItem {
                 entity: Entity::from_raw(0),
-                batch_range: Some(0..5),
+                batch_range: Some(BatchRange::new(0, 5)),
             },
             // This item should be batched
             TestPhaseItem {
                 entity: Entity::from_raw(0),
-                batch_range: Some(5..10),
+                batch_range: Some(BatchRange::new(5, 10)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
-                batch_range: Some(0..5),
+                batch_range: Some(BatchRange::new(0, 5)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(0),
-                batch_range: Some(10..15),
+                batch_range: Some(BatchRange::new(10, 15)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
-                batch_range: Some(5..10),
+                batch_range: Some(BatchRange::new(5, 10)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
@@ -144,21 +142,21 @@ mod tests {
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
-                batch_range: Some(10..15),
+                batch_range: Some(BatchRange::new(10, 15)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
-                batch_range: Some(20..25),
-            },
-            // This item should be batched
-            TestPhaseItem {
-                entity: Entity::from_raw(1),
-                batch_range: Some(25..30),
+                batch_range: Some(BatchRange::new(20, 25)),
             },
             // This item should be batched
             TestPhaseItem {
                 entity: Entity::from_raw(1),
-                batch_range: Some(30..35),
+                batch_range: Some(BatchRange::new(25, 30)),
+            },
+            // This item should be batched
+            TestPhaseItem {
+                entity: Entity::from_raw(1),
+                batch_range: Some(BatchRange::new(30, 35)),
             },
         ];
         for item in items {
@@ -168,19 +166,19 @@ mod tests {
         let items_batched = [
             TestPhaseItem {
                 entity: Entity::from_raw(0),
-                batch_range: Some(0..10),
+                batch_range: Some(BatchRange::new(0, 10)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
-                batch_range: Some(0..5),
+                batch_range: Some(BatchRange::new(0, 5)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(0),
-                batch_range: Some(10..15),
+                batch_range: Some(BatchRange::new(10, 15)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
-                batch_range: Some(5..10),
+                batch_range: Some(BatchRange::new(5, 10)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
@@ -188,11 +186,11 @@ mod tests {
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
-                batch_range: Some(10..15),
+                batch_range: Some(BatchRange::new(10, 15)),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
-                batch_range: Some(20..35),
+                batch_range: Some(BatchRange::new(20, 35)),
             },
         ];
         assert_eq!(&*render_phase.items, items_batched);
