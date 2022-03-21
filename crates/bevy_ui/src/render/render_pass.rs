@@ -12,6 +12,7 @@ use bevy_render::{
     renderer::*,
     view::*,
 };
+use rdst::RadixKey;
 
 use crate::prelude::CameraUi;
 
@@ -98,11 +99,20 @@ impl Node for UiPassNode {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct TransparentUi {
     pub sort_key: f32,
     pub entity: Entity,
     pub pipeline: CachedPipelineId,
     pub draw_function: DrawFunctionId,
+}
+
+impl RadixKey for TransparentUi {
+    const LEVELS: usize = 4;
+
+    fn get_level(&self, level: usize) -> u8 {
+        self.sort_key.get_level(level)
+    }
 }
 
 impl PhaseItem for TransparentUi {

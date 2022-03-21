@@ -16,6 +16,7 @@ pub use clear_pass_driver::*;
 pub use main_pass_2d::*;
 pub use main_pass_3d::*;
 pub use main_pass_driver::*;
+use rdst::RadixKey;
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
@@ -193,6 +194,7 @@ impl Plugin for CorePipelinePlugin {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Transparent2d {
     pub sort_key: f32,
     pub entity: Entity,
@@ -200,6 +202,15 @@ pub struct Transparent2d {
     pub draw_function: DrawFunctionId,
     /// Range in the vertex buffer of this item
     pub batch_range: Option<BatchRange>,
+}
+
+impl RadixKey for Transparent2d {
+    const LEVELS: usize = 4;
+
+    #[inline]
+    fn get_level(&self, level: usize) -> u8 {
+        self.sort_key.get_level(level)
+    }
 }
 
 impl PhaseItem for Transparent2d {
@@ -240,11 +251,21 @@ impl BatchedPhaseItem for Transparent2d {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Opaque3d {
     pub distance: f32,
     pub pipeline: CachedPipelineId,
     pub entity: Entity,
     pub draw_function: DrawFunctionId,
+}
+
+impl RadixKey for Opaque3d {
+    const LEVELS: usize = 4;
+
+    #[inline]
+    fn get_level(&self, level: usize) -> u8 {
+        self.distance.get_level(level)
+    }
 }
 
 impl PhaseItem for Opaque3d {
@@ -275,11 +296,21 @@ impl CachedPipelinePhaseItem for Opaque3d {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct AlphaMask3d {
     pub distance: f32,
     pub pipeline: CachedPipelineId,
     pub entity: Entity,
     pub draw_function: DrawFunctionId,
+}
+
+impl RadixKey for AlphaMask3d {
+    const LEVELS: usize = 4;
+
+    #[inline]
+    fn get_level(&self, level: usize) -> u8 {
+        self.distance.get_level(level)
+    }
 }
 
 impl PhaseItem for AlphaMask3d {
@@ -310,11 +341,21 @@ impl CachedPipelinePhaseItem for AlphaMask3d {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Transparent3d {
     pub distance: f32,
     pub pipeline: CachedPipelineId,
     pub entity: Entity,
     pub draw_function: DrawFunctionId,
+}
+
+impl RadixKey for Transparent3d {
+    const LEVELS: usize = 4;
+
+    #[inline]
+    fn get_level(&self, level: usize) -> u8 {
+        self.distance.get_level(level)
+    }
 }
 
 impl PhaseItem for Transparent3d {

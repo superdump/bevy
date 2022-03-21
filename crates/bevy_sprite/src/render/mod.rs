@@ -27,6 +27,7 @@ use bevy_transform::components::GlobalTransform;
 use bevy_utils::HashMap;
 use bytemuck::{Pod, Zeroable};
 use copyless::VecHelper;
+use rdst::{RadixKey, RadixSort};
 
 pub struct SpritePipeline {
     view_layout: BindGroupLayout,
@@ -181,6 +182,27 @@ pub struct ExtractedSprite {
     pub image_handle_id: HandleId,
     pub flip_x: bool,
     pub flip_y: bool,
+}
+
+impl RadixKey for ExtractedSprite {
+    const LEVELS: usize = 20;
+
+    #[inline]
+    fn get_level(&self, level: usize) -> u8 {
+        if level < 4 {
+            self.transform.translation.z.get_level(level)
+        } else if level < 12 {
+            match self.image_handle_id {
+                HandleId::Id(uuid, _) => uuid.as_u128().get_level(level - 4),
+                HandleId::AssetPathId(id) => id.source_path_id().value().get_level(level - 4),
+            }
+        } else {
+            match self.image_handle_id {
+                HandleId::Id(_, id) => id.get_level(level - 12),
+                HandleId::AssetPathId(id) => id.label_id().value().get_level(level - 12),
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -390,20 +412,8 @@ pub fn queue_sprites(
             transparent_phase.items.reserve(extracted_sprites.len());
 
             // Sort sprites by z for correct transparency and then by handle to improve batching
-            radsort::sort_by_key(extracted_sprites, |extracted_sprite| {
-                (
-                    extracted_sprite.transform.translation.z,
-                    match extracted_sprite.image_handle_id {
-                        HandleId::Id(uuid, id) => {
-                            ((uuid.as_u128() & ((1 << 64) - 1)) << 64) | (id as u128)
-                        }
-                        HandleId::AssetPathId(id) => {
-                            ((id.source_path_id().value() as u128) << 64)
-                                | (id.label_id().value() as u128)
-                        }
-                    },
-                )
-            });
+            extracted_sprites.radix_sort_unstable();
+
             // extracted_sprites.sort_unstable_by(|a, b| {
             //     match a
             //         .transform

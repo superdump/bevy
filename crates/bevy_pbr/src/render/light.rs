@@ -33,6 +33,7 @@ use bevy_utils::{
     tracing::{error, warn},
     HashMap,
 };
+use rdst::RadixKey;
 use std::num::NonZeroU32;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
@@ -1115,11 +1116,21 @@ pub fn queue_shadows(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Shadow {
     pub distance: f32,
     pub entity: Entity,
     pub pipeline: CachedPipelineId,
     pub draw_function: DrawFunctionId,
+}
+
+impl RadixKey for Shadow {
+    const LEVELS: usize = 4;
+
+    #[inline]
+    fn get_level(&self, level: usize) -> u8 {
+        self.distance.get_level(level)
+    }
 }
 
 impl PhaseItem for Shadow {

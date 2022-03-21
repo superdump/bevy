@@ -7,6 +7,7 @@ pub use draw_state::*;
 use bevy_ecs::prelude::{Component, Query};
 
 use copyless::VecHelper;
+use rdst::{RadixKey, RadixSort};
 
 /// A resource to collect and sort draw requests for specific [`PhaseItems`](PhaseItem).
 #[derive(Component)]
@@ -20,7 +21,7 @@ impl<I: PhaseItem> Default for RenderPhase<I> {
     }
 }
 
-impl<I: PhaseItem> RenderPhase<I> {
+impl<I: PhaseItem + RadixKey + Copy> RenderPhase<I> {
     /// Adds a [`PhaseItem`] to this render phase.
     #[inline]
     pub fn add(&mut self, item: I) {
@@ -29,7 +30,7 @@ impl<I: PhaseItem> RenderPhase<I> {
 
     /// Sorts all of its [`PhaseItems`](PhaseItem).
     pub fn sort(&mut self) {
-        radsort::sort_by_key(&mut self.items, |d| d.sort_key());
+        self.items.radix_sort_unstable();
     }
 }
 
@@ -62,7 +63,9 @@ impl<I: BatchedPhaseItem> RenderPhase<I> {
 }
 
 /// This system sorts all [`RenderPhases`](RenderPhase) for the [`PhaseItem`] type.
-pub fn sort_phase_system<I: PhaseItem>(mut render_phases: Query<&mut RenderPhase<I>>) {
+pub fn sort_phase_system<I: PhaseItem + RadixKey + Copy>(
+    mut render_phases: Query<&mut RenderPhase<I>>,
+) {
     for mut phase in render_phases.iter_mut() {
         phase.sort();
     }
@@ -83,10 +86,18 @@ mod tests {
 
     #[test]
     fn batching() {
-        #[derive(Debug, PartialEq)]
+        #[derive(Debug, Clone, Copy, PartialEq)]
         struct TestPhaseItem {
             entity: Entity,
             batch_range: Option<BatchRange>,
+        }
+        impl RadixKey for TestPhaseItem {
+            const LEVELS: usize = 4;
+
+            #[inline]
+            fn get_level(&self, level: usize) -> u8 {
+                self.sort_key().get_level(level)
+            }
         }
         impl PhaseItem for TestPhaseItem {
             type SortKey = f32;
