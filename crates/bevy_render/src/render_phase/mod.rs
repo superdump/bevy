@@ -7,7 +7,7 @@ pub use draw_state::*;
 use bevy_ecs::prelude::{Component, Query};
 
 use copyless::VecHelper;
-use rdst::{RadixKey, RadixSort};
+use voracious_radix_sort::{RadixSort, Radixable};
 
 /// A resource to collect and sort draw requests for specific [`PhaseItems`](PhaseItem).
 #[derive(Component)]
@@ -21,7 +21,7 @@ impl<I: PhaseItem> Default for RenderPhase<I> {
     }
 }
 
-impl<I: PhaseItem + RadixKey + Copy> RenderPhase<I> {
+impl<I: PhaseItem + Radixable<<I as PhaseItem>::SortKey> + Copy> RenderPhase<I> {
     /// Adds a [`PhaseItem`] to this render phase.
     #[inline]
     pub fn add(&mut self, item: I) {
@@ -30,7 +30,7 @@ impl<I: PhaseItem + RadixKey + Copy> RenderPhase<I> {
 
     /// Sorts all of its [`PhaseItems`](PhaseItem).
     pub fn sort(&mut self) {
-        self.items.radix_sort_unstable();
+        self.items.voracious_stable_sort();
     }
 }
 
@@ -63,7 +63,7 @@ impl<I: BatchedPhaseItem> RenderPhase<I> {
 }
 
 /// This system sorts all [`RenderPhases`](RenderPhase) for the [`PhaseItem`] type.
-pub fn sort_phase_system<I: PhaseItem + RadixKey + Copy>(
+pub fn sort_phase_system<I: PhaseItem + Radixable<<I as PhaseItem>::SortKey> + Copy>(
     mut render_phases: Query<&mut RenderPhase<I>>,
 ) {
     for mut phase in render_phases.iter_mut() {
@@ -80,28 +80,43 @@ pub fn batch_phase_system<I: BatchedPhaseItem>(mut render_phases: Query<&mut Ren
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+
     use bevy_ecs::entity::Entity;
 
     use super::*;
 
     #[test]
     fn batching() {
-        #[derive(Debug, Clone, Copy, PartialEq)]
+        #[derive(Debug, Clone, Copy)]
         struct TestPhaseItem {
             entity: Entity,
             batch_range: Option<BatchRange>,
         }
-        impl RadixKey for TestPhaseItem {
-            const LEVELS: usize = 4;
+        impl PartialOrd for TestPhaseItem {
+            #[inline]
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                self.sort_key().partial_cmp(&other.sort_key())
+            }
+        }
+        impl PartialEq for TestPhaseItem {
+            #[inline]
+            fn eq(&self, other: &Self) -> bool {
+                self.sort_key() == other.sort_key()
+            }
+        }
+        impl Radixable<<Self as PhaseItem>::SortKey> for TestPhaseItem {
+            type Key = <Self as PhaseItem>::SortKey;
 
             #[inline]
-            fn get_level(&self, level: usize) -> u8 {
-                self.sort_key().get_level(level)
+            fn key(&self) -> Self::Key {
+                self.sort_key()
             }
         }
         impl PhaseItem for TestPhaseItem {
             type SortKey = f32;
 
+            #[inline]
             fn sort_key(&self) -> Self::SortKey {
                 0.0f32
             }

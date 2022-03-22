@@ -33,8 +33,8 @@ use bevy_utils::{
     tracing::{error, warn},
     HashMap,
 };
-use rdst::RadixKey;
-use std::num::NonZeroU32;
+use std::{cmp::Ordering, num::NonZeroU32};
+use voracious_radix_sort::Radixable;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum RenderLightSystems {
@@ -1124,12 +1124,26 @@ pub struct Shadow {
     pub draw_function: DrawFunctionId,
 }
 
-impl RadixKey for Shadow {
-    const LEVELS: usize = 4;
+impl PartialOrd for Shadow {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.distance.partial_cmp(&other.distance)
+    }
+}
+
+impl PartialEq for Shadow {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.distance == other.distance
+    }
+}
+
+impl Radixable<<Self as PhaseItem>::SortKey> for Shadow {
+    type Key = <Self as PhaseItem>::SortKey;
 
     #[inline]
-    fn get_level(&self, level: usize) -> u8 {
-        self.distance.get_level(level)
+    fn key(&self) -> Self::Key {
+        self.distance
     }
 }
 

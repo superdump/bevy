@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemParamItem},
@@ -12,7 +14,7 @@ use bevy_render::{
     renderer::*,
     view::*,
 };
-use rdst::RadixKey;
+use voracious_radix_sort::Radixable;
 
 use crate::prelude::CameraUi;
 
@@ -107,11 +109,26 @@ pub struct TransparentUi {
     pub draw_function: DrawFunctionId,
 }
 
-impl RadixKey for TransparentUi {
-    const LEVELS: usize = 4;
+impl PartialOrd for TransparentUi {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.sort_key.partial_cmp(&other.sort_key)
+    }
+}
 
-    fn get_level(&self, level: usize) -> u8 {
-        self.sort_key.get_level(level)
+impl PartialEq for TransparentUi {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.sort_key == other.sort_key
+    }
+}
+
+impl Radixable<<Self as PhaseItem>::SortKey> for TransparentUi {
+    type Key = <Self as PhaseItem>::SortKey;
+
+    #[inline]
+    fn key(&self) -> Self::Key {
+        self.sort_key
     }
 }
 

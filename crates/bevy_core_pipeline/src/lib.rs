@@ -9,6 +9,8 @@ pub mod prelude {
     pub use crate::ClearColor;
 }
 
+use std::cmp::Ordering;
+
 use bevy_utils::HashMap;
 
 pub use clear_pass::*;
@@ -16,7 +18,6 @@ pub use clear_pass_driver::*;
 pub use main_pass_2d::*;
 pub use main_pass_3d::*;
 pub use main_pass_driver::*;
-use rdst::RadixKey;
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
@@ -35,6 +36,7 @@ use bevy_render::{
     view::{ExtractedView, Msaa, ViewDepthTexture},
     RenderApp, RenderStage, RenderWorld,
 };
+use voracious_radix_sort::Radixable;
 
 /// When used as a resource, sets the color that is used to clear the screen between frames.
 ///
@@ -204,12 +206,26 @@ pub struct Transparent2d {
     pub batch_range: Option<BatchRange>,
 }
 
-impl RadixKey for Transparent2d {
-    const LEVELS: usize = 4;
+impl PartialOrd for Transparent2d {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.sort_key.partial_cmp(&other.sort_key)
+    }
+}
+
+impl PartialEq for Transparent2d {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.sort_key == other.sort_key
+    }
+}
+
+impl Radixable<<Self as PhaseItem>::SortKey> for Transparent2d {
+    type Key = <Self as PhaseItem>::SortKey;
 
     #[inline]
-    fn get_level(&self, level: usize) -> u8 {
-        self.sort_key.get_level(level)
+    fn key(&self) -> Self::Key {
+        self.sort_key
     }
 }
 
@@ -259,12 +275,26 @@ pub struct Opaque3d {
     pub draw_function: DrawFunctionId,
 }
 
-impl RadixKey for Opaque3d {
-    const LEVELS: usize = 4;
+impl PartialOrd for Opaque3d {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.distance.partial_cmp(&other.distance)
+    }
+}
+
+impl PartialEq for Opaque3d {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.distance == other.distance
+    }
+}
+
+impl Radixable<<Self as PhaseItem>::SortKey> for Opaque3d {
+    type Key = <Self as PhaseItem>::SortKey;
 
     #[inline]
-    fn get_level(&self, level: usize) -> u8 {
-        self.distance.get_level(level)
+    fn key(&self) -> Self::Key {
+        self.distance
     }
 }
 
@@ -304,12 +334,26 @@ pub struct AlphaMask3d {
     pub draw_function: DrawFunctionId,
 }
 
-impl RadixKey for AlphaMask3d {
-    const LEVELS: usize = 4;
+impl PartialOrd for AlphaMask3d {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.distance.partial_cmp(&other.distance)
+    }
+}
+
+impl PartialEq for AlphaMask3d {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.distance == other.distance
+    }
+}
+
+impl Radixable<<Self as PhaseItem>::SortKey> for AlphaMask3d {
+    type Key = <Self as PhaseItem>::SortKey;
 
     #[inline]
-    fn get_level(&self, level: usize) -> u8 {
-        self.distance.get_level(level)
+    fn key(&self) -> Self::Key {
+        self.distance
     }
 }
 
@@ -349,12 +393,26 @@ pub struct Transparent3d {
     pub draw_function: DrawFunctionId,
 }
 
-impl RadixKey for Transparent3d {
-    const LEVELS: usize = 4;
+impl PartialOrd for Transparent3d {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.distance.partial_cmp(&other.distance)
+    }
+}
+
+impl PartialEq for Transparent3d {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.distance == other.distance
+    }
+}
+
+impl Radixable<<Self as PhaseItem>::SortKey> for Transparent3d {
+    type Key = <Self as PhaseItem>::SortKey;
 
     #[inline]
-    fn get_level(&self, level: usize) -> u8 {
-        self.distance.get_level(level)
+    fn key(&self) -> Self::Key {
+        self.distance
     }
 }
 

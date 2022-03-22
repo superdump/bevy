@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::{
     texture_atlas::{TextureAtlas, TextureAtlasSprite},
     Rect, Sprite, SPRITE_SHADER_HANDLE,
@@ -27,7 +29,7 @@ use bevy_transform::components::GlobalTransform;
 use bevy_utils::HashMap;
 use bytemuck::{Pod, Zeroable};
 use copyless::VecHelper;
-use rdst::{RadixKey, RadixSort};
+use voracious_radix_sort::{RadixSort, Radixable};
 
 pub struct SpritePipeline {
     view_layout: BindGroupLayout,
@@ -184,24 +186,29 @@ pub struct ExtractedSprite {
     pub flip_y: bool,
 }
 
-impl RadixKey for ExtractedSprite {
-    const LEVELS: usize = 20;
+impl PartialOrd for ExtractedSprite {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.transform
+            .translation
+            .z
+            .partial_cmp(&other.transform.translation.z)
+    }
+}
+
+impl PartialEq for ExtractedSprite {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.transform.translation.z == other.transform.translation.z
+    }
+}
+
+impl Radixable<f32> for ExtractedSprite {
+    type Key = f32;
 
     #[inline]
-    fn get_level(&self, level: usize) -> u8 {
-        if level < 4 {
-            self.transform.translation.z.get_level(level)
-        } else if level < 12 {
-            match self.image_handle_id {
-                HandleId::Id(uuid, _) => uuid.as_u128().get_level(level - 4),
-                HandleId::AssetPathId(id) => id.source_path_id().value().get_level(level - 4),
-            }
-        } else {
-            match self.image_handle_id {
-                HandleId::Id(_, id) => id.get_level(level - 12),
-                HandleId::AssetPathId(id) => id.label_id().value().get_level(level - 12),
-            }
-        }
+    fn key(&self) -> Self::Key {
+        self.transform.translation.z
     }
 }
 
@@ -412,19 +419,7 @@ pub fn queue_sprites(
             transparent_phase.items.reserve(extracted_sprites.len());
 
             // Sort sprites by z for correct transparency and then by handle to improve batching
-            extracted_sprites.radix_sort_unstable();
-
-            // extracted_sprites.sort_unstable_by(|a, b| {
-            //     match a
-            //         .transform
-            //         .translation
-            //         .z
-            //         .partial_cmp(&b.transform.translation.z)
-            //     {
-            //         Some(Ordering::Equal) | None => a.image_handle_id.cmp(&b.image_handle_id),
-            //         Some(other) => other,
-            //     }
-            // });
+            extracted_sprites.voracious_sort();
 
             // Impossible starting values that will be replaced on the first iteration
             let mut current_batch = SpriteBatch {
