@@ -56,7 +56,7 @@ pub fn update_debug_meshes<T>(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     query: Query<(&T, Entity, Option<&Children>), (Changed<T>, With<DebugBounds>)>,
-    mut debug_mesh_query: Query<&mut Handle<Mesh>, With<DebugBoundsMesh>>,
+    debug_mesh_query: Query<Entity, (With<Handle<Mesh>>, With<DebugBoundsMesh>)>,
 ) where
     T: 'static + BoundingVolume + Component,
     Mesh: From<&'static T>,
@@ -65,10 +65,7 @@ pub fn update_debug_meshes<T>(
         let mut updated_existing_child = false;
         if let Some(children) = optional_children {
             for child in children.iter() {
-                if let Ok(mut mesh_handle) = debug_mesh_query.get_mut(*child) {
-                    let mesh = bound_vol.new_debug_mesh();
-                    let new_handle = meshes.add(mesh);
-                    *mesh_handle = new_handle;
+                if debug_mesh_query.contains(*child) {
                     updated_existing_child = true;
                     break;
                 }
