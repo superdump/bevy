@@ -2,6 +2,7 @@ pub mod wireframe;
 
 mod alpha;
 mod bundle;
+mod debug_bounds;
 mod light;
 mod material;
 mod pbr_material;
@@ -9,6 +10,7 @@ mod render;
 
 pub use alpha::*;
 pub use bundle::*;
+pub use debug_bounds::*;
 pub use light::*;
 pub use material::*;
 pub use pbr_material::*;
@@ -40,6 +42,7 @@ use bevy_ecs::prelude::*;
 use bevy_reflect::TypeUuid;
 use bevy_render::{
     prelude::Color,
+    primitives::{Aabb, Frustum},
     render_graph::RenderGraph,
     render_phase::{sort_phase_system, AddRenderCommand, DrawFunctions},
     render_resource::{Shader, SpecializedMeshPipelines},
@@ -116,7 +119,9 @@ impl Plugin for PbrPlugin {
                     // because that resets entity ComputedVisibility for the first view
                     // which would override any results from this otherwise
                     .after(VisibilitySystems::CheckVisibility),
-            );
+            )
+            .add_plugin(DebugBoundsPlugin::<Aabb>::default())
+            .add_plugin(DebugBoundsPlugin::<Frustum>::default());
 
         app.world
             .resource_mut::<Assets<StandardMaterial>>()
