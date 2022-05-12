@@ -10,8 +10,9 @@ use bevy_render::{
     mesh::Mesh,
     prelude::{Color, Visibility},
     primitives::BoundingVolume,
-    view::{calculate_bounds, check_visibility},
+    view::VisibilitySystems,
 };
+use bevy_transform::TransformSystem;
 
 use crate::{NotShadowCaster, PbrBundle, StandardMaterial};
 
@@ -29,13 +30,17 @@ where
     fn build(&self, app: &mut App) {
         app.add_system_to_stage(
             CoreStage::PostUpdate,
-            update_debug_meshes::<T>.after(calculate_bounds),
+            update_debug_meshes::<T>
+                .after(VisibilitySystems::CalculateBounds)
+                .after(VisibilitySystems::UpdateOrthographicFrusta)
+                .after(VisibilitySystems::UpdatePerspectiveFrusta)
+                .after(TransformSystem::TransformPropagate),
         )
         .add_system_to_stage(
             CoreStage::PostUpdate,
             update_debug_mesh_visibility
                 .after(update_debug_meshes)
-                .before(check_visibility),
+                .before(VisibilitySystems::CheckVisibility),
         );
     }
 }
