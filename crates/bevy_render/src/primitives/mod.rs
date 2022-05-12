@@ -289,7 +289,7 @@ impl Plane {
         Some(Vec3A::new(
             d.dot(u) / denominator,
             m3.dot(v) / denominator,
-            -m2.dot(v) / denominator,
+            m2.dot(v) / denominator,
         ))
     }
 }
