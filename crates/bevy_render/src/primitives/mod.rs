@@ -1,6 +1,13 @@
 use bevy_ecs::{component::Component, reflect::ReflectComponent};
 use bevy_math::{Mat4, Vec3, Vec3A, Vec4, Vec4Swizzles};
 use bevy_reflect::Reflect;
+use wgpu::PrimitiveTopology;
+
+use crate::mesh::{Indices, Mesh};
+
+pub trait BoundingVolume {
+    fn new_debug_mesh(&self) -> Mesh;
+}
 
 /// An Axis-Aligned Bounding Box
 #[derive(Component, Clone, Debug, Default, Reflect)]
@@ -46,6 +53,31 @@ impl Aabb {
     pub fn max(&self) -> Vec3A {
         self.center + self.half_extents
     }
+
+    #[inline]
+    pub fn vertices_mesh_space(&self) -> [Vec3; 8] {
+        /*
+              (2)-----(3)               Y
+               | \     | \              |
+               |  (1)-----(0) MAX       o---X
+               |   |   |   |             \
+          MIN (6)--|--(7)  |              Z
+                 \ |     \ |
+                  (5)-----(4)
+        */
+        let min = self.min();
+        let max = self.max();
+        [
+            Vec3::new(max.x, max.y, max.z),
+            Vec3::new(min.x, max.y, max.z),
+            Vec3::new(min.x, max.y, min.z),
+            Vec3::new(max.x, max.y, min.z),
+            Vec3::new(max.x, min.y, max.z),
+            Vec3::new(min.x, min.y, max.z),
+            Vec3::new(min.x, min.y, min.z),
+            Vec3::new(max.x, min.y, min.z),
+        ]
+    }
 }
 
 impl From<Sphere> for Aabb {
@@ -55,6 +87,45 @@ impl From<Sphere> for Aabb {
             center: sphere.center,
             half_extents: Vec3A::splat(sphere.radius),
         }
+    }
+}
+
+impl From<&Aabb> for Mesh {
+    fn from(aabb: &Aabb) -> Self {
+        /*
+              (2)-----(3)               Y
+               | \     | \              |
+               |  (1)-----(0) MAX       o---X
+               |   |   |   |             \
+          MIN (6)--|--(7)  |              Z
+                 \ |     \ |
+                  (5)-----(4)
+        */
+        let vertices: Vec<[f32; 3]> = aabb
+            .vertices_mesh_space()
+            .iter()
+            .map(|vert| [vert.x, vert.y, vert.z])
+            .collect();
+        let uvs = vec![[0.0f32; 2]; 8];
+
+        let indices = Indices::U32(vec![
+            0, 1, 1, 2, 2, 3, 3, 0, // Top ring
+            4, 5, 5, 6, 6, 7, 7, 4, // Bottom ring
+            0, 4, 1, 5, 2, 6, 3, 7, // Verticals
+        ]);
+
+        let mut mesh = Mesh::new(PrimitiveTopology::LineList);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vertices);
+        mesh.set_indices(Some(indices));
+        mesh
+    }
+}
+
+impl BoundingVolume for Aabb {
+    fn new_debug_mesh(&self) -> Mesh {
+        Mesh::from(self)
     }
 }
 
@@ -77,6 +148,82 @@ impl Sphere {
         let d = v.length();
         let relative_radius = aabb.relative_radius(&(v / d), &axes);
         d < self.radius + relative_radius
+    }
+}
+
+impl From<&Sphere> for Mesh {
+    fn from(sphere: &Sphere) -> Self {
+        let radius = sphere.radius;
+        let origin = sphere.center;
+        let n_points = 24;
+        let vertices_x0: Vec<[f32; 3]> = (0..n_points)
+            .map(|i| {
+                let angle = i as f32 * 2.0 * std::f32::consts::PI / (n_points as f32);
+                [
+                    0.0,
+                    angle.sin() * radius + origin.y,
+                    angle.cos() * radius + origin.z,
+                ]
+            })
+            .collect();
+        let vertices_y0: Vec<[f32; 3]> = (0..n_points)
+            .map(|i| {
+                let angle = i as f32 * 2.0 * std::f32::consts::PI / (n_points as f32);
+                [
+                    angle.cos() * radius + origin.x,
+                    0.0,
+                    angle.sin() * radius + origin.z,
+                ]
+            })
+            .collect();
+        let vertices_z0: Vec<[f32; 3]> = (0..n_points)
+            .map(|i| {
+                let angle = i as f32 * 2.0 * std::f32::consts::PI / (n_points as f32);
+                [
+                    angle.cos() * radius + origin.x,
+                    angle.sin() * radius + origin.y,
+                    0.0,
+                ]
+            })
+            .collect();
+        let vertices = [vertices_x0, vertices_y0, vertices_z0].concat();
+        let indices_single: Vec<u32> = (0..n_points * 2)
+            .map(|i| {
+                let result = (i as u32 + 1) / 2;
+                if result == n_points as u32 {
+                    0
+                } else {
+                    result
+                }
+            })
+            .collect();
+        let indices = Indices::U32(
+            [
+                indices_single
+                    .iter()
+                    .map(|&index| index + n_points as u32)
+                    .collect(),
+                indices_single
+                    .iter()
+                    .map(|&index| index + 2 * n_points as u32)
+                    .collect(),
+                indices_single,
+            ]
+            .concat(),
+        );
+        let uvs = vec![[0.0f32; 2]; n_points * 3];
+        let mut mesh = Mesh::new(PrimitiveTopology::LineList);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vertices);
+        mesh.set_indices(Some(indices));
+        mesh
+    }
+}
+
+impl BoundingVolume for Sphere {
+    fn new_debug_mesh(&self) -> Mesh {
+        Mesh::from(self)
     }
 }
 
@@ -120,6 +267,30 @@ impl Plane {
     #[inline]
     pub fn normal_d(&self) -> Vec4 {
         self.normal_d
+    }
+
+    pub fn triplanar_intersection(&self, p1: &Plane, p2: &Plane) -> Option<Vec3A> {
+        let p0 = self;
+
+        let m1 = Vec3A::new(p0.normal_d.x, p1.normal_d.x, p2.normal_d.x);
+        let m2 = Vec3A::new(p0.normal_d.y, p1.normal_d.y, p2.normal_d.y);
+        let m3 = Vec3A::new(p0.normal_d.z, p1.normal_d.z, p2.normal_d.z);
+        let d = Vec3A::new(p0.normal_d.w, p1.normal_d.w, p2.normal_d.w);
+
+        let u = m2.cross(m3);
+        let v = m1.cross(d);
+
+        let denominator = m1.dot(u);
+        if denominator.abs() < f32::EPSILON {
+            // Planes don't actually intersect in a point
+            return None;
+        }
+
+        Some(Vec3A::new(
+            d.dot(u) / denominator,
+            m3.dot(v) / denominator,
+            -m2.dot(v) / denominator,
+        ))
     }
 }
 
@@ -187,6 +358,84 @@ impl Frustum {
             }
         }
         true
+    }
+
+    #[inline]
+    pub fn vertices_mesh_space(&self) -> [Vec3; 8] {
+        /*
+              (2)-----(3)               Y
+               | \     | \              |
+               |  (1)-----(0) MAX       o---X
+               |   |   |   |             \
+          MIN (6)--|--(7)  |              Z
+                 \ |     \ |
+                  (5)-----(4)
+        */
+        let n = self.planes.len();
+        let mut corners = Vec::with_capacity(8);
+        for i in 0..n {
+            for j in (i - (i & 1) + 2)..n {
+                for k in (j - (j & 1) + 2)..n {
+                    corners.push(Vec3::from(
+                        self.planes[i]
+                            .triplanar_intersection(&self.planes[j], &self.planes[k])
+                            .unwrap(),
+                    ));
+                }
+            }
+        }
+        let corners = [
+            corners[0], // right  top    near
+            corners[4], // left   top    near
+            corners[5], // left   top    far
+            corners[1], // right  top    far
+            corners[2], // right  bottom near
+            corners[6], // left   bottom near
+            corners[7], // left   bottom far
+            corners[3], // right  bottom far
+        ];
+        // dbg!(&self.planes);
+        // dbg!(&corners);
+        corners
+    }
+}
+
+impl From<&Frustum> for Mesh {
+    fn from(frustum: &Frustum) -> Self {
+        /*
+              (2)-----(3)               Y
+               | \     | \              |
+               |  (1)-----(0) MAX       o---X
+               |   |   |   |             \
+          MIN (6)--|--(7)  |              Z
+                 \ |     \ |
+                  (5)-----(4)
+        */
+        let vertices: Vec<[f32; 3]> = frustum
+            .vertices_mesh_space()
+            .iter()
+            .map(|vert| [vert.x, vert.y, vert.z])
+            .collect();
+        let uvs = vec![[0.0f32; 2]; 8];
+
+        let indices = Indices::U32(vec![
+            0, 1, 1, 2, 2, 3, 3, 0, // Top ring
+            4, 5, 5, 6, 6, 7, 7, 4, // Bottom ring
+            0, 4, 1, 5, 2, 6, 3, 7, // Verticals
+        ]);
+
+        let mut mesh = Mesh::new(PrimitiveTopology::LineList);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vertices.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vertices);
+        mesh.set_indices(Some(indices));
+        mesh
+    }
+}
+
+impl BoundingVolume for Frustum {
+    fn new_debug_mesh(&self) -> Mesh {
+        Mesh::from(self)
     }
 }
 

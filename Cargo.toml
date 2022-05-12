@@ -173,6 +173,10 @@ name = "3d_scene"
 path = "examples/3d/3d_scene.rs"
 
 [[example]]
+name = "debug_bounds"
+path = "examples/3d/debug_bounds.rs"
+
+[[example]]
 name = "lighting"
 path = "examples/3d/lighting.rs"
 
