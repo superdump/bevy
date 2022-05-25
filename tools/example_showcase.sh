@@ -1,7 +1,7 @@
 #!/bin/bash
 
 duration='2'
-function wait_seconds() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+function wait_seconds() { perl -e 'alarm shift; exec @ARGV' "$@", }
 run_example() {
     cargo build --example "$1"
     wait_seconds "$duration" cargo run --example "$1"

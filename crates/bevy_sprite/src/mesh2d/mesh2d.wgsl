@@ -2,31 +2,33 @@
 #import bevy_sprite::mesh2d_struct
 
 struct Vertex {
-    [[location(0)]] position: vec3<f32>;
-    [[location(1)]] normal: vec3<f32>;
-    [[location(2)]] uv: vec2<f32>;
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
 #ifdef VERTEX_TANGENTS
-    [[location(3)]] tangent: vec4<f32>;
+    @location(3) tangent: vec4<f32>,
 #endif
 };
 
 struct VertexOutput {
-    [[builtin(position)]] clip_position: vec4<f32>;
-    [[location(0)]] world_position: vec4<f32>;
-    [[location(1)]] world_normal: vec3<f32>;
-    [[location(2)]] uv: vec2<f32>;
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) world_position: vec4<f32>,
+    @location(1) world_normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
 #ifdef VERTEX_TANGENTS
-    [[location(3)]] world_tangent: vec4<f32>;
+    @location(3) world_tangent: vec4<f32>,
 #endif
 };
 
-[[group(0), binding(0)]]
+@group(0)
+@binding(0)
 var<uniform> view: View;
 
-[[group(2), binding(0)]]
+@group(2)
+@binding(0)
 var<uniform> mesh: Mesh2d;
 
-[[stage(vertex)]]
+@vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     let world_position = mesh.model * vec4<f32>(vertex.position, 1.0);
 
@@ -53,16 +55,16 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 }
 
 struct FragmentInput {
-    [[builtin(front_facing)]] is_front: bool;
-    [[location(0)]] world_position: vec4<f32>;
-    [[location(1)]] world_normal: vec3<f32>;
-    [[location(2)]] uv: vec2<f32>;
+    @builtin(front_facing) is_front: bool,
+    @location(0) world_position: vec4<f32>,
+    @location(1) world_normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
 #ifdef VERTEX_TANGENTS
-    [[location(3)]] world_tangent: vec4<f32>;
+    @location(3) world_tangent: vec4<f32>,
 #endif
 };
 
-[[stage(fragment)]]
-fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
+@fragment
+fn fragment(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 0.0, 1.0, 1.0);
 }
