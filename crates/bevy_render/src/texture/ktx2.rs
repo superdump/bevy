@@ -11,7 +11,7 @@ use ktx2::{
     BasicDataFormatDescriptor, ChannelTypeQualifiers, ColorModel, DataFormatDescriptorHeader,
     Header, SampleInformation,
 };
-use wgpu::{Extent3d, TextureDimension, TextureFormat};
+use wgpu::{AstcBlock, AstcChannel, Extent3d, TextureDimension, TextureFormat};
 
 use super::{CompressedImageFormats, DataFormat, Image, TextureError, TranscodeFormat};
 
@@ -239,10 +239,13 @@ pub fn get_transcoded_formats(
             if supported_compressed_formats.contains(CompressedImageFormats::ASTC_LDR) {
                 (
                     TranscoderBlockFormat::ASTC_4x4,
-                    if is_srgb {
-                        TextureFormat::Astc4x4RgbaUnormSrgb
-                    } else {
-                        TextureFormat::Astc4x4RgbaUnorm
+                    TextureFormat::Astc {
+                        block: AstcBlock::B4x4,
+                        channel: if is_srgb {
+                            AstcChannel::UnormSrgb
+                        } else {
+                            AstcChannel::Unorm
+                        },
                     },
                 )
             } else if supported_compressed_formats.contains(CompressedImageFormats::BC) {
@@ -1078,13 +1081,14 @@ pub fn ktx2_dfd_to_texture_format(
         },
         Some(ColorModel::ASTC) => match data_format_descriptor.texel_block_dimensions[0] {
             4 => match data_format_descriptor.texel_block_dimensions[1] {
-                4 => {
-                    if is_srgb {
-                        TextureFormat::Astc4x4RgbaUnormSrgb
+                4 => TextureFormat::Astc {
+                    block: AstcBlock::B4x4,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc4x4RgbaUnorm
-                    }
-                }
+                        AstcChannel::Unorm
+                    },
+                },
                 d => {
                     return Err(TextureError::UnsupportedTextureFormat(format!(
                         "Invalid ASTC y-dimension: {}",
@@ -1093,20 +1097,22 @@ pub fn ktx2_dfd_to_texture_format(
                 }
             },
             5 => match data_format_descriptor.texel_block_dimensions[1] {
-                4 => {
-                    if is_srgb {
-                        TextureFormat::Astc5x4RgbaUnormSrgb
+                4 => TextureFormat::Astc {
+                    block: AstcBlock::B5x4,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc5x4RgbaUnorm
-                    }
-                }
-                5 => {
-                    if is_srgb {
-                        TextureFormat::Astc5x5RgbaUnormSrgb
+                        AstcChannel::Unorm
+                    },
+                },
+                5 => TextureFormat::Astc {
+                    block: AstcBlock::B5x5,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc5x5RgbaUnorm
-                    }
-                }
+                        AstcChannel::Unorm
+                    },
+                },
                 d => {
                     return Err(TextureError::UnsupportedTextureFormat(format!(
                         "Invalid ASTC y-dimension: {}",
@@ -1115,20 +1121,22 @@ pub fn ktx2_dfd_to_texture_format(
                 }
             },
             6 => match data_format_descriptor.texel_block_dimensions[1] {
-                5 => {
-                    if is_srgb {
-                        TextureFormat::Astc6x5RgbaUnormSrgb
+                5 => TextureFormat::Astc {
+                    block: AstcBlock::B6x5,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc6x5RgbaUnorm
-                    }
-                }
-                6 => {
-                    if is_srgb {
-                        TextureFormat::Astc6x6RgbaUnormSrgb
+                        AstcChannel::Unorm
+                    },
+                },
+                6 => TextureFormat::Astc {
+                    block: AstcBlock::B6x6,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc6x6RgbaUnorm
-                    }
-                }
+                        AstcChannel::Unorm
+                    },
+                },
                 d => {
                     return Err(TextureError::UnsupportedTextureFormat(format!(
                         "Invalid ASTC y-dimension: {}",
@@ -1137,27 +1145,30 @@ pub fn ktx2_dfd_to_texture_format(
                 }
             },
             8 => match data_format_descriptor.texel_block_dimensions[1] {
-                5 => {
-                    if is_srgb {
-                        TextureFormat::Astc8x5RgbaUnormSrgb
+                5 => TextureFormat::Astc {
+                    block: AstcBlock::B8x5,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc8x5RgbaUnorm
-                    }
-                }
-                6 => {
-                    if is_srgb {
-                        TextureFormat::Astc8x6RgbaUnormSrgb
+                        AstcChannel::Unorm
+                    },
+                },
+                6 => TextureFormat::Astc {
+                    block: AstcBlock::B8x6,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc8x6RgbaUnorm
-                    }
-                }
-                8 => {
-                    if is_srgb {
-                        TextureFormat::Astc8x8RgbaUnormSrgb
+                        AstcChannel::Unorm
+                    },
+                },
+                8 => TextureFormat::Astc {
+                    block: AstcBlock::B8x8,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc8x8RgbaUnorm
-                    }
-                }
+                        AstcChannel::Unorm
+                    },
+                },
                 d => {
                     return Err(TextureError::UnsupportedTextureFormat(format!(
                         "Invalid ASTC y-dimension: {}",
@@ -1166,34 +1177,38 @@ pub fn ktx2_dfd_to_texture_format(
                 }
             },
             10 => match data_format_descriptor.texel_block_dimensions[1] {
-                5 => {
-                    if is_srgb {
-                        TextureFormat::Astc10x5RgbaUnormSrgb
+                5 => TextureFormat::Astc {
+                    block: AstcBlock::B10x5,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc10x5RgbaUnorm
-                    }
-                }
-                6 => {
-                    if is_srgb {
-                        TextureFormat::Astc10x6RgbaUnormSrgb
+                        AstcChannel::Unorm
+                    },
+                },
+                6 => TextureFormat::Astc {
+                    block: AstcBlock::B10x6,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc10x6RgbaUnorm
-                    }
-                }
-                8 => {
-                    if is_srgb {
-                        TextureFormat::Astc10x8RgbaUnormSrgb
+                        AstcChannel::Unorm
+                    },
+                },
+                8 => TextureFormat::Astc {
+                    block: AstcBlock::B10x8,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc10x8RgbaUnorm
-                    }
-                }
-                10 => {
-                    if is_srgb {
-                        TextureFormat::Astc10x10RgbaUnormSrgb
+                        AstcChannel::Unorm
+                    },
+                },
+                10 => TextureFormat::Astc {
+                    block: AstcBlock::B10x10,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc10x10RgbaUnorm
-                    }
-                }
+                        AstcChannel::Unorm
+                    },
+                },
                 d => {
                     return Err(TextureError::UnsupportedTextureFormat(format!(
                         "Invalid ASTC y-dimension: {}",
@@ -1202,20 +1217,22 @@ pub fn ktx2_dfd_to_texture_format(
                 }
             },
             12 => match data_format_descriptor.texel_block_dimensions[1] {
-                10 => {
-                    if is_srgb {
-                        TextureFormat::Astc12x10RgbaUnormSrgb
+                10 => TextureFormat::Astc {
+                    block: AstcBlock::B12x10,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc12x10RgbaUnorm
-                    }
-                }
-                12 => {
-                    if is_srgb {
-                        TextureFormat::Astc12x12RgbaUnormSrgb
+                        AstcChannel::Unorm
+                    },
+                },
+                12 => TextureFormat::Astc {
+                    block: AstcBlock::B12x12,
+                    channel: if is_srgb {
+                        AstcChannel::UnormSrgb
                     } else {
-                        TextureFormat::Astc12x12RgbaUnorm
-                    }
-                }
+                        AstcChannel::Unorm
+                    },
+                },
                 d => {
                     return Err(TextureError::UnsupportedTextureFormat(format!(
                         "Invalid ASTC y-dimension: {}",
@@ -1519,198 +1536,366 @@ pub fn ktx2_format_to_texture_format(
         ktx2::Format::EAC_R11G11_SNORM_BLOCK => TextureFormat::EacRg11Snorm,
         ktx2::Format::ASTC_4x4_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc4x4RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B4x4,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc4x4RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B4x4,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_4x4_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc4x4RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B4x4,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc4x4RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B4x4,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_5x4_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc5x4RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B5x4,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc5x4RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B5x4,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_5x4_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc5x4RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B5x4,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc5x4RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B5x4,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_5x5_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc5x5RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B5x5,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc5x5RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B5x5,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_5x5_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc5x5RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B5x5,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc5x5RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B5x5,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_6x5_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc6x5RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B6x5,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc6x5RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B6x5,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_6x5_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc6x5RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B6x5,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc6x5RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B6x5,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_6x6_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc6x6RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B6x6,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc6x6RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B6x6,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_6x6_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc6x6RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B6x6,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc6x6RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B6x6,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_8x5_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc8x5RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x5,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc8x5RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x5,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_8x5_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc8x5RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x5,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc8x5RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x5,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_8x6_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc8x6RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x6,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc8x6RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x6,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_8x6_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc8x6RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x6,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc8x6RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x6,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_8x8_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc8x8RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x8,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc8x8RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x8,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_8x8_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc8x8RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x8,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc8x8RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B8x8,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_10x5_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc10x5RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x5,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc10x5RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x5,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_10x5_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc10x5RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x5,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc10x5RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x5,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_10x6_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc10x6RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x6,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc10x6RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x6,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_10x6_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc10x6RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x6,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc10x6RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x6,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_10x8_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc10x8RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x8,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc10x8RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x8,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_10x8_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc10x8RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x8,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc10x8RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x8,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_10x10_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc10x10RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x10,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc10x10RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x10,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_10x10_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc10x10RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x10,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc10x10RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B10x10,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_12x10_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc12x10RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B12x10,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc12x10RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B12x10,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_12x10_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc12x10RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B12x10,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc12x10RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B12x10,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_12x12_UNORM_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc12x12RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B12x12,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc12x12RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B12x12,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         ktx2::Format::ASTC_12x12_SRGB_BLOCK => {
             if is_srgb {
-                TextureFormat::Astc12x12RgbaUnormSrgb
+                TextureFormat::Astc {
+                    block: AstcBlock::B12x12,
+                    channel: AstcChannel::UnormSrgb,
+                }
             } else {
-                TextureFormat::Astc12x12RgbaUnorm
+                TextureFormat::Astc {
+                    block: AstcBlock::B12x12,
+                    channel: AstcChannel::Unorm,
+                }
             }
         }
         _ => {
