@@ -79,6 +79,11 @@ pub fn extract_msaa(mut commands: Commands, msaa: Res<Msaa>) {
 pub struct ExtractedView {
     pub projection: Mat4,
     pub transform: GlobalTransform,
+    // NOTE: This is here for cases where an exact view_projection matrix is needed. For example,
+    // cascaded shadow maps will produce unstable visual artifacts if the view projection matrices
+    // of the shadow cascades are not exactly and precisely calculated. If this is None then the
+    // matrix is calculated as usual.
+    pub view_projection: Option<Mat4>,
     pub width: u32,
     pub height: u32,
     pub near: f32,
@@ -146,21 +151,26 @@ fn prepare_view_uniforms(
     views: Query<(Entity, &ExtractedView)>,
 ) {
     view_uniforms.uniforms.clear();
-    for (entity, camera) in views.iter() {
-        let projection = camera.projection;
-        let view = camera.transform.compute_matrix();
+    for (entity, extracted_view) in views.iter() {
+        let projection = extracted_view.projection;
+        let view = extracted_view.transform.compute_matrix();
         let inverse_view = view.inverse();
+        let view_proj = if let Some(view_projection) = extracted_view.view_projection {
+            view_projection
+        } else {
+            projection * inverse_view
+        };
         let view_uniforms = ViewUniformOffset {
             offset: view_uniforms.uniforms.push(ViewUniform {
-                view_proj: projection * inverse_view,
+                view_proj,
                 view,
                 inverse_view,
                 projection,
-                world_position: camera.transform.translation,
-                near: camera.near,
-                far: camera.far,
-                width: camera.width as f32,
-                height: camera.height as f32,
+                world_position: extracted_view.transform.translation,
+                near: extracted_view.near,
+                far: extracted_view.far,
+                width: extracted_view.width as f32,
+                height: extracted_view.height as f32,
             }),
         };
 

@@ -14,7 +14,7 @@ use bevy_transform::TransformSystem;
 use crate::{
     camera::{Camera, CameraProjection, OrthographicProjection, PerspectiveProjection},
     mesh::Mesh,
-    primitives::{Aabb, Frustum, Sphere},
+    primitives::{Aabb, Frustum, FrustumPlaneMask, Sphere},
 };
 
 /// User indication of whether an entity is visible
@@ -192,11 +192,11 @@ pub fn check_visibility(
                     radius: (Vec3A::from(transform.scale) * model_aabb.half_extents).length(),
                 };
                 // Do quick sphere-based frustum culling
-                if !frustum.intersects_sphere(&model_sphere, false) {
+                if !frustum.intersects_sphere(&model_sphere, FrustumPlaneMask::NOT_FAR) {
                     continue;
                 }
                 // If we have an aabb, do aabb-based frustum culling
-                if !frustum.intersects_obb(model_aabb, &model, false) {
+                if !frustum.intersects_obb(model_aabb, &model, FrustumPlaneMask::NOT_FAR) {
                     continue;
                 }
             }

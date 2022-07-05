@@ -25,14 +25,28 @@ struct PointLight {
 
 let POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32 = 1u;
 
-struct DirectionalLight {
+struct DirectionalCascade {
     view_projection: mat4x4<f32>;
+    texel_size: vec4<f32>;
+};
+
+// NOTE: Keep in sync with light.rs!
+let MAX_CASCADES_PER_LIGHT: u32 = 8u;
+
+struct DirectionalLight {
+    // NOTE: there array sizes must be kept in sync with the constants defined bevy_pbr2/src/render/light.rs
+    cascades: array<DirectionalCascade, 8u>; // MAX_CASCADES_PER_LIGHT
+    // NOTE: contains the far view z bounds of each cascade
+    cascades_far_bounds: array<vec4<f32>, 2u>; // (MAX_CASCADES_PER_LIGHT + 3) / 4
     color: vec4<f32>;
     direction_to_light: vec3<f32>;
     // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
     flags: u32;
     shadow_depth_bias: f32;
     shadow_normal_bias: f32;
+    n_cascades: u32;
+    // The proportion by which adjacent cascades overlap
+    cascade_overlap_proportion: f32;
 };
 
 let DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32 = 1u;

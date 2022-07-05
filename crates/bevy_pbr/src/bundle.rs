@@ -1,10 +1,12 @@
-use crate::{DirectionalLight, PointLight, SpecializedMaterial, StandardMaterial};
+use crate::{
+    Cascades, CascadesConfig, DirectionalLight, PointLight, SpecializedMaterial, StandardMaterial,
+};
 use bevy_asset::Handle;
 use bevy_ecs::{bundle::Bundle, component::Component, reflect::ReflectComponent};
 use bevy_reflect::Reflect;
 use bevy_render::{
     mesh::Mesh,
-    primitives::{CubemapFrusta, Frustum},
+    primitives::{CascadeFrusta, CubemapFrusta, Frustum},
     view::{ComputedVisibility, Visibility, VisibleEntities},
 };
 use bevy_transform::components::{GlobalTransform, Transform};
@@ -75,12 +77,55 @@ pub struct PointLightBundle {
     pub visibility: Visibility,
 }
 
+#[derive(Clone, Component, Debug)]
+pub struct CascadesVisibleEntities {
+    data: Vec<VisibleEntities>,
+}
+
+impl Default for CascadesVisibleEntities {
+    fn default() -> Self {
+        Self::with_capacity(CascadesConfig::default().len())
+    }
+}
+
+impl CascadesVisibleEntities {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            data: vec![Default::default(); capacity],
+        }
+    }
+
+    pub fn clear(&mut self) {
+        for visible_entities in self.data.iter_mut() {
+            visible_entities.entities.clear();
+        }
+    }
+
+    pub fn get(&self, i: usize) -> &VisibleEntities {
+        &self.data[i]
+    }
+
+    pub fn get_mut(&mut self, i: usize) -> &mut VisibleEntities {
+        &mut self.data[i]
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &VisibleEntities> {
+        self.data.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut VisibleEntities> {
+        self.data.iter_mut()
+    }
+}
+
 /// A component bundle for [`DirectionalLight`] entities.
 #[derive(Debug, Bundle, Default)]
 pub struct DirectionalLightBundle {
     pub directional_light: DirectionalLight,
-    pub frustum: Frustum,
-    pub visible_entities: VisibleEntities,
+    pub cascades_config: CascadesConfig,
+    pub cascades: Cascades,
+    pub cascade_frusta: CascadeFrusta,
+    pub cascades_visible_entities: CascadesVisibleEntities,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
     /// Enables or disables the light

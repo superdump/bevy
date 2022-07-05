@@ -1,7 +1,8 @@
 use crate::{
-    point_light_order, AmbientLight, Clusters, CubemapVisibleEntities, DirectionalLight,
-    DirectionalLightShadowMap, DrawMesh, GlobalVisiblePointLights, MeshPipeline, NotShadowCaster,
-    PointLight, PointLightShadowMap, SetMeshBindGroup, VisiblePointLights, SHADOW_SHADER_HANDLE,
+    point_light_order, AmbientLight, Cascades, CascadesConfig, CascadesVisibleEntities, Clusters,
+    CubemapVisibleEntities, DirectionalLight, DirectionalLightShadowMap, DrawMesh,
+    GlobalVisiblePointLights, MeshPipeline, NotShadowCaster, PointLight, PointLightShadowMap,
+    SetMeshBindGroup, VisiblePointLights, SHADOW_SHADER_HANDLE,
 };
 use bevy_asset::Handle;
 use bevy_core_pipeline::Transparent3d;
@@ -69,13 +70,9 @@ pub type ExtractedPointLightShadowMap = PointLightShadowMap;
 pub struct ExtractedDirectionalLight {
     color: Color,
     illuminance: f32,
-    direction: Vec3,
-    projection: Mat4,
     shadows_enabled: bool,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
-    near: f32,
-    far: f32,
 }
 
 pub type ExtractedDirectionalLightShadowMap = DirectionalLightShadowMap;
@@ -182,15 +179,28 @@ bitflags::bitflags! {
     }
 }
 
-#[repr(C)]
 #[derive(Copy, Clone, AsStd140, Default, Debug)]
-pub struct GpuDirectionalLight {
+#[repr(C)]
+pub struct GpuDirectionalCascade {
     view_projection: Mat4,
+    texel_size: Vec4,
+}
+
+pub type GpuDirectionalCascadeBounds = [Vec4; (MAX_CASCADES_PER_LIGHT + 3) / 4];
+
+#[derive(Copy, Clone, AsStd140, Default, Debug)]
+#[repr(C)]
+pub struct GpuDirectionalLight {
+    // NOTE: Contains the far view z bound of each cascade
+    cascades: [GpuDirectionalCascade; MAX_CASCADES_PER_LIGHT],
+    cascades_far_bounds: GpuDirectionalCascadeBounds,
     color: Vec4,
     dir_to_light: Vec3,
     flags: u32,
     shadow_depth_bias: f32,
     shadow_normal_bias: f32,
+    n_cascades: u32,
+    cascades_overlap_proportion: f32,
 }
 
 // NOTE: These must match the bit flags in bevy_pbr2/src/render/pbr.frag!
@@ -221,7 +231,8 @@ pub struct GpuLights {
 // NOTE: this must be kept in sync with the same constants in pbr.frag
 pub const MAX_UNIFORM_BUFFER_POINT_LIGHTS: usize = 256;
 pub const MAX_DIRECTIONAL_LIGHTS: usize = 1;
-pub const DIRECTIONAL_SHADOW_LAYERS: u32 = MAX_DIRECTIONAL_LIGHTS as u32;
+pub const MAX_CASCADES_PER_LIGHT: usize = 8;
+pub const DIRECTIONAL_SHADOW_LAYERS: u32 = (MAX_CASCADES_PER_LIGHT * MAX_DIRECTIONAL_LIGHTS) as u32;
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
 pub struct ShadowPipeline {
@@ -279,7 +290,7 @@ impl FromWorld for ShadowPipeline {
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 mipmap_filter: FilterMode::Nearest,
-                compare: Some(CompareFunction::GreaterEqual),
+                compare: Some(CompareFunction::LessEqual),
                 ..Default::default()
             }),
         }
@@ -290,6 +301,7 @@ bitflags::bitflags! {
     #[repr(transparent)]
     pub struct ShadowPipelineKey: u32 {
         const NONE               = 0;
+        const DIRECTIONAL        = (1 << 0);
         const PRIMITIVE_TOPOLOGY_RESERVED_BITS = ShadowPipelineKey::PRIMITIVE_TOPOLOGY_MASK_BITS << ShadowPipelineKey::PRIMITIVE_TOPOLOGY_SHIFT_BITS;
     }
 }
@@ -343,6 +355,29 @@ impl SpecializedMeshPipeline for ShadowPipeline {
             bind_group_layout.push(self.mesh_layout.clone());
         }
 
+        let (depth_compare, bias, unclipped_depth) = if key.contains(ShadowPipelineKey::DIRECTIONAL)
+        {
+            (
+                CompareFunction::LessEqual,
+                DepthBiasState {
+                    constant: 2,
+                    slope_scale: 3.0,
+                    clamp: 1.0 / 128.0,
+                },
+                true,
+            )
+        } else {
+            (
+                CompareFunction::GreaterEqual,
+                DepthBiasState {
+                    constant: 0,
+                    slope_scale: 0.0,
+                    clamp: 0.0,
+                },
+                false,
+            )
+        };
+
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
 
         Ok(RenderPipelineDescriptor {
@@ -366,18 +401,14 @@ impl SpecializedMeshPipeline for ShadowPipeline {
             depth_stencil: Some(DepthStencilState {
                 format: SHADOW_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: CompareFunction::GreaterEqual,
+                depth_compare,
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
                     read_mask: 0,
                     write_mask: 0,
                 },
-                bias: DepthBiasState {
-                    constant: 0,
-                    slope_scale: 0.0,
-                    clamp: 0.0,
-                },
+                bias,
             }),
             multisample: MultisampleState::default(),
             label: Some("shadow_pipeline".into()),
@@ -425,8 +456,9 @@ pub fn extract_lights(
     mut directional_lights: Query<(
         Entity,
         &DirectionalLight,
-        &mut VisibleEntities,
-        &GlobalTransform,
+        &CascadesConfig,
+        &Cascades,
+        &mut CascadesVisibleEntities,
         &Visibility,
     )>,
     mut previous_point_lights_len: Local<usize>,
@@ -481,41 +513,31 @@ pub fn extract_lights(
     *previous_point_lights_len = point_lights_values.len();
     commands.insert_or_spawn_batch(point_lights_values);
 
-    for (entity, directional_light, visible_entities, transform, visibility) in
-        directional_lights.iter_mut()
+    for (
+        entity,
+        directional_light,
+        cascades_config,
+        cascades,
+        cascades_visible_entities,
+        visibility,
+    ) in directional_lights.iter_mut()
     {
         if !visibility.is_visible {
             continue;
         }
 
-        // Calulate the directional light shadow map texel size using the largest x,y dimension of
-        // the orthographic projection divided by the shadow map resolution
-        // NOTE: When using various PCF kernel sizes, this will need to be adjusted, according to:
-        // https://catlikecoding.com/unity/tutorials/custom-srp/directional-shadows/
-        let largest_dimension = (directional_light.shadow_projection.right
-            - directional_light.shadow_projection.left)
-            .max(
-                directional_light.shadow_projection.top
-                    - directional_light.shadow_projection.bottom,
-            );
-        let directional_light_texel_size =
-            largest_dimension / directional_light_shadow_map.size as f32;
-        let render_visible_entities = std::mem::take(visible_entities.into_inner());
+        let render_visible_entities = std::mem::take(cascades_visible_entities.into_inner());
         commands.get_or_spawn(entity).insert_bundle((
             ExtractedDirectionalLight {
                 color: directional_light.color,
                 illuminance: directional_light.illuminance,
-                direction: transform.forward(),
-                projection: directional_light.shadow_projection.get_projection_matrix(),
                 shadows_enabled: directional_light.shadows_enabled,
                 shadow_depth_bias: directional_light.shadow_depth_bias,
                 // The factor of SQRT_2 is for the worst-case diagonal offset
-                shadow_normal_bias: directional_light.shadow_normal_bias
-                    * directional_light_texel_size
-                    * std::f32::consts::SQRT_2,
-                near: directional_light.shadow_projection.near,
-                far: directional_light.shadow_projection.far,
+                shadow_normal_bias: directional_light.shadow_normal_bias * std::f32::consts::SQRT_2,
             },
+            cascades_config.clone(),
+            cascades.clone(),
             render_visible_entities,
         ));
     }
@@ -581,6 +603,7 @@ fn face_index_to_name(face_index: usize) -> &'static str {
 
 #[derive(Component)]
 pub struct ShadowView {
+    pub is_directional: bool,
     pub depth_texture_view: TextureView,
     pub pass_name: String,
 }
@@ -641,12 +664,14 @@ pub struct LightMeta {
 pub enum LightEntity {
     Directional {
         light_entity: Entity,
+        cascade_index: usize,
     },
     Point {
         light_entity: Entity,
         face_index: usize,
     },
 }
+
 pub fn calculate_cluster_factors(
     near: f32,
     far: f32,
@@ -680,7 +705,12 @@ pub fn prepare_lights(
     point_light_shadow_map: Res<ExtractedPointLightShadowMap>,
     directional_light_shadow_map: Res<ExtractedDirectionalLightShadowMap>,
     point_lights: Query<(Entity, &ExtractedPointLight)>,
-    directional_lights: Query<(Entity, &ExtractedDirectionalLight)>,
+    directional_lights: Query<(
+        Entity,
+        &ExtractedDirectionalLight,
+        &CascadesConfig,
+        &Cascades,
+    )>,
 ) {
     light_meta.view_gpu_lights.clear();
 
@@ -849,6 +879,7 @@ pub fn prepare_lights(
                     .spawn()
                     .insert_bundle((
                         ShadowView {
+                            is_directional: false,
                             depth_texture_view,
                             pass_name: format!(
                                 "shadow pass point light {} {}",
@@ -861,6 +892,7 @@ pub fn prepare_lights(
                             height: point_light_shadow_map.size as u32,
                             transform: view_translation * *view_rotation,
                             projection: cube_face_projection,
+                            view_projection: None,
                             near: POINT_LIGHT_NEAR_Z,
                             far: light.range,
                         },
@@ -875,14 +907,11 @@ pub fn prepare_lights(
             }
         }
 
-        for (i, (light_entity, light)) in directional_lights
+        for (light_index, (light_entity, light, cascades_config, cascades)) in directional_lights
             .iter()
             .enumerate()
             .take(MAX_DIRECTIONAL_LIGHTS)
         {
-            // direction is negated to be ready for N.L
-            let dir_to_light = -light.direction;
-
             // convert from illuminance (lux) to candelas
             //
             // exposure is hard coded at the moment but should be replaced
@@ -896,64 +925,95 @@ pub fn prepare_lights(
             let exposure = 1.0 / (f32::powf(2.0, ev100) * 1.2);
             let intensity = light.illuminance * exposure;
 
-            // NOTE: A directional light seems to have to have an eye position on the line along the direction of the light
-            // through the world origin. I (Rob Swain) do not yet understand why it cannot be translated away from this.
-            let view = Mat4::look_at_rh(Vec3::ZERO, light.direction, Vec3::Y);
-            // NOTE: This orthographic projection defines the volume within which shadows from a directional light can be cast
-            let projection = light.projection;
-
             let mut flags = DirectionalLightFlags::NONE;
             if light.shadows_enabled {
                 flags |= DirectionalLightFlags::SHADOWS_ENABLED;
             }
 
-            gpu_lights.directional_lights[i] = GpuDirectionalLight {
+            gpu_lights.directional_lights[light_index] = GpuDirectionalLight {
+                cascades: [GpuDirectionalCascade::default(); MAX_CASCADES_PER_LIGHT],
+                cascades_far_bounds: cascades_config.get_far_bounds(),
                 // premultiply color by intensity
                 // we don't use the alpha at all, so no reason to multiply only [0..3]
                 color: Vec4::from_slice(&light.color.as_linear_rgba_f32()) * intensity,
-                dir_to_light,
-                // NOTE: * view is correct, it should not be view.inverse() here
-                view_projection: projection * view,
+                dir_to_light: Default::default(),
                 flags: flags.bits,
                 shadow_depth_bias: light.shadow_depth_bias,
                 shadow_normal_bias: light.shadow_normal_bias,
+                n_cascades: cascades_config.cascades_far_bounds.len() as u32,
+                cascades_overlap_proportion: cascades_config.overlap_proportion,
             };
 
             if light.shadows_enabled {
-                let depth_texture_view =
-                    directional_light_depth_texture
-                        .texture
-                        .create_view(&TextureViewDescriptor {
-                            label: Some("directional_light_shadow_map_texture_view"),
+                let gpu_light = &mut gpu_lights.directional_lights[light_index];
+                for (cascade_index, (cascade_far_bound, cascade)) in cascades_config
+                    .iter()
+                    .zip(cascades.iter())
+                    .enumerate()
+                    .take(MAX_CASCADES_PER_LIGHT)
+                {
+                    let gpu_cascade = &mut gpu_light.cascades[cascade_index];
+                    // direction is negated to be ready for N.L
+                    gpu_light.dir_to_light = cascade.view_transform.z_axis.xyz().normalize();
+
+                    *gpu_cascade = GpuDirectionalCascade {
+                        view_projection: cascade.view_projection,
+                        texel_size: Vec4::splat(cascade.cascade_texel_size),
+                    };
+
+                    let depth_texture_view = directional_light_depth_texture.texture.create_view(
+                        &TextureViewDescriptor {
+                            label: Some(&format!(
+                                "directional_light_{}_shadow_map_cascade_{}_texture_view",
+                                light_index, cascade_index
+                            )),
                             format: None,
                             dimension: Some(TextureViewDimension::D2),
                             aspect: TextureAspect::All,
                             base_mip_level: 0,
                             mip_level_count: None,
-                            base_array_layer: i as u32,
+                            base_array_layer: (light_index * MAX_CASCADES_PER_LIGHT + cascade_index)
+                                as u32,
                             array_layer_count: NonZeroU32::new(1),
-                        });
+                        },
+                    );
 
-                let view_light_entity = commands
-                    .spawn()
-                    .insert_bundle((
-                        ShadowView {
-                            depth_texture_view,
-                            pass_name: format!("shadow pass directional light {}", i),
-                        },
-                        ExtractedView {
-                            width: directional_light_shadow_map.size as u32,
-                            height: directional_light_shadow_map.size as u32,
-                            transform: GlobalTransform::from_matrix(view.inverse()),
-                            projection,
-                            near: light.near,
-                            far: light.far,
-                        },
-                        RenderPhase::<Shadow>::default(),
-                        LightEntity::Directional { light_entity },
-                    ))
-                    .id();
-                view_lights.push(view_light_entity);
+                    let view_light_entity = commands
+                        .spawn()
+                        .insert_bundle((
+                            ShadowView {
+                                is_directional: true,
+                                depth_texture_view,
+                                pass_name: format!(
+                                    "shadow pass directional light {} cascade {}",
+                                    light_index, cascade_index
+                                ),
+                            },
+                            ExtractedView {
+                                width: directional_light_shadow_map.size as u32,
+                                height: directional_light_shadow_map.size as u32,
+                                transform: GlobalTransform::from_matrix(cascade.view_transform),
+                                projection: cascade.projection,
+                                // NOTE: This view projection matrix is very important for shadow stability!
+                                view_projection: Some(cascade.view_projection),
+                                near: if cascade_index > 0 {
+                                    (1.0 - cascades_config.overlap_proportion)
+                                        * cascades_config.cascades_far_bounds[cascade_index - 1]
+                                } else {
+                                    0.0
+                                },
+                                far: *cascade_far_bound,
+                            },
+                            RenderPhase::<Shadow>::default(),
+                            LightEntity::Directional {
+                                light_entity,
+                                cascade_index,
+                            },
+                        ))
+                        .id();
+
+                    view_lights.push(view_light_entity);
+                }
             }
         }
         let point_light_depth_texture_view =
@@ -1309,7 +1369,7 @@ pub fn queue_shadows(
     view_lights: Query<&ViewLightEntities>,
     mut view_light_shadow_phases: Query<(&LightEntity, &mut RenderPhase<Shadow>)>,
     point_light_entities: Query<&CubemapVisibleEntities, With<ExtractedPointLight>>,
-    directional_light_entities: Query<&VisibleEntities, With<ExtractedDirectionalLight>>,
+    directional_light_entities: Query<&CascadesVisibleEntities, With<ExtractedDirectionalLight>>,
 ) {
     for view_lights in view_lights.iter() {
         let draw_shadow_mesh = shadow_draw_functions
@@ -1320,9 +1380,13 @@ pub fn queue_shadows(
             let (light_entity, mut shadow_phase) =
                 view_light_shadow_phases.get_mut(view_light_entity).unwrap();
             let visible_entities = match light_entity {
-                LightEntity::Directional { light_entity } => directional_light_entities
+                LightEntity::Directional {
+                    light_entity,
+                    cascade_index,
+                } => directional_light_entities
                     .get(*light_entity)
-                    .expect("Failed to get directional light visible entities"),
+                    .expect("Failed to get directional light visible entities")
+                    .get(*cascade_index),
                 LightEntity::Point {
                     light_entity,
                     face_index,
@@ -1336,8 +1400,14 @@ pub fn queue_shadows(
             for entity in visible_entities.iter().copied() {
                 if let Ok(mesh_handle) = casting_meshes.get(entity) {
                     if let Some(mesh) = render_meshes.get(mesh_handle) {
-                        let key =
+                        let mut key =
                             ShadowPipelineKey::from_primitive_topology(mesh.primitive_topology);
+                        let sort_key = if matches!(light_entity, LightEntity::Directional { .. }) {
+                            key |= ShadowPipelineKey::DIRECTIONAL;
+                            0
+                        } else {
+                            1
+                        };
                         let pipeline_id = pipelines.specialize(
                             &mut pipeline_cache,
                             &shadow_pipeline,
@@ -1357,7 +1427,7 @@ pub fn queue_shadows(
                             draw_function: draw_shadow_mesh,
                             pipeline: pipeline_id,
                             entity,
-                            distance: 0.0, // TODO: sort back-to-front
+                            sort_key,
                         });
                     }
                 }
@@ -1367,18 +1437,18 @@ pub fn queue_shadows(
 }
 
 pub struct Shadow {
-    pub distance: f32,
+    pub sort_key: u32,
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
 }
 
 impl PhaseItem for Shadow {
-    type SortKey = FloatOrd;
+    type SortKey = u32;
 
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
-        FloatOrd(self.distance)
+        self.sort_key
     }
 
     #[inline]
@@ -1402,7 +1472,7 @@ impl CachedRenderPipelinePhaseItem for Shadow {
 
 pub struct ShadowPassNode {
     main_view_query: QueryState<&'static ViewLightEntities>,
-    view_light_query: QueryState<(&'static ShadowView, &'static RenderPhase<Shadow>)>,
+    shadow_view_query: QueryState<(&'static ShadowView, &'static RenderPhase<Shadow>)>,
 }
 
 impl ShadowPassNode {
@@ -1411,7 +1481,7 @@ impl ShadowPassNode {
     pub fn new(world: &mut World) -> Self {
         Self {
             main_view_query: QueryState::new(world),
-            view_light_query: QueryState::new(world),
+            shadow_view_query: QueryState::new(world),
         }
     }
 }
@@ -1423,7 +1493,7 @@ impl Node for ShadowPassNode {
 
     fn update(&mut self, world: &mut World) {
         self.main_view_query.update_archetypes(world);
-        self.view_light_query.update_archetypes(world);
+        self.shadow_view_query.update_archetypes(world);
     }
 
     fn run(
@@ -1435,8 +1505,8 @@ impl Node for ShadowPassNode {
         let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
         if let Ok(view_lights) = self.main_view_query.get_manual(world, view_entity) {
             for view_light_entity in view_lights.lights.iter().copied() {
-                let (view_light, shadow_phase) = self
-                    .view_light_query
+                let (shadow_view, shadow_phase) = self
+                    .shadow_view_query
                     .get_manual(world, view_light_entity)
                     .unwrap();
 
@@ -1444,13 +1514,15 @@ impl Node for ShadowPassNode {
                     continue;
                 }
 
+                // dbg!(&shadow_view.pass_name);
                 let pass_descriptor = RenderPassDescriptor {
-                    label: Some(&view_light.pass_name),
+                    label: Some(&shadow_view.pass_name),
                     color_attachments: &[],
                     depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                        view: &view_light.depth_texture_view,
+                        view: &shadow_view.depth_texture_view,
                         depth_ops: Some(Operations {
-                            load: LoadOp::Clear(0.0),
+                            // FIXME: Reverse the depth of the cascades?
+                            load: LoadOp::Clear(if shadow_view.is_directional { 1.0 } else { 0.0 }),
                             store: true,
                         }),
                         stencil_ops: None,

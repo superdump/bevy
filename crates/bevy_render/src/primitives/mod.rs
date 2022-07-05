@@ -80,6 +80,16 @@ impl Sphere {
     }
 }
 
+impl From<&Aabb> for Sphere {
+    #[inline]
+    fn from(aabb: &Aabb) -> Self {
+        Self {
+            center: aabb.center,
+            radius: aabb.half_extents.length(),
+        }
+    }
+}
+
 /// A plane defined by a unit normal and distance from the origin along the normal
 /// Any point p is in the plane if n.p + d = 0
 /// For planes defining half-spaces such as for frusta, if n.p + d > 0 then p is on
@@ -123,6 +133,23 @@ impl Plane {
     }
 }
 
+bitflags::bitflags! {
+    #[repr(transparent)]
+    pub struct FrustumPlaneMask: u32 {
+        const LEFT   = (1 << 0);
+        const RIGHT  = (1 << 1);
+        const TOP    = (1 << 2);
+        const BOTTOM = (1 << 3);
+        const NEAR   = (1 << 4);
+        const FAR    = (1 << 5);
+    }
+}
+
+impl FrustumPlaneMask {
+    pub const NOT_FAR: Self = unsafe { Self::from_bits_unchecked(0b111110) };
+    pub const NOT_NEAR: Self = unsafe { Self::from_bits_unchecked(0b111101) };
+}
+
 #[derive(Component, Clone, Copy, Debug, Default, Reflect)]
 #[reflect(Component)]
 pub struct Frustum {
@@ -158,11 +185,12 @@ impl Frustum {
     }
 
     #[inline]
-    pub fn intersects_sphere(&self, sphere: &Sphere, intersect_far: bool) -> bool {
+    pub fn intersects_sphere(&self, sphere: &Sphere, intersection_mask: FrustumPlaneMask) -> bool {
         let sphere_center = sphere.center.extend(1.0);
-        let max = if intersect_far { 6 } else { 5 };
-        for plane in &self.planes[..max] {
-            if plane.normal_d().dot(sphere_center) + sphere.radius <= 0.0 {
+        for (i, plane) in self.planes.iter().enumerate() {
+            if intersection_mask.contains(FrustumPlaneMask::from_bits_truncate((1 << i) as u32))
+                && plane.normal_d().dot(sphere_center) + sphere.radius <= 0.0
+            {
                 return false;
             }
         }
@@ -170,7 +198,12 @@ impl Frustum {
     }
 
     #[inline]
-    pub fn intersects_obb(&self, aabb: &Aabb, model_to_world: &Mat4, intersect_far: bool) -> bool {
+    pub fn intersects_obb(
+        &self,
+        aabb: &Aabb,
+        model_to_world: &Mat4,
+        intersection_mask: FrustumPlaneMask,
+    ) -> bool {
         let aabb_center_world = model_to_world.transform_point3a(aabb.center).extend(1.0);
         let axes = [
             Vec3A::from(model_to_world.x_axis),
@@ -178,8 +211,10 @@ impl Frustum {
             Vec3A::from(model_to_world.z_axis),
         ];
 
-        let max = if intersect_far { 6 } else { 5 };
-        for plane in &self.planes[..max] {
+        for (i, plane) in self.planes.iter().enumerate() {
+            if !intersection_mask.contains(FrustumPlaneMask::from_bits_truncate((1 << i) as u32)) {
+                continue;
+            }
             let p_normal = Vec3A::from(plane.normal_d());
             let relative_radius = aabb.relative_radius(&p_normal, &axes);
             if plane.normal_d().dot(aabb_center_world) + relative_radius <= 0.0 {
@@ -201,6 +236,32 @@ impl CubemapFrusta {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Frustum> {
         self.frusta.iter()
     }
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut Frustum> {
+        self.frusta.iter_mut()
+    }
+}
+
+#[derive(Component, Debug, Default)]
+pub struct CascadeFrusta {
+    pub frusta: Vec<Frustum>,
+}
+
+impl CascadeFrusta {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            frusta: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn reserve_and_clear(&mut self, capacity: usize) {
+        self.frusta.resize(capacity, Default::default());
+        self.frusta.clear();
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Frustum> {
+        self.frusta.iter()
+    }
+
     pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut Frustum> {
         self.frusta.iter_mut()
     }
@@ -232,7 +293,7 @@ mod tests {
             center: Vec3A::new(0.9167, 0.0000, 0.0000),
             radius: 0.7500,
         };
-        assert!(!frustum.intersects_sphere(&sphere, true));
+        assert!(!frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 
     #[test]
@@ -243,7 +304,7 @@ mod tests {
             center: Vec3A::new(7.9288, 0.0000, 2.9728),
             radius: 2.0000,
         };
-        assert!(frustum.intersects_sphere(&sphere, true));
+        assert!(frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 
     // A frustum
@@ -268,7 +329,7 @@ mod tests {
             center: Vec3A::new(0.0000, 0.0000, 0.0000),
             radius: 3.0000,
         };
-        assert!(frustum.intersects_sphere(&sphere, true));
+        assert!(frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 
     #[test]
@@ -279,7 +340,7 @@ mod tests {
             center: Vec3A::new(0.0000, 0.0000, 0.0000),
             radius: 0.7000,
         };
-        assert!(frustum.intersects_sphere(&sphere, true));
+        assert!(frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 
     #[test]
@@ -290,7 +351,7 @@ mod tests {
             center: Vec3A::new(0.0000, 0.0000, 0.9695),
             radius: 0.7000,
         };
-        assert!(frustum.intersects_sphere(&sphere, true));
+        assert!(frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 
     #[test]
@@ -301,7 +362,7 @@ mod tests {
             center: Vec3A::new(1.2037, 0.0000, 0.9695),
             radius: 0.7000,
         };
-        assert!(frustum.intersects_sphere(&sphere, true));
+        assert!(frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 
     #[test]
@@ -312,7 +373,7 @@ mod tests {
             center: Vec3A::new(1.2037, -1.0988, 0.9695),
             radius: 0.7000,
         };
-        assert!(frustum.intersects_sphere(&sphere, true));
+        assert!(frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 
     #[test]
@@ -323,7 +384,7 @@ mod tests {
             center: Vec3A::new(-1.7020, 0.0000, 0.0000),
             radius: 0.7000,
         };
-        assert!(!frustum.intersects_sphere(&sphere, true));
+        assert!(!frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 
     // A long frustum.
@@ -348,7 +409,7 @@ mod tests {
             center: Vec3A::new(-4.4889, 46.9021, 0.0000),
             radius: 0.7500,
         };
-        assert!(!frustum.intersects_sphere(&sphere, true));
+        assert!(!frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 
     #[test]
@@ -359,6 +420,6 @@ mod tests {
             center: Vec3A::new(-4.9957, 0.0000, -0.7396),
             radius: 4.4094,
         };
-        assert!(frustum.intersects_sphere(&sphere, true));
+        assert!(frustum.intersects_sphere(&sphere, FrustumPlaneMask::all()));
     }
 }

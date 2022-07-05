@@ -7,10 +7,10 @@ use bevy_math::{
 };
 use bevy_reflect::prelude::*;
 use bevy_render::{
-    camera::{Camera, CameraProjection, OrthographicProjection},
+    camera::{ActiveCamera, Camera, Camera3d, PerspectiveProjection},
     color::Color,
     prelude::Image,
-    primitives::{Aabb, CubemapFrusta, Frustum, Plane, Sphere},
+    primitives::{Aabb, CascadeFrusta, CubemapFrusta, Frustum, FrustumPlaneMask, Plane, Sphere},
     render_resource::BufferBindingType,
     renderer::RenderDevice,
     view::{ComputedVisibility, RenderLayers, Visibility, VisibleEntities},
@@ -20,9 +20,9 @@ use bevy_utils::tracing::warn;
 use bevy_window::Windows;
 
 use crate::{
-    calculate_cluster_factors, CubeMapFace, CubemapVisibleEntities, ViewClusterBindings,
-    CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT, CUBE_MAP_FACES, MAX_UNIFORM_BUFFER_POINT_LIGHTS,
-    POINT_LIGHT_NEAR_Z,
+    calculate_cluster_factors, CascadesVisibleEntities, CubeMapFace, CubemapVisibleEntities,
+    GpuDirectionalCascadeBounds, ViewClusterBindings, CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT,
+    CUBE_MAP_FACES, MAX_CASCADES_PER_LIGHT, MAX_UNIFORM_BUFFER_POINT_LIGHTS, POINT_LIGHT_NEAR_Z,
 };
 
 /// A light that emits light in all directions from a central point.
@@ -121,7 +121,6 @@ pub struct DirectionalLight {
     /// Illuminance in lux
     pub illuminance: f32,
     pub shadows_enabled: bool,
-    pub shadow_projection: OrthographicProjection,
     pub shadow_depth_bias: f32,
     /// A bias applied along the direction of the fragment's surface normal. It is scaled to the
     /// shadow map's texel size so that it is automatically adjusted to the orthographic projection.
@@ -130,20 +129,10 @@ pub struct DirectionalLight {
 
 impl Default for DirectionalLight {
     fn default() -> Self {
-        let size = 100.0;
         DirectionalLight {
             color: Color::rgb(1.0, 1.0, 1.0),
             illuminance: 100000.0,
             shadows_enabled: false,
-            shadow_projection: OrthographicProjection {
-                left: -size,
-                right: size,
-                bottom: -size,
-                top: size,
-                near: -size,
-                far: size,
-                ..Default::default()
-            },
             shadow_depth_bias: Self::DEFAULT_SHADOW_DEPTH_BIAS,
             shadow_normal_bias: Self::DEFAULT_SHADOW_NORMAL_BIAS,
         }
@@ -162,10 +151,7 @@ pub struct DirectionalLightShadowMap {
 
 impl Default for DirectionalLightShadowMap {
     fn default() -> Self {
-        #[cfg(feature = "webgl")]
-        return Self { size: 2048 };
-        #[cfg(not(feature = "webgl"))]
-        return Self { size: 4096 };
+        return Self { size: 1024 };
     }
 }
 
@@ -199,6 +185,7 @@ pub struct NotShadowReceiver;
 pub enum SimulationLightSystems {
     AddClusters,
     AssignLightsToClusters,
+    UpdateDirectionalLightCascades,
     UpdateDirectionalLightFrusta,
     UpdatePointLightFrusta,
     CheckLightVisibility,
@@ -707,9 +694,9 @@ pub(crate) fn assign_lights_to_clusters(
                     radius: light.range,
                 };
 
-                let light_in_view = frusta
-                    .iter()
-                    .any(|frustum| frustum.intersects_sphere(&light_sphere, true));
+                let light_in_view = frusta.iter().any(|frustum| {
+                    frustum.intersects_sphere(&light_sphere, FrustumPlaneMask::all())
+                });
 
                 if light_in_view {
                     lights_in_view_count += 1;
@@ -794,7 +781,7 @@ pub(crate) fn assign_lights_to_clusters(
                 };
 
                 // Check if the light is within the view frustum
-                if !frustum.intersects_sphere(&light_sphere, true) {
+                if !frustum.intersects_sphere(&light_sphere, FrustumPlaneMask::all()) {
                     continue;
                 }
 
@@ -945,7 +932,7 @@ pub(crate) fn assign_lights_to_clusters(
                 };
 
                 // Check if the light is within the view frustum
-                if !frustum.intersects_sphere(&light_sphere, true) {
+                if !frustum.intersects_sphere(&light_sphere, FrustumPlaneMask::all()) {
                     continue;
                 }
 
@@ -1158,18 +1145,380 @@ fn project_to_plane_y(y_light: Sphere, y_plane: Plane, is_orthographic: bool) ->
     })
 }
 
+#[derive(Clone, Component, Debug)]
+pub struct CascadesConfig {
+    pub cascades_far_bounds: Vec<f32>,
+    pub overlap_proportion: f32,
+}
+
+impl Default for CascadesConfig {
+    fn default() -> Self {
+        CascadesConfig::new(5, 1000.0, 5.0, 0.2)
+    }
+}
+
+// Given the number of cascades, the shadow far distance, and the first far bound,
+// generate the cascade far bounds using a polynomial sum
+fn calculate_cascade_far_bounds(
+    n_cascades: usize,
+    shadow_far_distance: f32,
+    first_far_bound: f32,
+) -> Vec<f32> {
+    let mut cascades_far_bounds = Vec::with_capacity(n_cascades);
+
+    let base = (shadow_far_distance / first_far_bound).powf(1.0 / (n_cascades - 1) as f32);
+    for i in 0..n_cascades {
+        let cascade_far_bound = first_far_bound * base.powf(i as f32);
+        cascades_far_bounds.push(cascade_far_bound);
+    }
+
+    cascades_far_bounds
+}
+
+impl CascadesConfig {
+    pub fn new(
+        n_cascades: usize,
+        shadow_far_distance: f32,
+        first_far_bound: f32,
+        overlap_proportion: f32,
+    ) -> Self {
+        Self {
+            cascades_far_bounds: calculate_cascade_far_bounds(
+                n_cascades,
+                shadow_far_distance,
+                first_far_bound,
+            ),
+            overlap_proportion,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.cascades_far_bounds.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cascades_far_bounds.is_empty()
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &f32> {
+        self.cascades_far_bounds.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut f32> {
+        self.cascades_far_bounds.iter_mut()
+    }
+
+    pub fn get_far_bounds(&self) -> GpuDirectionalCascadeBounds {
+        let mut cascades_bounds = GpuDirectionalCascadeBounds::default();
+        for (cascade_index, cascade_far_bound) in self
+            .cascades_far_bounds
+            .iter()
+            .take(MAX_CASCADES_PER_LIGHT)
+            .enumerate()
+        {
+            let slice_index = cascade_index >> 2;
+            let cascade_sub_index = cascade_index & 3;
+            cascades_bounds[slice_index][cascade_sub_index] = *cascade_far_bound;
+        }
+        cascades_bounds
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Cascade {
+    pub view_transform: Mat4,
+    pub projection: Mat4,
+    pub view_projection: Mat4,
+    pub min_max_z: Vec2,
+    pub cascade_texel_size: f32,
+    pub near_plane_center: Vec3A,
+}
+
+impl Cascade {
+    fn update_projection(&mut self) {
+        self.projection.z_axis.z = 1.0 / -(self.min_max_z.y - self.min_max_z.x);
+        // NOTE: max.z is the near plane for right-handed y-up
+        self.near_plane_center.z = self.min_max_z.y;
+
+        // NOTE: Calculating the cascade_world_to_light_view results in numerical instability but
+        //       we are trying to calculate the view projection matrix which requires the inverse
+        //       view. It is assumed that the world_to_light_view matrix has orthogonal upper-left
+        //       3x3 and the translation component is zero!
+        let world_to_light_view_transpose = self.view_transform.transpose();
+        let cascade_world_to_light_view_inverse = Mat4::from_cols(
+            world_to_light_view_transpose.x_axis,
+            world_to_light_view_transpose.y_axis,
+            world_to_light_view_transpose.z_axis,
+            (-self.near_plane_center).extend(1.0),
+        );
+
+        // dbg!(&near_plane_center);
+        // let cascade_world_to_light_view = Mat4::from_cols(
+        //     world_to_light_view.x_axis,
+        //     world_to_light_view.y_axis,
+        //     world_to_light_view.z_axis,
+        //     world_to_light_view * near_plane_center.extend(1.0),
+        // );
+        // self.view_transform = cascade_world_to_light_view_inverse.inverse();
+
+        // let cascade_projection = Mat4::from_cols(
+        //     Vec4::new(1.0 / cascade_diameter, 0.0, 0.0, 0.5),
+        //     Vec4::new(0.0, 1.0 / cascade_diameter, 0.0, 0.5),
+        //     Vec4::new(0.0, 0.0, 1.0 / -(max.z - min.z), 0.0),
+        //     Vec4::W,
+        // );
+        // dbg!(&cascade_projection);
+
+        // let cascade_projection = Mat4::orthographic_rh(
+        //     min.x, max.x, min.y, max.y,
+        //     // NOTE: near and far are swapped to invert the depth range from [0,1] to [1,0]
+        //     // This is for interoperability with pipelines using infinite reverse perspective projections.
+        //     min.z, max.z,
+        // );
+        // dbg!(&cascade_projection);
+        // panic!("lkjljkl");
+
+        // self.view_projection = self.projection * cascade_world_to_light_view_inverse;
+    }
+}
+
+#[derive(Clone, Component, Debug)]
+pub struct Cascades {
+    cascades: Vec<Cascade>,
+}
+
+impl Default for Cascades {
+    fn default() -> Self {
+        Cascades::with_capacity(CascadesConfig::default().len())
+    }
+}
+
+impl Cascades {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            cascades: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn reserve_and_clear(&mut self, capacity: usize) {
+        self.cascades.resize(capacity, Default::default());
+        self.cascades.clear();
+    }
+
+    pub fn push(&mut self, cascade: Cascade) {
+        self.cascades.push(cascade);
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Cascade> {
+        self.cascades.iter()
+    }
+}
+
+// NOTE: This code is very sensitive to floating point precision and instability and has followed
+//       instructions to avoid view dependence from the section on cascade shadow maps in
+//       Eric Lengyel's Foundations of Game Engine Development 2: Rendering. Be very careful when
+//       modifying this code!
+fn calculate_cascade(
+    ar: f32,
+    tan_half_fov: f32,
+    cascade_texture_size: f32,
+    world_to_light_view: Mat4,  // m_light
+    camera_to_light_view: Mat4, // l
+    z_near: f32,
+    z_far: f32,
+) -> Cascade {
+    let a = z_near * tan_half_fov;
+    let b = z_far * tan_half_fov;
+    // NOTE: These vertices are in a specific order: bottom right, top right, top left, bottom left
+    //                                               for near then for far
+    let frustum_corners = [
+        Vec3A::new(a * ar, -a, z_near),
+        Vec3A::new(a * ar, a, z_near),
+        Vec3A::new(-a * ar, a, z_near),
+        Vec3A::new(-a * ar, -a, z_near),
+        Vec3A::new(b * ar, -b, z_far),
+        Vec3A::new(b * ar, b, z_far),
+        Vec3A::new(-b * ar, b, z_far),
+        Vec3A::new(-b * ar, -b, z_far),
+    ];
+    // dbg!(&frustum_corners);
+
+    let mut min = Vec3A::splat(f32::MAX);
+    let mut max = Vec3A::splat(f32::MIN);
+    for corner_camera_view in frustum_corners {
+        let corner_light_view = Vec3A::from(camera_to_light_view * corner_camera_view.extend(1.0));
+        // dbg!(&corner_light_view);
+        min = min.min(corner_light_view);
+        max = max.max(corner_light_view);
+    }
+
+    // dbg!(&min);
+    // dbg!(&max);
+
+    // NOTE: The shadow map texture is square so width and height must be equal. Calculate the larger
+    //       dimension.
+    // let cascade_diameter = (max.x - min.x).max(max.y - min.y);
+    // NOTE: Use the larger of the frustum slice far plane diagonal and body diagonal lengths as this
+    //       will be the maximum possible projection size. Use the ceiling to get an integer which is
+    //       very important for floating point stability later. It is also important that these are
+    //       calculated using the original camera space corner positions for floating point precision
+    //       as even though the lengths using corner_light_view above should be the same, preicsion can
+    //       introduce small but significant differences.
+    // NOTE: The size remains the same unless the view frustum or cascade configuration is modified.
+    let cascade_diameter = (frustum_corners[0] - frustum_corners[6])
+        .length()
+        .max((frustum_corners[4] - frustum_corners[6]).length())
+        .ceil();
+    // dbg!(&cascade_diameter);
+    // panic!("blerp");
+
+    // NOTE: near plane is at max z as -z is forwards
+    // let near_plane_center = Vec3A::new(0.5 * (min.x + max.x), 0.5 * (min.y + max.y), max.z);
+    // NOTE: If we ensure that cascade_texture_size is a power of 2, then as we made cascade_diameter an
+    //       integer, cascade_texel_size is then an integer multiple of a power of 2 and can be
+    //       exactly represented in a floating point value.
+    let cascade_texel_size = cascade_diameter / cascade_texture_size;
+    // NOTE: For shadow stability it is very important that the near_plane_center is at integer
+    //       multiples of the texel size to be exactly representable in a floating point value.
+    let near_plane_center = Vec3A::new(
+        (0.5 * (min.x + max.x) / cascade_texel_size).floor() * cascade_texel_size,
+        (0.5 * (min.y + max.y) / cascade_texel_size).floor() * cascade_texel_size,
+        // NOTE: max.z is the near plane for right-handed y-up
+        max.z,
+    );
+
+    // NOTE: Calculating the cascade_world_to_light_view results in numerical instability but
+    //       we are trying to calculate the view projection matrix which requires the inverse
+    //       view. It is assumed that the world_to_light_view matrix has orthogonal upper-left
+    //       3x3 and the translation component is zero!
+    let world_to_light_view_transpose = world_to_light_view.transpose();
+    let cascade_world_to_light_view_inverse = Mat4::from_cols(
+        world_to_light_view_transpose.x_axis,
+        world_to_light_view_transpose.y_axis,
+        world_to_light_view_transpose.z_axis,
+        (-near_plane_center).extend(1.0),
+    );
+
+    // dbg!(&near_plane_center);
+    let cascade_world_to_light_view_npc = Mat4::from_cols(
+        world_to_light_view.x_axis,
+        world_to_light_view.y_axis,
+        world_to_light_view.z_axis,
+        near_plane_center.extend(1.0),
+    );
+    let cascade_world_to_light_view = cascade_world_to_light_view_inverse.inverse();
+    println!(
+        "inv: {}\nnpc: {}",
+        cascade_world_to_light_view, cascade_world_to_light_view_npc
+    );
+
+    // NOTE: The projection is simplified because cascade_world_to_light_view translates to
+    //       the center of the near plane
+    let cascade_projection = Mat4::from_diagonal(Vec4::new(
+        2.0 / cascade_diameter,
+        // 2.0 / (max.x - min.x),
+        2.0 / cascade_diameter,
+        // 2.0 / (max.y - min.y),
+        // FIXME: This needs to be flipped in the shader so that clip.z = 1.0 - clip.z
+        1.0 / -(max.z - min.z),
+        1.0,
+    ));
+    // let cascade_projection = Mat4::from_cols(
+    //     Vec4::new(1.0 / cascade_diameter, 0.0, 0.0, 0.5),
+    //     Vec4::new(0.0, 1.0 / cascade_diameter, 0.0, 0.5),
+    //     Vec4::new(0.0, 0.0, 1.0 / -(max.z - min.z), 0.0),
+    //     Vec4::W,
+    // );
+    // dbg!(&cascade_projection);
+
+    // let cascade_projection = Mat4::orthographic_rh(
+    //     min.x, max.x, min.y, max.y,
+    //     // NOTE: near and far are swapped to invert the depth range from [0,1] to [1,0]
+    //     // This is for interoperability with pipelines using infinite reverse perspective projections.
+    //     min.z, max.z,
+    // );
+    // dbg!(&cascade_projection);
+    // panic!("lkjljkl");
+
+    let cascade_view_projection = cascade_projection * cascade_world_to_light_view_inverse;
+
+    Cascade {
+        view_transform: cascade_world_to_light_view,
+        projection: cascade_projection,
+        view_projection: cascade_view_projection,
+        min_max_z: Vec2::new(min.z, max.z),
+        cascade_texel_size,
+        near_plane_center,
+    }
+}
+
+pub fn update_directional_light_cascades(
+    active_3d: Res<ActiveCamera<Camera3d>>,
+    directional_light_shadow_map: Res<DirectionalLightShadowMap>,
+    views: Query<(&GlobalTransform, &PerspectiveProjection), With<Camera3d>>,
+    mut lights: Query<(
+        &GlobalTransform,
+        &DirectionalLight,
+        &CascadesConfig,
+        &mut Cascades,
+    )>,
+) {
+    if let Some(camera_entity) = active_3d.get() {
+        if let Ok((camera_transform, camera_projection)) = views.get(camera_entity) {
+            let ar = camera_projection.aspect_ratio;
+            let tan_half_fov = (0.5 * camera_projection.fov).tan();
+            let camera_view = camera_transform.compute_matrix();
+            for (transform, directional_light, cascades_config, mut cascades) in lights.iter_mut() {
+                if !directional_light.shadows_enabled {
+                    continue;
+                }
+
+                // NOTE: It is very important for numerical stability and so visual stability of the shadows
+                //       that the world_to_light_view has orthogonal upper-left 3x3 and the translation
+                //       component is zero! As such, only use the rotation.
+                let world_to_light_view = Mat4::from_quat(transform.rotation);
+                let camera_to_light_view = world_to_light_view.inverse() * camera_view;
+
+                cascades.reserve_and_clear(cascades_config.len());
+                for (i, cascade_far_bound) in cascades_config.iter().copied().enumerate() {
+                    let cascade = calculate_cascade(
+                        ar,
+                        tan_half_fov,
+                        directional_light_shadow_map.size as f32,
+                        world_to_light_view,
+                        camera_to_light_view,
+                        // NOTE: -z is in front of the camera so we negate the cascade z bounds
+                        if i > 0 {
+                            (1.0 - cascades_config.overlap_proportion)
+                                * -cascades_config.cascades_far_bounds[i - 1]
+                        } else {
+                            0.0
+                        },
+                        -cascade_far_bound,
+                    );
+                    cascades.push(cascade);
+                }
+                // panic!("blerp");
+            }
+        }
+    }
+}
+
 pub fn update_directional_light_frusta(
     mut views: Query<
         (
-            &GlobalTransform,
             &DirectionalLight,
-            &mut Frustum,
+            &CascadesConfig,
+            &Cascades,
+            &mut CascadeFrusta,
             &Visibility,
         ),
         Or<(Changed<GlobalTransform>, Changed<DirectionalLight>)>,
     >,
 ) {
-    for (transform, directional_light, mut frustum, visibility) in views.iter_mut() {
+    for (directional_light, cascades_config, cascades, mut cascade_frusta, visibility) in
+        views.iter_mut()
+    {
         // The frustum is used for culling meshes to the light for shadow mapping
         // so if shadow mapping is disabled for this light, then the frustum is
         // not needed.
@@ -1177,14 +1526,22 @@ pub fn update_directional_light_frusta(
             continue;
         }
 
-        let view_projection = directional_light.shadow_projection.get_projection_matrix()
-            * transform.compute_matrix().inverse();
-        *frustum = Frustum::from_view_projection(
-            &view_projection,
-            &transform.translation,
-            &transform.back(),
-            directional_light.shadow_projection.far(),
-        );
+        cascade_frusta.reserve_and_clear(cascades_config.len());
+        for (cascade, cascade_config) in cascades.iter().zip(cascades_config.iter()) {
+            // dbg!(&view_transform.w_axis);
+            // dbg!(&view_transform.z_axis);
+            // dbg!(cascade_config.y);
+            // dbg!(&cascade);
+            let frustum = Frustum::from_view_projection(
+                &cascade.view_projection,
+                &cascade.view_transform.w_axis.xyz(),
+                &cascade.view_transform.z_axis.xyz(),
+                *cascade_config,
+            );
+            // dbg!(&frustum);
+            cascade_frusta.frusta.push(frustum);
+        }
+        // panic!("blerp");
     }
 }
 
@@ -1244,8 +1601,9 @@ pub fn check_light_mesh_visibility(
     )>,
     mut directional_lights: Query<(
         &DirectionalLight,
-        &Frustum,
-        &mut VisibleEntities,
+        &CascadeFrusta,
+        &mut Cascades,
+        &mut CascadesVisibleEntities,
         Option<&RenderLayers>,
         &Visibility,
     )>,
@@ -1262,10 +1620,16 @@ pub fn check_light_mesh_visibility(
     >,
 ) {
     // Directonal lights
-    for (directional_light, frustum, mut visible_entities, maybe_view_mask, visibility) in
-        directional_lights.iter_mut()
+    for (
+        directional_light,
+        cascade_frusta,
+        mut cascades,
+        mut cascades_visible_entities,
+        maybe_view_mask,
+        visibility,
+    ) in directional_lights.iter_mut()
     {
-        visible_entities.entities.clear();
+        cascades_visible_entities.clear();
 
         // NOTE: If shadow mapping is disabled for the light then it must have no visible entities
         if !directional_light.shadows_enabled || !visibility.is_visible {
@@ -1273,34 +1637,61 @@ pub fn check_light_mesh_visibility(
         }
 
         let view_mask = maybe_view_mask.copied().unwrap_or_default();
-
-        for (
-            entity,
-            visibility,
-            mut computed_visibility,
-            maybe_entity_mask,
-            maybe_aabb,
-            maybe_transform,
-        ) in visible_entity_query.iter_mut()
+        for (i, (frustum, (cascade, visible_entities))) in cascade_frusta
+            .iter()
+            .zip(
+                cascades
+                    .cascades
+                    .iter_mut()
+                    .zip(cascades_visible_entities.iter_mut()),
+            )
+            .enumerate()
         {
-            if !visibility.is_visible {
-                continue;
-            }
-
-            let entity_mask = maybe_entity_mask.copied().unwrap_or_default();
-            if !view_mask.intersects(&entity_mask) {
-                continue;
-            }
-
-            // If we have an aabb and transform, do frustum culling
-            if let (Some(aabb), Some(transform)) = (maybe_aabb, maybe_transform) {
-                if !frustum.intersects_obb(aabb, &transform.compute_matrix(), true) {
+            let mut cascade_max_z_updated = false;
+            for (
+                entity,
+                visibility,
+                mut computed_visibility,
+                maybe_entity_mask,
+                maybe_aabb,
+                maybe_transform,
+            ) in visible_entity_query.iter_mut()
+            {
+                if !visibility.is_visible {
                     continue;
                 }
-            }
 
-            computed_visibility.is_visible = true;
-            visible_entities.entities.push(entity);
+                let entity_mask = maybe_entity_mask.copied().unwrap_or_default();
+                if !view_mask.intersects(&entity_mask) {
+                    continue;
+                }
+
+                // If we have an aabb and transform, do frustum culling
+                if let (Some(aabb), Some(transform)) = (maybe_aabb, maybe_transform) {
+                    // println!("Testing entities against {}", frusta.iter().count());
+                    let model_to_world = transform.compute_matrix();
+                    // println!("Testing frustum");
+                    // if frustum.intersects_obb(aabb, &model_to_world, FrustumPlaneMask::NOT_NEAR) {
+                    {
+                        // println!("Intersected");
+                        let sphere = Sphere::from(aabb);
+                        let light_view_z = cascade
+                            .view_transform
+                            .transform_point3a(model_to_world.transform_point3a(sphere.center))
+                            + sphere.radius;
+                        println!("ci {}, lvz {} cmz {}", i, light_view_z.z, cascade.min_max_z);
+                        if light_view_z.z > cascade.min_max_z.x {
+                            cascade_max_z_updated = true;
+                            cascade.min_max_z.y = light_view_z.z;
+                        }
+                        computed_visibility.is_visible = true;
+                        visible_entities.entities.push(entity);
+                    }
+                }
+            }
+            if cascade_max_z_updated {
+                cascade.update_projection();
+            }
         }
 
         // TODO: check for big changes in visible entities len() vs capacity() (ex: 2x) and resize
@@ -1362,7 +1753,11 @@ pub fn check_light_mesh_visibility(
                             .iter()
                             .zip(cubemap_visible_entities.iter_mut())
                         {
-                            if frustum.intersects_obb(aabb, &model_to_world, true) {
+                            if frustum.intersects_obb(
+                                aabb,
+                                &model_to_world,
+                                FrustumPlaneMask::all(),
+                            ) {
                                 computed_visibility.is_visible = true;
                                 visible_entities.entities.push(entity);
                             }

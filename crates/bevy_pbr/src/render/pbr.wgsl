@@ -405,15 +405,53 @@ fn fetch_point_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: v
 #endif
 }
 
-fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
-    let light = lights.directional_lights[light_id];
+let CASCADE_INDEX_OFFSETS_4: vec4<u32> = vec4<u32>(0u, 1u, 2u, 3u);
+
+fn get_cascade_index(light_id: u32, view_z: f32) -> u32 {
+    var light: DirectionalLight = lights.directional_lights[light_id];
+
+    // NOTE: This parallel comparison technique is from the CascadedShadowMaps11 DirextX SDK example code
+    // which is MIT licensed
+    var index_f32: f32 = 0.0;
+    let view_z4 = vec4<f32>(-view_z);
+    let max_elements = (light.n_cascades + 3u) / 4u;
+    let n_cascades_4 = vec4<u32>(
+        light.n_cascades,
+        light.n_cascades,
+        light.n_cascades,
+        light.n_cascades
+    );
+    for (var i: u32 = 0u; i < max_elements; i = i + 1u) {
+        // NOTE: Comparison contains true for each cascade far bound where view z is closer
+        let comparison = view_z4 <= light.cascades_far_bounds[i];
+        let four_i4 = vec4<u32>(i * 4u);
+        index_f32 = index_f32 + dot(
+            vec4<f32>(comparison),
+            vec4<f32>((four_i4 + CASCADE_INDEX_OFFSETS_4) < n_cascades_4)
+        );
+    }
+
+    // NOTE: If view z is closer than all cascade far bounds, then it is the 0th cascade.
+    //       If it is not closer than any, then it is beyond the last cascade and should
+    //       return light.n_cascades or greater.
+    return light.n_cascades - u32(index_f32);
+}
+
+fn sample_cascade(
+    light_id: u32,
+    cascade_index: u32,
+    frag_position: vec4<f32>,
+    surface_normal: vec3<f32>
+) -> f32 {
+    var light: DirectionalLight = lights.directional_lights[light_id];
+    let cascade = light.cascades[cascade_index];
 
     // The normal bias is scaled to the texel size.
-    let normal_offset = light.shadow_normal_bias * surface_normal.xyz;
+    let normal_offset = light.shadow_normal_bias * cascade.texel_size.x * surface_normal.xyz;
     let depth_offset = light.shadow_depth_bias * light.direction_to_light.xyz;
     let offset_position = vec4<f32>(frag_position.xyz + normal_offset + depth_offset, frag_position.w);
 
-    let offset_position_clip = light.view_projection * offset_position;
+    let offset_position_clip = cascade.view_projection * offset_position;
     if (offset_position_clip.w <= 0.0) {
         return 1.0;
     }
@@ -434,10 +472,50 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
     // NOTE: Due to non-uniform control flow above, we must use the level variant of the texture
     // sampler to avoid use of implicit derivatives causing possible undefined behavior.
 #ifdef NO_ARRAY_TEXTURES_SUPPORT
-    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, depth);
+    return textureSampleCompareLevel(
+        directional_shadow_textures,
+        directional_shadow_textures_sampler,
+        light_local,
+        depth
+    );
 #else
-    return textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_sampler, light_local, i32(light_id), depth);
+    return textureSampleCompareLevel(
+        directional_shadow_textures,
+        directional_shadow_textures_sampler,
+        light_local,
+        i32(light_id * MAX_CASCADES_PER_LIGHT + cascade_index),
+        depth
+    );
 #endif
+}
+
+
+fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>, view_z: f32) -> f32 {
+    var light = lights.directional_lights[light_id];
+
+    let cascade_index = get_cascade_index(light_id, view_z);
+    if (cascade_index >= light.n_cascades) {
+        return 1.0;
+    }
+
+    var shadow: f32 = sample_cascade(light_id, cascade_index, frag_position, surface_normal);
+
+    let next_cascade_index = cascade_index + 1u;
+    if (next_cascade_index < light.n_cascades) {
+        let cascade_far_bound = light.cascades_far_bounds[cascade_index >> 2u][cascade_index & 3u];
+        let next_cascade_near_bound = (1.0 - light.cascade_overlap_proportion) * cascade_far_bound;
+        if (-view_z >= next_cascade_near_bound) {
+            let next_cascade_shadow = sample_cascade(light_id, next_cascade_index, frag_position, surface_normal);
+            shadow = mix(
+                shadow,
+                next_cascade_shadow,
+                (-view_z - next_cascade_near_bound)
+                    / (cascade_far_bound - next_cascade_near_bound)
+            );
+        }
+    }
+
+    return shadow;
 }
 
 fn hsv2rgb(hue: f32, saturation: f32, value: f32) -> vec3<f32> {
@@ -612,7 +690,7 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
             var shadow: f32 = 1.0;
             if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
                     && (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
-                shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
+                shadow = fetch_directional_shadow(i, in.world_position, in.world_normal, view_z);
             }
             let light_contrib = directional_light(light, roughness, NdotV, N, V, R, F0, diffuse_color);
             light_accum = light_accum + light_contrib * shadow;
@@ -626,6 +704,35 @@ fn fragment(in: FragmentInput) -> [[location(0)]] vec4<f32> {
                 (diffuse_ambient + specular_ambient) * lights.ambient_color.rgb * occlusion +
                 emissive.rgb * output_color.a,
             output_color.a);
+
+#ifdef CASCADE_DEBUG
+        let cascade_debug_alpha = 0.4;
+
+        var light: DirectionalLight = lights.directional_lights[0u];
+
+        let cascade_index: u32 = get_cascade_index(0u, view_z);
+        var cascade_color: vec3<f32> = hsv2rgb(f32(cascade_index) / f32(light.n_cascades + 1u), 1.0, 0.5);
+
+        let next_cascade_index: u32 = cascade_index + 1u;
+        if (next_cascade_index < light.n_cascades) {
+            let cascade_far_bound = light.cascades_far_bounds[cascade_index >> 2u][cascade_index & 3u];
+            let next_cascade_near_bound = (1.0 - light.cascade_overlap_proportion) * cascade_far_bound;
+            if (-view_z >= next_cascade_near_bound) {
+                var next_cascade_color: vec3<f32> = hsv2rgb(f32(next_cascade_index) / f32(light.n_cascades + 1u), 1.0, 0.5);
+                cascade_color = mix(
+                    cascade_color,
+                    next_cascade_color,
+                    (-view_z - next_cascade_near_bound)
+                        / (cascade_far_bound - next_cascade_near_bound)
+                );
+            }
+        }
+
+        output_color = vec4<f32>(
+            (1.0 - cascade_debug_alpha) * output_color.rgb + cascade_debug_alpha * cascade_color,
+            output_color.a
+        );
+#endif // CASCADE_DEBUG
 
         // Cluster allocation debug (using 'over' alpha blending)
 #ifdef CLUSTERED_FORWARD_DEBUG_Z_SLICES

@@ -64,15 +64,6 @@ fn setup(
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 100000.0,
-            shadow_projection: OrthographicProjection {
-                left: -0.35,
-                right: 500.35,
-                bottom: -0.1,
-                top: 5.0,
-                near: -5.0,
-                far: 5.0,
-                ..default()
-            },
             shadow_depth_bias: 0.0,
             shadow_normal_bias: 0.0,
             shadows_enabled: true,
@@ -83,10 +74,11 @@ fn setup(
     });
 
     // camera
+    let camera_z = 1.0;
     commands
         .spawn_bundle(PerspectiveCameraBundle {
-            transform: Transform::from_xyz(-1.0, 1.0, 1.0)
-                .looking_at(Vec3::new(-1.0, 1.0, 0.0), Vec3::Y),
+            transform: Transform::from_xyz(-1.0, 1.0, camera_z)
+                .looking_at(Vec3::new(-1.0, 1.0, camera_z - 1.0), Vec3::Y),
             ..default()
         })
         .insert(CameraController::default());
