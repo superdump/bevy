@@ -5,6 +5,8 @@ use bevy::{
     prelude::*,
     render::{
         render_resource::{TextureViewDescriptor, TextureViewDimension},
+        renderer::RenderDevice,
+        texture::CompressedImageFormats,
         view::EnvironmentMap,
     },
 };
@@ -15,7 +17,24 @@ mod cubemap_materials;
 use camera_controller::*;
 use cubemap_materials::*;
 
-const CUBEMAP_PATH: &str = "textures/Ryfjallet_cubemap.png";
+const CUBEMAPS: &[(&str, CompressedImageFormats)] = &[
+    (
+        "textures/Ryfjallet_cubemap.png",
+        CompressedImageFormats::NONE,
+    ),
+    (
+        "textures/Ryfjallet_cubemap_astc4x4.ktx2",
+        CompressedImageFormats::ASTC_LDR,
+    ),
+    (
+        "textures/Ryfjallet_cubemap_bc7.ktx2",
+        CompressedImageFormats::BC,
+    ),
+    (
+        "textures/Ryfjallet_cubemap_etc2.ktx2",
+        CompressedImageFormats::ETC2,
+    ),
+];
 
 fn main() {
     App::new()
@@ -23,7 +42,8 @@ fn main() {
         .add_plugin(MaterialPlugin::<CubemapMaterial>::default())
         .add_plugin(MaterialPlugin::<CubemapArrayMaterial>::default())
         .add_startup_system(setup)
-        .add_system(asset_loaded)
+        .add_system(cycle_cubemap_asset)
+        .add_system(asset_loaded.after(cycle_cubemap_asset))
         .add_system(camera_controller)
         .add_system(animate_light_direction)
         .run();
@@ -31,6 +51,7 @@ fn main() {
 
 struct Cubemap {
     is_loaded: bool,
+    index: usize,
     image_handle: Handle<Image>,
 }
 
@@ -88,7 +109,7 @@ fn setup(
         ..default()
     });
 
-    let skybox_handle = asset_server.load(CUBEMAP_PATH);
+    let skybox_handle = asset_server.load(CUBEMAPS[0].0);
     // camera
     commands
         .spawn_bundle(Camera3dBundle {
@@ -98,7 +119,7 @@ fn setup(
         .insert_bundle((
             CameraController::default(),
             EnvironmentMap {
-                handle: asset_server.load(CUBEMAP_PATH),
+                handle: skybox_handle.clone(),
             },
         ));
 
@@ -112,8 +133,50 @@ fn setup(
 
     commands.insert_resource(Cubemap {
         is_loaded: false,
+        index: 0,
         image_handle: skybox_handle,
     });
+}
+
+const CUBEMAP_SWAP_DELAY: f64 = 3.0;
+
+fn cycle_cubemap_asset(
+    time: Res<Time>,
+    mut next_swap: Local<f64>,
+    mut cubemap: ResMut<Cubemap>,
+    asset_server: Res<AssetServer>,
+    render_device: Res<RenderDevice>,
+) {
+    let now = time.seconds_since_startup();
+    if *next_swap == 0.0 {
+        *next_swap = now + CUBEMAP_SWAP_DELAY;
+        return;
+    } else if now < *next_swap {
+        return;
+    }
+    *next_swap += CUBEMAP_SWAP_DELAY;
+
+    let supported_compressed_formats =
+        CompressedImageFormats::from_features(render_device.features());
+
+    let mut new_index = cubemap.index;
+    for _ in 0..CUBEMAPS.len() {
+        new_index = (new_index + 1) % CUBEMAPS.len();
+        if supported_compressed_formats.contains(CUBEMAPS[new_index].1) {
+            break;
+        }
+        info!("Skipping unsupported format: {:?}", CUBEMAPS[new_index]);
+    }
+
+    // Skip swapping to the same texture. Useful for when ktx2, zstd, or compressed texture support
+    // is missing
+    if new_index == cubemap.index {
+        return;
+    }
+
+    cubemap.index = new_index;
+    cubemap.image_handle = asset_server.load(CUBEMAPS[cubemap.index].0);
+    cubemap.is_loaded = false;
 }
 
 fn asset_loaded(
@@ -124,15 +187,20 @@ fn asset_loaded(
     mut cubemap_materials: ResMut<Assets<CubemapMaterial>>,
     mut cubemap_array_materials: ResMut<Assets<CubemapArrayMaterial>>,
     mut cubemap: ResMut<Cubemap>,
+    cubes: Query<&Handle<CubemapMaterial>>,
+    array_cubes: Query<&Handle<CubemapArrayMaterial>>,
+    mut env_maps: Query<&mut EnvironmentMap>,
 ) {
     if !cubemap.is_loaded
         && asset_server.get_load_state(cubemap.image_handle.clone_weak()) == LoadState::Loaded
     {
-        println!("LOADED!");
+        info!("Swapping to {}...", CUBEMAPS[cubemap.index].0);
         let mut image = images.get_mut(&cubemap.image_handle).unwrap();
-        image.texture_descriptor.size.depth_or_array_layers =
-            image.texture_descriptor.size.height / image.texture_descriptor.size.width;
-        image.texture_descriptor.size.height = image.texture_descriptor.size.width;
+        if image.texture_descriptor.array_layer_count() == 1 {
+            image.texture_descriptor.size.depth_or_array_layers =
+                image.texture_descriptor.size.height / image.texture_descriptor.size.width;
+            image.texture_descriptor.size.height = image.texture_descriptor.size.width;
+        }
 
         let is_array = image.texture_descriptor.array_layer_count() > 6;
 
@@ -142,26 +210,49 @@ fn asset_loaded(
                 dimension: Some(TextureViewDimension::CubeArray),
                 ..default()
             });
-            commands.spawn_bundle(MaterialMeshBundle::<CubemapArrayMaterial> {
-                mesh: meshes.add(Mesh::from(shape::Cube { size: 10000.0 })),
-                material: cubemap_array_materials.add(CubemapArrayMaterial {
-                    base_color_texture: Some(cubemap.image_handle.clone_weak()),
-                }),
-                ..default()
-            });
+            let mut updated = false;
+            for handle in array_cubes.iter() {
+                if let Some(material) = cubemap_array_materials.get_mut(handle) {
+                    updated = true;
+                    material.base_color_texture = Some(cubemap.image_handle.clone_weak());
+                }
+            }
+            if !updated {
+                commands.spawn_bundle(MaterialMeshBundle::<CubemapArrayMaterial> {
+                    mesh: meshes.add(Mesh::from(shape::Cube { size: 10000.0 })),
+                    material: cubemap_array_materials.add(CubemapArrayMaterial {
+                        base_color_texture: Some(cubemap.image_handle.clone_weak()),
+                    }),
+                    ..default()
+                });
+            }
         } else {
             image.texture_view_descriptor = Some(TextureViewDescriptor {
                 dimension: Some(TextureViewDimension::Cube),
                 ..default()
             });
-            commands.spawn_bundle(MaterialMeshBundle::<CubemapMaterial> {
-                mesh: meshes.add(Mesh::from(shape::Cube { size: 10000.0 })),
-                material: cubemap_materials.add(CubemapMaterial {
-                    base_color_texture: Some(cubemap.image_handle.clone_weak()),
-                }),
-                ..default()
-            });
+            let mut updated = false;
+            for handle in cubes.iter() {
+                if let Some(material) = cubemap_materials.get_mut(handle) {
+                    updated = true;
+                    material.base_color_texture = Some(cubemap.image_handle.clone_weak());
+                }
+            }
+            if !updated {
+                commands.spawn_bundle(MaterialMeshBundle::<CubemapMaterial> {
+                    mesh: meshes.add(Mesh::from(shape::Cube { size: 10000.0 })),
+                    material: cubemap_materials.add(CubemapMaterial {
+                        base_color_texture: Some(cubemap.image_handle.clone_weak()),
+                    }),
+                    ..default()
+                });
+            }
         }
+
+        for mut env_map in env_maps.iter_mut() {
+            env_map.handle = cubemap.image_handle.clone_weak();
+        }
+
         cubemap.is_loaded = true;
     }
 }
