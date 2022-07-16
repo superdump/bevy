@@ -280,6 +280,16 @@ category = "3D Rendering"
 wasm = true
 
 [[example]]
+name = "cubemaps"
+path = "examples/3d/cubemaps/main.rs"
+
+[package.metadata.example.cubemaps]
+name = "Cubemaps"
+description = "Demonstration of cubemap and cubemap array textures"
+category = "3D Rendering"
+wasm = false
+
+[[example]]
 name = "lighting"
 path = "examples/3d/lighting.rs"
 
