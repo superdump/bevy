@@ -43,12 +43,13 @@ use bevy_ecs::prelude::*;
 use bevy_reflect::TypeUuid;
 use bevy_render::{
     camera::CameraUpdateSystem,
+    extract_component::ExtractComponentPlugin,
     extract_resource::ExtractResourcePlugin,
     prelude::Color,
     render_graph::RenderGraph,
     render_phase::{sort_phase_system, AddRenderCommand, DrawFunctions},
     render_resource::{Shader, SpecializedMeshPipelines},
-    view::VisibilitySystems,
+    view::{EnvironmentMap, VisibilitySystems},
     RenderApp, RenderStage,
 };
 use bevy_transform::TransformSystem;
@@ -124,6 +125,8 @@ impl Plugin for PbrPlugin {
         );
 
         app.register_type::<CubemapVisibleEntities>()
+            .register_type::<EnvironmentMap>()
+            .add_plugin(ExtractComponentPlugin::<EnvironmentMap>::default())
             .register_type::<DirectionalLight>()
             .register_type::<PointLight>()
             .register_type::<SpotLight>()

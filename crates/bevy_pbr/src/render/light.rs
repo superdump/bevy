@@ -43,6 +43,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 pub enum RenderLightSystems {
     ExtractClusters,
     ExtractLights,
+    PrepareEnvironmentMap,
     PrepareClusters,
     PrepareLights,
     QueueShadows,

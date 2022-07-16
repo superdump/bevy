@@ -24,10 +24,11 @@ use bevy_render::{
     texture::{
         BevyDefault, DefaultImageSampler, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
     },
-    view::{ComputedVisibility, ViewUniform, ViewUniformOffset, ViewUniforms},
+    view::{ComputedVisibility, EnvironmentMap, ViewUniform, ViewUniformOffset, ViewUniforms},
     Extract, RenderApp, RenderStage,
 };
 use bevy_transform::components::GlobalTransform;
+use bevy_utils::default;
 use std::num::NonZeroU64;
 
 #[derive(Default)]
@@ -254,6 +255,7 @@ pub struct MeshPipeline {
     pub skinned_mesh_layout: BindGroupLayout,
     // This dummy white texture is to be used in place of optional StandardMaterial textures
     pub dummy_white_gpu_image: GpuImage,
+    pub dummy_white_gpu_cubemap_image: GpuImage,
     pub clustered_forward_buffer_binding_type: BufferBindingType,
 }
 
@@ -377,6 +379,24 @@ impl FromWorld for MeshPipeline {
                     },
                     count: None,
                 },
+                // Environment Map Texture
+                BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::Cube,
+                    },
+                    count: None,
+                },
+                // Environment Map Texture Sampler
+                BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
             label: Some("mesh_view_layout"),
         });
@@ -463,12 +483,69 @@ impl FromWorld for MeshPipeline {
                 ),
             }
         };
+
+        // A 1x1x6 'all 1.0' texture to use as a dummy texture to use in place of optional cubemap textures
+        let dummy_white_gpu_cubemap_image = {
+            let image = Image::new_fill(
+                Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+                TextureDimension::D2,
+                &[255u8; 4 * 6],
+                TextureFormat::bevy_default(),
+            );
+            let texture = render_device.create_texture(&image.texture_descriptor);
+            let sampler = match image.sampler_descriptor {
+                ImageSampler::Default => (**default_sampler).clone(),
+                ImageSampler::Descriptor(descriptor) => render_device.create_sampler(&descriptor),
+            };
+
+            let format_size = image.texture_descriptor.format.pixel_size();
+            render_queue.write_texture(
+                ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: Origin3d::ZERO,
+                    aspect: TextureAspect::All,
+                },
+                &image.data,
+                ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(
+                        std::num::NonZeroU32::new(
+                            image.texture_descriptor.size.width * format_size as u32,
+                        )
+                        .unwrap(),
+                    ),
+                    rows_per_image: std::num::NonZeroU32::new(image.texture_descriptor.size.height),
+                },
+                image.texture_descriptor.size,
+            );
+
+            let texture_view = texture.create_view(&TextureViewDescriptor {
+                dimension: Some(TextureViewDimension::Cube),
+                ..default()
+            });
+            GpuImage {
+                texture,
+                texture_view,
+                texture_format: image.texture_descriptor.format,
+                sampler,
+                size: Vec2::new(
+                    image.texture_descriptor.size.width as f32,
+                    image.texture_descriptor.size.height as f32,
+                ),
+            }
+        };
         MeshPipeline {
             view_layout,
             mesh_layout,
             skinned_mesh_layout,
             clustered_forward_buffer_binding_type,
             dummy_white_gpu_image,
+            dummy_white_gpu_cubemap_image,
         }
     }
 }
@@ -478,15 +555,26 @@ impl MeshPipeline {
         &'a self,
         gpu_images: &'a RenderAssets<Image>,
         handle_option: &Option<Handle<Image>>,
+        view_dimension: TextureViewDimension,
     ) -> Option<(&'a TextureView, &'a Sampler)> {
         if let Some(handle) = handle_option {
-            let gpu_image = gpu_images.get(handle)?;
-            Some((&gpu_image.texture_view, &gpu_image.sampler))
-        } else {
-            Some((
+            if let Some(gpu_image) = gpu_images.get(handle) {
+                return Some((&gpu_image.texture_view, &gpu_image.sampler));
+            }
+        }
+        match view_dimension {
+            TextureViewDimension::D1 => todo!(),
+            TextureViewDimension::D2 => Some((
                 &self.dummy_white_gpu_image.texture_view,
                 &self.dummy_white_gpu_image.sampler,
-            ))
+            )),
+            TextureViewDimension::D2Array => todo!(),
+            TextureViewDimension::Cube => Some((
+                &self.dummy_white_gpu_cubemap_image.texture_view,
+                &self.dummy_white_gpu_cubemap_image.sampler,
+            )),
+            TextureViewDimension::CubeArray => todo!(),
+            TextureViewDimension::D3 => todo!(),
         }
     }
 }
@@ -754,14 +842,28 @@ pub fn queue_mesh_view_bind_groups(
     light_meta: Res<LightMeta>,
     global_light_meta: Res<GlobalLightMeta>,
     view_uniforms: Res<ViewUniforms>,
-    views: Query<(Entity, &ViewShadowBindings, &ViewClusterBindings)>,
+    views: Query<(
+        Entity,
+        &ViewShadowBindings,
+        &ViewClusterBindings,
+        Option<&EnvironmentMap>,
+    )>,
+    gpu_images: Res<RenderAssets<Image>>,
 ) {
     if let (Some(view_binding), Some(light_binding), Some(point_light_binding)) = (
         view_uniforms.uniforms.binding(),
         light_meta.view_gpu_lights.binding(),
         global_light_meta.gpu_point_lights.binding(),
     ) {
-        for (entity, view_shadow_bindings, view_cluster_bindings) in &views {
+        for (entity, view_shadow_bindings, view_cluster_bindings, environment_map) in &views {
+            let (environment_map_texture_view, environment_map_texture_sampler) = mesh_pipeline
+                .get_image_texture(
+                    &*gpu_images,
+                    &environment_map.map(|em| em.handle.clone_weak()),
+                    TextureViewDimension::Cube,
+                )
+                .unwrap();
+
             let view_bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 entries: &[
                     BindGroupEntry {
@@ -805,6 +907,14 @@ pub fn queue_mesh_view_bind_groups(
                     BindGroupEntry {
                         binding: 8,
                         resource: view_cluster_bindings.offsets_and_counts_binding().unwrap(),
+                    },
+                    BindGroupEntry {
+                        binding: 9,
+                        resource: BindingResource::TextureView(environment_map_texture_view),
+                    },
+                    BindGroupEntry {
+                        binding: 10,
+                        resource: BindingResource::Sampler(environment_map_texture_sampler),
                     },
                 ],
                 label: Some("mesh_view_bind_group"),

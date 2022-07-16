@@ -89,6 +89,7 @@ fn calculate_view(
 struct PbrInput {
     material: StandardMaterial,
     occlusion: f32,
+    environment_color: vec3<f32>,
     frag_coord: vec4<f32>,
     world_position: vec4<f32>,
     // Normalized world normal used for shadow mapping as normal-mapping is not used for shadow
@@ -99,6 +100,8 @@ struct PbrInput {
     // Normalized view vector in world space, pointing from the fragment world position toward the
     // view world position
     V: vec3<f32>,
+    // Normalized reflection vector
+    R: vec3<f32>,
     is_orthographic: bool,
 };
 
@@ -161,8 +164,6 @@ fn pbr(
     // Diffuse strength inversely related to metallicity
     let diffuse_color = output_color.rgb * (1.0 - metallic);
 
-    let R = reflect(-in.V, in.N);
-
     // accumulate color
     var light_accum: vec3<f32> = vec3<f32>(0.0);
 
@@ -184,7 +185,7 @@ fn pbr(
                 && (light.flags & POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
             shadow = fetch_point_shadow(light_id, in.world_position, in.world_normal);
         }
-        let light_contrib = point_light(in.world_position.xyz, light, roughness, NdotV, in.N, in.V, R, F0, diffuse_color);
+        let light_contrib = point_light(in.world_position.xyz, light, roughness, NdotV, in.N, in.V, in.R, F0, diffuse_color);
         light_accum = light_accum + light_contrib * shadow;
     }
 
@@ -197,7 +198,7 @@ fn pbr(
                 && (light.flags & POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
             shadow = fetch_spot_shadow(light_id, in.world_position, in.world_normal);
         }
-        let light_contrib = spot_light(in.world_position.xyz, light, roughness, NdotV, in.N, in.V, R, F0, diffuse_color);
+        let light_contrib = spot_light(in.world_position.xyz, light, roughness, NdotV, in.N, in.V, in.R, F0, diffuse_color);
         light_accum = light_accum + light_contrib * shadow;
     }
 
@@ -209,12 +210,12 @@ fn pbr(
                 && (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
             shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
         }
-        let light_contrib = directional_light(light, roughness, NdotV, in.N, in.V, R, F0, diffuse_color);
+        let light_contrib = directional_light(light, roughness, NdotV, in.N, in.V, in.R, F0, diffuse_color);
         light_accum = light_accum + light_contrib * shadow;
     }
 
     let diffuse_ambient = EnvBRDFApprox(diffuse_color, 1.0, NdotV);
-    let specular_ambient = EnvBRDFApprox(F0, perceptual_roughness, NdotV);
+    let specular_ambient = in.environment_color * EnvBRDFApprox(F0, perceptual_roughness, NdotV);
 
     output_color = vec4<f32>(
         light_accum +
@@ -236,7 +237,7 @@ fn pbr(
 fn tone_mapping(in: vec4<f32>) -> vec4<f32> {
     // tone_mapping
     return vec4<f32>(reinhard_luminance(in.rgb), in.a);
-    
+
     // Gamma correction.
     // Not needed with sRGB buffer
     // output_color.rgb = pow(output_color.rgb, vec3(1.0 / 2.2));

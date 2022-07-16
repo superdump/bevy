@@ -87,6 +87,17 @@ fn fragment(in: FragmentInput) -> @location(0) vec4<f32> {
             in.is_front,
         );
         pbr_input.V = calculate_view(in.world_position, pbr_input.is_orthographic);
+        pbr_input.R = reflect(-pbr_input.V, pbr_input.N);
+
+        pbr_input.environment_color = vec3<f32>(1.0);
+        if ((view.flags & VIEW_FLAGS_ENVIRONMENT_MAP_BIT) != 0u) {
+            // Cubemaps must be sampled using left-handed coordinates so flip the sign of z
+            pbr_input.environment_color = textureSample(
+                environment_map_texture,
+                environment_map_sampler,
+                pbr_input.R * vec3<f32>(1.0, 1.0, -1.0)
+            ).rgb;
+        }
 
         output_color = tone_mapping(pbr(pbr_input));
     }

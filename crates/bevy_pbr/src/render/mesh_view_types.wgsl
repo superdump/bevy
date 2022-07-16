@@ -10,7 +10,11 @@ struct View {
     world_position: vec3<f32>,
     width: f32,
     height: f32,
+    // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
+    flags: u32,
 };
+
+let VIEW_FLAGS_ENVIRONMENT_MAP_BIT: u32 = 1u;
 
 struct PointLight {
     // For point lights: the lower-right 2x2 values of the projection matrix [2][2] [2][3] [3][2] [3][3]

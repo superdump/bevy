@@ -1,6 +1,7 @@
 pub mod visibility;
 pub mod window;
 
+use bevy_asset::Handle;
 pub use visibility::*;
 use wgpu::{
     Color, Extent3d, Operations, RenderPassColorAttachment, TextureDescriptor, TextureDimension,
@@ -9,7 +10,8 @@ use wgpu::{
 pub use window::*;
 
 use crate::{
-    camera::ExtractedCamera,
+    camera::{Camera, ExtractedCamera},
+    extract_component::ExtractComponent,
     extract_resource::{ExtractResource, ExtractResourcePlugin},
     prelude::Image,
     rangefinder::ViewRangefinder3d,
@@ -20,7 +22,7 @@ use crate::{
     RenderApp, RenderStage,
 };
 use bevy_app::{App, Plugin};
-use bevy_ecs::prelude::*;
+use bevy_ecs::{prelude::*, query::QueryItem};
 use bevy_math::{Mat4, Vec3};
 use bevy_reflect::Reflect;
 use bevy_transform::components::GlobalTransform;
@@ -77,6 +79,21 @@ impl Default for Msaa {
     }
 }
 
+#[derive(Default, Clone, Component, Debug, Reflect)]
+#[reflect(Component)]
+pub struct EnvironmentMap {
+    pub handle: Handle<Image>,
+}
+
+impl ExtractComponent for EnvironmentMap {
+    type Query = &'static Self;
+    type Filter = With<Camera>;
+
+    fn extract_component(item: QueryItem<Self::Query>) -> Self {
+        item.clone()
+    }
+}
+
 #[derive(Component)]
 pub struct ExtractedView {
     pub projection: Mat4,
@@ -92,6 +109,16 @@ impl ExtractedView {
     }
 }
 
+// NOTE: These must match the bit flags in bevy_pbr/src/render/mesh_view_types.wgsl!
+bitflags::bitflags! {
+    #[repr(transparent)]
+    pub struct ViewFlags: u32 {
+        const ENVIRONMENT_MAP = (1 << 0);
+        const NONE            = 0;
+        const UNINITIALIZED   = 0xFFFF;
+    }
+}
+
 #[derive(Clone, ShaderType)]
 pub struct ViewUniform {
     view_proj: Mat4,
@@ -103,6 +130,7 @@ pub struct ViewUniform {
     world_position: Vec3,
     width: f32,
     height: f32,
+    flags: u32,
 }
 
 #[derive(Default)]
@@ -146,14 +174,18 @@ fn prepare_view_uniforms(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut view_uniforms: ResMut<ViewUniforms>,
-    views: Query<(Entity, &ExtractedView)>,
+    views: Query<(Entity, &ExtractedView, Option<&EnvironmentMap>)>,
 ) {
     view_uniforms.uniforms.clear();
-    for (entity, camera) in &views {
+    for (entity, camera, maybe_environment_map) in &views {
         let projection = camera.projection;
         let inverse_projection = projection.inverse();
         let view = camera.transform.compute_matrix();
         let inverse_view = view.inverse();
+        let mut flags = ViewFlags::empty();
+        if maybe_environment_map.is_some() {
+            flags |= ViewFlags::ENVIRONMENT_MAP;
+        }
         let view_uniforms = ViewUniformOffset {
             offset: view_uniforms.uniforms.push(ViewUniform {
                 view_proj: projection * inverse_view,
@@ -165,6 +197,7 @@ fn prepare_view_uniforms(
                 world_position: camera.transform.translation(),
                 width: camera.width as f32,
                 height: camera.height as f32,
+                flags: flags.bits(),
             }),
         };
 
