@@ -1,6 +1,13 @@
 //! A simple 3D scene with light shining over a cube sitting on a plane.
 
-use bevy::{asset::LoadState, prelude::*, render::view::EnvironmentMap};
+use bevy::{
+    asset::LoadState,
+    prelude::*,
+    render::{
+        render_resource::{TextureViewDescriptor, TextureViewDimension},
+        view::EnvironmentMap,
+    },
+};
 
 mod camera_controller;
 mod cubemap_materials;
@@ -8,19 +15,7 @@ mod cubemap_materials;
 use camera_controller::*;
 use cubemap_materials::*;
 
-const CUBEMAPS: [&str; 5] = [
-    "textures/Storforsen4.ktx2",
-    "textures/Storforsen4_basisu.ktx2",
-    "textures/Storforsen4_basisu_mipmaps.ktx2",
-    "textures/Storforsen4_toktx_mipmaps.ktx2",
-    "textures/cubemap_kram_mipmaps_bc1_sanfrancisco.ktx2",
-];
-
-const CUBEMAP_ARRAYS: [&str; 3] = [
-    "textures/cubemap_array_kram_mipmaps.ktx2",
-    "textures/cubemap_array_kram_mipmaps_uncompressed.ktx2",
-    "textures/cubemap_array_toktx_mipmaps.ktx2",
-];
+const CUBEMAP_PATH: &str = "textures/Ryfjallet_cubemap.png";
 
 fn main() {
     App::new()
@@ -93,7 +88,7 @@ fn setup(
         ..default()
     });
 
-    let skybox_handle = asset_server.load(CUBEMAPS[4]);
+    let skybox_handle = asset_server.load(CUBEMAP_PATH);
     // camera
     commands
         .spawn_bundle(Camera3dBundle {
@@ -103,9 +98,17 @@ fn setup(
         .insert_bundle((
             CameraController::default(),
             EnvironmentMap {
-                handle: asset_server.load(CUBEMAPS[4]),
+                handle: asset_server.load(CUBEMAP_PATH),
             },
         ));
+
+    // ambient light
+    // NOTE: The ambient light is used to scale how bright the environment map is so with a bright
+    // environment map, use an appropriate colour and brightness to match
+    commands.insert_resource(AmbientLight {
+        color: Color::rgb_u8(210, 220, 240),
+        brightness: 1.0,
+    });
 
     commands.insert_resource(Cubemap {
         is_loaded: false,
@@ -126,15 +129,19 @@ fn asset_loaded(
         && asset_server.get_load_state(cubemap.image_handle.clone_weak()) == LoadState::Loaded
     {
         println!("LOADED!");
-        let is_array = images
-            .get_mut(&cubemap.image_handle)
-            .unwrap()
-            .texture_descriptor
-            .array_layer_count()
-            > 6;
+        let mut image = images.get_mut(&cubemap.image_handle).unwrap();
+        image.texture_descriptor.size.depth_or_array_layers =
+            image.texture_descriptor.size.height / image.texture_descriptor.size.width;
+        image.texture_descriptor.size.height = image.texture_descriptor.size.width;
+
+        let is_array = image.texture_descriptor.array_layer_count() > 6;
 
         // spawn cube
         if is_array {
+            image.texture_view_descriptor = Some(TextureViewDescriptor {
+                dimension: Some(TextureViewDimension::CubeArray),
+                ..default()
+            });
             commands.spawn_bundle(MaterialMeshBundle::<CubemapArrayMaterial> {
                 mesh: meshes.add(Mesh::from(shape::Cube { size: 10000.0 })),
                 material: cubemap_array_materials.add(CubemapArrayMaterial {
@@ -143,6 +150,10 @@ fn asset_loaded(
                 ..default()
             });
         } else {
+            image.texture_view_descriptor = Some(TextureViewDescriptor {
+                dimension: Some(TextureViewDimension::Cube),
+                ..default()
+            });
             commands.spawn_bundle(MaterialMeshBundle::<CubemapMaterial> {
                 mesh: meshes.add(Mesh::from(shape::Cube { size: 10000.0 })),
                 material: cubemap_materials.add(CubemapMaterial {
