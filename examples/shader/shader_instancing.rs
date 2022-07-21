@@ -1,13 +1,16 @@
+//! A shader that renders a mesh multiple times in one draw call.
+
 use bevy::{
-    core_pipeline::Transparent3d,
+    core_pipeline::core_3d::Transparent3d,
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     ecs::system::{lifetimeless::*, SystemParamItem},
     math::{prelude::*, Vec4Swizzles},
     pbr::{MeshPipeline, MeshPipelineKey, MeshUniform, SetMeshBindGroup, SetMeshViewBindGroup},
     prelude::*,
     render::{
+        extract_component::{ExtractComponent, ExtractComponentPlugin},
         mesh::{GpuBufferInfo, MeshVertexBufferLayout},
         render_asset::RenderAssets,
-        render_component::{ExtractComponent, ExtractComponentPlugin},
         render_phase::{
             AddRenderCommand, DrawFunctions, EntityRenderCommand, RenderCommandResult, RenderPhase,
             SetItemPipeline, TrackedRenderPass,
@@ -23,26 +26,57 @@ use bytemuck::{Pod, Zeroable};
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugin(FrameTimeDiagnosticsPlugin)
+        .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(CustomMaterialPlugin)
         .add_startup_system(setup)
+        .add_system(toggle_spawn)
         .run();
 }
 
-fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
+const DIM: usize = 500;
+
+fn setup(mut commands: Commands) {
+    // camera
+    commands.spawn_bundle(Camera3dBundle {
+        transform: Transform::from_xyz(0.0, 0.0, 1.5 * DIM as f32).looking_at(Vec3::ZERO, Vec3::Y),
+        ..default()
+    });
+}
+
+fn toggle_spawn(
+    mut commands: Commands,
+    key_input: Res<Input<KeyCode>>,
+    mut spawned: Local<bool>,
+    cubes: Query<Entity, With<ColorMaterialInstanced>>,
+    meshes: ResMut<Assets<Mesh>>,
+) {
+    if key_input.just_pressed(KeyCode::S) {
+        if *spawned {
+            info!("Despawning");
+            for entity in cubes.iter() {
+                commands.entity(entity).despawn_recursive();
+            }
+        } else {
+            info!("Spawning");
+            spawn(&mut commands, meshes.into_inner());
+        }
+        *spawned = !*spawned;
+    }
+}
+
+fn spawn(commands: &mut Commands, meshes: &mut Assets<Mesh>) {
     let mesh_handle = meshes.add(Mesh::from(shape::Cube { size: 0.5 }));
-    for x in 1..=10 {
-        for y in 1..=10 {
-            let (x, y) = (x as f32 / 10.0, y as f32 / 10.0);
+    for x in 0..DIM {
+        for y in 0..DIM {
+            let (x, y) = (x as f32 / (DIM - 1) as f32, y as f32 / (DIM - 1) as f32);
             commands.spawn_bundle((
                 mesh_handle.clone(),
                 // NOTE: The x-component of the scale is being used for the scale of the instance.
                 // This would break if rotations are applied to the transform, but in that case you
                 // would probably extend the instance data to account for it.
-                Transform::from_xyz(x * 10.0 - 5.0, y * 10.0 - 5.0, 0.0).with_scale(Vec3::new(
-                    (x * y).sqrt(),
-                    0.0,
-                    0.0,
-                )),
+                Transform::from_xyz((x - 0.5) * DIM as f32, (y - 0.5) * DIM as f32, 0.0)
+                    .with_scale(Vec3::new((x * y).sqrt(), 0.0, 0.0)),
                 GlobalTransform::default(),
                 ColorMaterialInstanced(Color::hsla(x * 360., y, 0.5, 1.0)),
                 Visibility::default(),
@@ -50,12 +84,6 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
             ));
         }
     }
-
-    // camera
-    commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(0.0, 0.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
 }
 
 #[derive(Clone, Component, Debug, Deref)]
@@ -146,10 +174,9 @@ fn queue_custom(
 
     let msaa_key = MeshPipelineKey::from_msaa_samples(msaa.samples);
 
-    for (view, mut transparent_phase) in views.iter_mut() {
-        let inverse_view_matrix = view.transform.compute_matrix().inverse();
-        let inverse_view_row_2 = inverse_view_matrix.row(2);
-        for (entity, mesh_uniform, mesh_handle) in material_meshes.iter() {
+    for (view, mut transparent_phase) in &mut views {
+        let rangefinder = view.rangefinder3d();
+        for (entity, mesh_uniform, mesh_handle) in &material_meshes {
             if let Some(mesh) = meshes.get(mesh_handle) {
                 let key =
                     msaa_key | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
@@ -160,7 +187,7 @@ fn queue_custom(
                     entity,
                     pipeline,
                     draw_function: draw_custom,
-                    distance: inverse_view_row_2.dot(mesh_uniform.transform.col(3)),
+                    distance: rangefinder.distance(&mesh_uniform.transform),
                 });
             }
         }
@@ -174,12 +201,11 @@ pub struct CustomPipeline {
 
 impl FromWorld for CustomPipeline {
     fn from_world(world: &mut World) -> Self {
-        let world = world.cell();
-        let asset_server = world.get_resource::<AssetServer>().unwrap();
+        let asset_server = world.resource::<AssetServer>();
         asset_server.watch_for_changes().unwrap();
         let shader = asset_server.load("shaders/instancing.wgsl");
 
-        let mesh_pipeline = world.get_resource::<MeshPipeline>().unwrap();
+        let mesh_pipeline = world.resource::<MeshPipeline>();
 
         CustomPipeline {
             shader,
@@ -232,6 +258,7 @@ type DrawCustom = (
 );
 
 pub struct DrawMeshInstanced;
+
 impl EntityRenderCommand for DrawMeshInstanced {
     type Param = (
         SRes<RenderAssets<Mesh>>,
