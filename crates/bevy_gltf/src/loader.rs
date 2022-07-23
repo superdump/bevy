@@ -751,7 +751,7 @@ fn load_node(
         node.insert_bundle((
             projection,
             Camera {
-                is_active: !*active_camera_found,
+                is_active: false, // !*active_camera_found,
                 ..Default::default()
             },
             VisibleEntities::default(),
@@ -861,6 +861,7 @@ fn load_node(
                     inner_cone_angle,
                     outer_cone_angle,
                 } => {
+                    dbg!((inner_cone_angle, outer_cone_angle));
                     let mut entity = parent.spawn_bundle(SpotLightBundle {
                         spot_light: SpotLight {
                             color: Color::from(light.color()),

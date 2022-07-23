@@ -129,6 +129,7 @@ bytemuck = "1.7"
 # Needed to poll Task examples
 futures-lite = "1.11.3"
 crossbeam-channel = "0.5.0"
+smooth-bevy-cameras = { git = "https://github.com/superdump/smooth-bevy-cameras.git", branch = "bevy-main" }
 
 [[example]]
 name = "hello_world"

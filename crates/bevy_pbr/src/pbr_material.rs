@@ -251,7 +251,7 @@ impl AsBindGroupShaderType<StandardMaterialUniform> for StandardMaterial {
                     _ => {}
                 }
             }
-            if self.flip_normal_map_y {
+            if !self.flip_normal_map_y {
                 flags |= StandardMaterialFlags::FLIP_NORMAL_MAP_Y;
             }
         }

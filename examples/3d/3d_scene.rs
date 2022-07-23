@@ -15,6 +15,11 @@ use bevy::{
         },
         view::RenderLayers,
     },
+    scene::SceneInstance,
+};
+use smooth_bevy_cameras::{
+    controllers::fps::{FpsCameraBundle, FpsCameraController, FpsCameraPlugin},
+    LookTransformPlugin,
 };
 
 #[derive(Component)]
@@ -39,10 +44,13 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugin(MaterialPlugin::<PortalMaterial>::default())
+        .add_plugin(LookTransformPlugin)
+        .add_plugin(FpsCameraPlugin::default())
         .add_startup_system(setup)
-        .add_system(camera_controller)
+        .add_system(sponza_loaded)
         .add_system(toggle_portal_texture)
         .add_system(sync_portal_camera_to_player_camera)
+        .add_system(print_position)
         .run();
 }
 
@@ -123,6 +131,7 @@ fn sync_portal_camera_to_player_camera(
 
 fn setup(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut portal_materials: ResMut<Assets<PortalMaterial>>,
@@ -160,7 +169,7 @@ fn setup(
     let portal_material = portal_materials.add(PortalMaterial {
         base_color_texture: Some(image_handle.clone()),
         reflectance: 0.02,
-        unlit: false,
+        unlit: true,
         ..default()
     });
 
@@ -179,184 +188,211 @@ fn setup(
     let first_pass_layer = RenderLayers::layer(1);
 
     // Set up the player scene
-    // ground plane
-    commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 10.0 })),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
+    // bistro
+    commands.spawn_bundle(SceneBundle {
+        scene: asset_server.load(
+            "/Users/roberts/projects/assets/bistro-full/bistro-fixed-point-light-range-intensity.gltf#Scene0",
+        ),
         ..default()
     });
     // portal
+    let portal_entrance = Vec3::new(-1.165, 1.75, -0.767);
     commands
         .spawn_bundle(MaterialMeshBundle::<PortalMaterial> {
-            mesh: meshes.add(Mesh::from(shape::Quad::default())),
+            mesh: meshes.add(Mesh::from(shape::Quad::new(Vec2::new(2.0, 2.5)))),
             material: portal_material.clone_weak(),
-            transform: Transform::from_xyz(0.0, 1.0, 0.0).with_scale(Vec3::new(1.0, 2.0, 1.0)),
+            transform: Transform::from_translation(portal_entrance).with_rotation(Quat::from_xyzw(
+                -0.0029154487,
+                -0.52564484,
+                -0.0018014525,
+                0.85069716,
+            )),
             ..default()
         })
         .insert(PortalEntrance);
-    // light
-    commands.spawn_bundle(PointLightBundle {
-        point_light: PointLight {
-            intensity: 1500.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
-        ..default()
-    });
+    // // light
+    // commands.spawn_bundle(PointLightBundle {
+    //     point_light: PointLight {
+    //         intensity: 1500.0,
+    //         shadows_enabled: true,
+    //         ..default()
+    //     },
+    //     transform: Transform::from_xyz(4.0, 8.0, 4.0),
+    //     ..default()
+    // });
     // The main pass camera.
+    let eye = Vec3::new(-7.2432623, 1.4000013, 2.197827);
+    // let eye = Vec3::new(0.0, 1.0, 5.0);
+    let target = Vec3::new(0.0, 1.0, 0.0);
     commands
         .spawn_bundle(Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 1.0, 5.0)
-                .looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+            transform: Transform::from_translation(eye).looking_at(target, Vec3::Y),
             ..default()
         })
-        .insert_bundle((PlayerCamera, CameraController::default()));
+        .insert_bundle((PlayerCamera,))
+        .insert_bundle(FpsCameraBundle::new(
+            FpsCameraController {
+                mouse_rotate_sensitivity: Vec2::splat(0.001),
+                translate_sensitivity: 0.1,
+                ..default()
+            },
+            eye,
+            target,
+        ));
 
     // Set up the portal scene
-    commands
-        .spawn_bundle(SpatialBundle {
+    let sponza_entity = commands
+        .spawn_bundle(SceneBundle {
+            scene: asset_server.load("/Users/roberts/Downloads/glTF-Sample-Models-master/2.0/Sponza/glTF/Sponza.gltf#Scene0"),
             transform: Transform::from_xyz(100.0, 0.0, 0.0),
             ..default()
         })
+        // .spawn_bundle(SpatialBundle {
+        //     // scene: asset_server.load("/Users/roberts/Downloads/glTF-Sample-Models-master/2.0/Sponza/glTF/Sponza.gltf#Scene0"),
+        //     transform: Transform::from_xyz(100.0, 0.0, 0.0),
+        //     ..default()
+        // })
+        .insert(first_pass_layer)
         .with_children(|parent| {
-            // ground plane
-            parent
-                .spawn_bundle(PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::Plane { size: 10.0 })),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::WHITE,
-                        perceptual_roughness: 1.0,
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .insert(first_pass_layer);
+            // // ground plane
+            // parent
+            //     .spawn_bundle(PbrBundle {
+            //         mesh: meshes.add(Mesh::from(shape::Plane { size: 10.0 })),
+            //         material: materials.add(StandardMaterial {
+            //             base_color: Color::WHITE,
+            //             perceptual_roughness: 1.0,
+            //             ..default()
+            //         }),
+            //         ..default()
+            //     })
+            //     .insert(first_pass_layer);
 
-            // left wall
-            let mut transform = Transform::from_xyz(2.5, 2.5, 0.0);
-            transform.rotate_z(std::f32::consts::FRAC_PI_2);
-            parent
-                .spawn_bundle(PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
-                    transform,
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::INDIGO,
-                        perceptual_roughness: 1.0,
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .insert(first_pass_layer);
-            // back (right) wall
-            let mut transform = Transform::from_xyz(0.0, 2.5, -2.5);
-            transform.rotate_x(std::f32::consts::FRAC_PI_2);
-            parent
-                .spawn_bundle(PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
-                    transform,
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::INDIGO,
-                        perceptual_roughness: 1.0,
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .insert(first_pass_layer);
+            // // left wall
+            // let mut transform = Transform::from_xyz(2.5, 2.5, 0.0);
+            // transform.rotate_z(std::f32::consts::FRAC_PI_2);
+            // parent
+            //     .spawn_bundle(PbrBundle {
+            //         mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
+            //         transform,
+            //         material: materials.add(StandardMaterial {
+            //             base_color: Color::INDIGO,
+            //             perceptual_roughness: 1.0,
+            //             ..default()
+            //         }),
+            //         ..default()
+            //     })
+            //     .insert(first_pass_layer);
+            // // back (right) wall
+            // let mut transform = Transform::from_xyz(0.0, 2.5, -2.5);
+            // transform.rotate_x(std::f32::consts::FRAC_PI_2);
+            // parent
+            //     .spawn_bundle(PbrBundle {
+            //         mesh: meshes.add(Mesh::from(shape::Box::new(5.0, 0.15, 5.0))),
+            //         transform,
+            //         material: materials.add(StandardMaterial {
+            //             base_color: Color::INDIGO,
+            //             perceptual_roughness: 1.0,
+            //             ..default()
+            //         }),
+            //         ..default()
+            //     })
+            //     .insert(first_pass_layer);
 
-            // cube
-            parent
-                .spawn_bundle(PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::PINK,
-                        ..default()
-                    }),
-                    transform: Transform::from_xyz(0.0, 0.5, 0.0),
-                    ..default()
-                })
-                .insert(first_pass_layer);
-            // sphere
-            parent
-                .spawn_bundle(PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::UVSphere {
-                        radius: 0.5,
-                        ..default()
-                    })),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::LIME_GREEN,
-                        ..default()
-                    }),
-                    transform: Transform::from_xyz(1.5, 1.0, 1.5),
-                    ..default()
-                })
-                .insert(first_pass_layer);
+            // // cube
+            // parent
+            //     .spawn_bundle(PbrBundle {
+            //         mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+            //         material: materials.add(StandardMaterial {
+            //             base_color: Color::PINK,
+            //             ..default()
+            //         }),
+            //         transform: Transform::from_xyz(0.0, 0.5, 0.0),
+            //         ..default()
+            //     })
+            //     .insert(first_pass_layer);
+            // // sphere
+            // parent
+            //     .spawn_bundle(PbrBundle {
+            //         mesh: meshes.add(Mesh::from(shape::UVSphere {
+            //             radius: 0.5,
+            //             ..default()
+            //         })),
+            //         material: materials.add(StandardMaterial {
+            //             base_color: Color::LIME_GREEN,
+            //             ..default()
+            //         }),
+            //         transform: Transform::from_xyz(1.5, 1.0, 1.5),
+            //         ..default()
+            //     })
+            //     .insert(first_pass_layer);
 
-            // red point light
-            parent
-                .spawn_bundle(PointLightBundle {
-                    // transform: Transform::from_xyz(5.0, 8.0, 2.0),
-                    transform: Transform::from_xyz(1.0, 2.0, 0.0),
-                    point_light: PointLight {
-                        intensity: 1600.0, // lumens - roughly a 100W non-halogen incandescent bulb
-                        color: Color::RED,
-                        shadows_enabled: true,
-                        ..default()
-                    },
-                    ..default()
-                })
-                .with_children(|builder| {
-                    builder
-                        .spawn_bundle(PbrBundle {
-                            mesh: meshes.add(Mesh::from(shape::UVSphere {
-                                radius: 0.1,
-                                ..default()
-                            })),
-                            material: materials.add(StandardMaterial {
-                                base_color: Color::RED,
-                                emissive: Color::rgba_linear(100.0, 0.0, 0.0, 0.0),
-                                ..default()
-                            }),
-                            ..default()
-                        })
-                        .insert(first_pass_layer);
-                });
+            // // red point light
+            // parent
+            //     .spawn_bundle(PointLightBundle {
+            //         // transform: Transform::from_xyz(5.0, 8.0, 2.0),
+            //         transform: Transform::from_xyz(1.0, 2.0, 0.0),
+            //         point_light: PointLight {
+            //             intensity: 1600.0, // lumens - roughly a 100W non-halogen incandescent bulb
+            //             color: Color::RED,
+            //             shadows_enabled: true,
+            //             ..default()
+            //         },
+            //         ..default()
+            //     })
+            //     .insert(first_pass_layer)
+            //     .with_children(|builder| {
+            //         builder
+            //             .spawn_bundle(PbrBundle {
+            //                 mesh: meshes.add(Mesh::from(shape::UVSphere {
+            //                     radius: 0.1,
+            //                     ..default()
+            //                 })),
+            //                 material: materials.add(StandardMaterial {
+            //                     base_color: Color::RED,
+            //                     emissive: Color::rgba_linear(100.0, 0.0, 0.0, 0.0),
+            //                     ..default()
+            //                 }),
+            //                 ..default()
+            //             })
+            //             .insert(first_pass_layer);
+            //     });
 
             // green spot light
-            parent
-                .spawn_bundle(SpotLightBundle {
-                    transform: Transform::from_xyz(-1.0, 2.0, 0.0)
-                        .looking_at(Vec3::new(-1.0, 0.0, 0.0), Vec3::Z),
-                    spot_light: SpotLight {
-                        intensity: 1600.0, // lumens - roughly a 100W non-halogen incandescent bulb
-                        color: Color::GREEN,
-                        shadows_enabled: true,
-                        inner_angle: 0.6,
-                        outer_angle: 0.8,
-                        ..default()
-                    },
-                    ..default()
-                })
-                .with_children(|builder| {
-                    builder
-                        .spawn_bundle(PbrBundle {
-                            transform: Transform::from_rotation(Quat::from_rotation_x(
-                                std::f32::consts::PI / 2.0,
-                            )),
-                            mesh: meshes.add(Mesh::from(shape::Capsule {
-                                depth: 0.125,
-                                radius: 0.1,
-                                ..default()
-                            })),
-                            material: materials.add(StandardMaterial {
-                                base_color: Color::GREEN,
-                                emissive: Color::rgba_linear(0.0, 100.0, 0.0, 0.0),
-                                ..default()
-                            }),
-                            ..default()
-                        })
-                        .insert(first_pass_layer);
-                });
+            // parent
+            //     .spawn_bundle(SpotLightBundle {
+            //         transform: Transform::from_xyz(-1.0, 2.0, 0.0)
+            //             .looking_at(Vec3::new(-1.0, 0.0, 0.0), Vec3::Z),
+            //         spot_light: SpotLight {
+            //             intensity: 1600.0, // lumens - roughly a 100W non-halogen incandescent bulb
+            //             color: Color::GREEN,
+            //             shadows_enabled: true,
+            //             inner_angle: 0.6,
+            //             outer_angle: 0.8,
+            //             ..default()
+            //         },
+            //         ..default()
+            //     })
+            //     .insert(first_pass_layer)
+            //     .with_children(|builder| {
+            //         builder
+            //             .spawn_bundle(PbrBundle {
+            //                 transform: Transform::from_rotation(Quat::from_rotation_x(
+            //                     std::f32::consts::PI / 2.0,
+            //                 )),
+            //                 mesh: meshes.add(Mesh::from(shape::Capsule {
+            //                     depth: 0.125,
+            //                     radius: 0.1,
+            //                     ..default()
+            //                 })),
+            //                 material: materials.add(StandardMaterial {
+            //                     base_color: Color::GREEN,
+            //                     emissive: Color::rgba_linear(0.0, 100.0, 0.0, 0.0),
+            //                     ..default()
+            //                 }),
+            //                 ..default()
+            //             })
+            //             .insert(first_pass_layer);
+            //     });
 
             // blue point light
             parent
@@ -365,12 +401,14 @@ fn setup(
                     transform: Transform::from_xyz(0.0, 4.0, 0.0),
                     point_light: PointLight {
                         intensity: 1600.0, // lumens - roughly a 100W non-halogen incandescent bulb
-                        color: Color::BLUE,
-                        shadows_enabled: true,
+                        color: Color::WHITE,
+                        shadows_enabled: false,
+                        range: 70.0,
                         ..default()
                     },
                     ..default()
                 })
+                .insert(first_pass_layer)
                 .with_children(|builder| {
                     builder
                         .spawn_bundle(PbrBundle {
@@ -401,24 +439,49 @@ fn setup(
                         target: RenderTarget::Image(image_handle.clone()),
                         ..default()
                     },
-                    transform: Transform::from_xyz(-2.0, 2.5, 5.0)
-                        .looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+                    // transform: Transform::from_xyz(-2.0, 2.5, 5.0)
+                    //     .looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
                     ..default()
                 })
                 .insert_bundle((first_pass_layer, PortalCamera));
 
             parent
-                .spawn_bundle(TransformBundle {
-                    local: Transform::from_xyz(-2.0, 1.0, 5.0)
-                        .looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+                .spawn_bundle(SpatialBundle {
+                    // transform: Transform::from_xyz(-2.0, 1.0, 5.0)
+                    //     .looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+                    transform: Transform::from_translation(Vec3::new(
+                        -2.1439185,
+                        portal_entrance.y,
+                        0.009181549,
+                    )).with_rotation(Quat::from_xyzw(
+                        -0.014527673,
+                        -0.68689746,
+                        -0.01373614,
+                        0.7264793,
+                    )),
                     ..default()
                 })
-                .insert(PortalExit);
-        });
+                .insert_bundle((first_pass_layer, PortalExit));
+                // .with_children(|parent| {
+                //     parent
+                //         .spawn_bundle(PbrBundle {
+                //             mesh: meshes.add(Mesh::from(shape::Quad::new(Vec2::new(1.0, 2.0)))),
+                //             material: materials.add(StandardMaterial {
+                //                 base_color: Color::WHITE,
+                //                 perceptual_roughness: 1.0,
+                //                 ..default()
+                //             }),
+                //             ..default()
+                //         })
+                //         .insert(first_pass_layer);
+                // });
+        }).id();
+
+    commands.insert_resource(Sponza(sponza_entity));
 
     // ambient light
     commands.insert_resource(AmbientLight {
-        color: Color::ORANGE_RED,
+        color: Color::WHITE,
         brightness: 0.02,
     });
 
@@ -442,145 +505,45 @@ fn setup(
         transform: Transform {
             translation: Vec3::new(0.0, 2.0, 0.0),
             rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_4),
+            // rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
             ..default()
         },
         ..default()
     });
 }
 
-#[derive(Component)]
-struct CameraController {
-    pub enabled: bool,
-    pub initialized: bool,
-    pub sensitivity: f32,
-    pub key_forward: KeyCode,
-    pub key_back: KeyCode,
-    pub key_left: KeyCode,
-    pub key_right: KeyCode,
-    pub key_up: KeyCode,
-    pub key_down: KeyCode,
-    pub key_run: KeyCode,
-    pub mouse_key_enable_mouse: MouseButton,
-    pub keyboard_key_enable_mouse: KeyCode,
-    pub walk_speed: f32,
-    pub run_speed: f32,
-    pub friction: f32,
-    pub pitch: f32,
-    pub yaw: f32,
-    pub velocity: Vec3,
-}
+struct Sponza(Entity);
 
-impl Default for CameraController {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            initialized: false,
-            sensitivity: 0.5,
-            key_forward: KeyCode::W,
-            key_back: KeyCode::S,
-            key_left: KeyCode::A,
-            key_right: KeyCode::D,
-            key_up: KeyCode::E,
-            key_down: KeyCode::Q,
-            key_run: KeyCode::LShift,
-            mouse_key_enable_mouse: MouseButton::Left,
-            keyboard_key_enable_mouse: KeyCode::M,
-            walk_speed: 5.0,
-            run_speed: 15.0,
-            friction: 0.5,
-            pitch: 0.0,
-            yaw: 0.0,
-            velocity: Vec3::ZERO,
+fn sponza_loaded(
+    mut commands: Commands,
+    sponza: Res<Sponza>,
+    scene_instances: Query<&SceneInstance>,
+    scene_spawner: Res<SceneSpawner>,
+    mut prepared: Local<bool>,
+) {
+    if !*prepared {
+        if let Ok(scene_instance) = scene_instances.get(sponza.0) {
+            if scene_spawner.instance_is_ready(**scene_instance) {
+                let first_pass_layer = RenderLayers::layer(1);
+                for entity in scene_spawner
+                    .iter_instance_entities(**scene_instance)
+                    .unwrap()
+                {
+                    commands.entity(entity).insert(first_pass_layer);
+                }
+                *prepared = true;
+            }
         }
     }
 }
 
-fn camera_controller(
-    time: Res<Time>,
-    mut mouse_events: EventReader<MouseMotion>,
-    mouse_button_input: Res<Input<MouseButton>>,
+fn print_position(
     key_input: Res<Input<KeyCode>>,
-    mut move_toggled: Local<bool>,
-    mut query: Query<(&mut Transform, &mut CameraController), With<Camera>>,
+    cameras: Query<&Transform, With<FpsCameraController>>,
 ) {
-    let dt = time.delta_seconds();
-
-    if let Ok((mut transform, mut options)) = query.get_single_mut() {
-        if !options.initialized {
-            let (yaw, pitch, _roll) = transform.rotation.to_euler(EulerRot::YXZ);
-            options.yaw = yaw;
-            options.pitch = pitch;
-            options.initialized = true;
-        }
-        if !options.enabled {
-            return;
-        }
-
-        // Handle key input
-        let mut axis_input = Vec3::ZERO;
-        if key_input.pressed(options.key_forward) {
-            axis_input.z += 1.0;
-        }
-        if key_input.pressed(options.key_back) {
-            axis_input.z -= 1.0;
-        }
-        if key_input.pressed(options.key_right) {
-            axis_input.x += 1.0;
-        }
-        if key_input.pressed(options.key_left) {
-            axis_input.x -= 1.0;
-        }
-        if key_input.pressed(options.key_up) {
-            axis_input.y += 1.0;
-        }
-        if key_input.pressed(options.key_down) {
-            axis_input.y -= 1.0;
-        }
-        if key_input.just_pressed(options.keyboard_key_enable_mouse) {
-            *move_toggled = !*move_toggled;
-        }
-
-        // Apply movement update
-        if axis_input != Vec3::ZERO {
-            let max_speed = if key_input.pressed(options.key_run) {
-                options.run_speed
-            } else {
-                options.walk_speed
-            };
-            options.velocity = axis_input.normalize() * max_speed;
-        } else {
-            let friction = options.friction.clamp(0.0, 1.0);
-            options.velocity *= 1.0 - friction;
-            if options.velocity.length_squared() < 1e-6 {
-                options.velocity = Vec3::ZERO;
-            }
-        }
-        let forward = transform.forward();
-        let right = transform.right();
-        transform.translation += options.velocity.x * dt * right
-            + options.velocity.y * dt * Vec3::Y
-            + options.velocity.z * dt * forward;
-
-        // Handle mouse input
-        let mut mouse_delta = Vec2::ZERO;
-        if mouse_button_input.pressed(options.mouse_key_enable_mouse) || *move_toggled {
-            for mouse_event in mouse_events.iter() {
-                mouse_delta += mouse_event.delta;
-            }
-        }
-
-        if mouse_delta != Vec2::ZERO {
-            // Apply look update
-            let (pitch, yaw) = (
-                (options.pitch - mouse_delta.y * 0.5 * options.sensitivity * dt).clamp(
-                    -0.99 * std::f32::consts::FRAC_PI_2,
-                    0.99 * std::f32::consts::FRAC_PI_2,
-                ),
-                options.yaw - mouse_delta.x * options.sensitivity * dt,
-            );
-            transform.rotation = Quat::from_euler(EulerRot::ZYX, 0.0, yaw, pitch);
-            options.pitch = pitch;
-            options.yaw = yaw;
+    if key_input.just_pressed(KeyCode::P) {
+        for camera in cameras.iter() {
+            dbg!(camera);
         }
     }
 }

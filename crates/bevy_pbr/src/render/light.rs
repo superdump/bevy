@@ -48,7 +48,7 @@ pub enum RenderLightSystems {
     QueueShadows,
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct ExtractedPointLight {
     color: Color,
     /// luminous intensity in lumens per steradian
@@ -797,10 +797,14 @@ pub fn prepare_lights(
 
     let point_light_count = point_lights
         .iter()
-        .filter(|light| light.1.shadows_enabled && light.1.spot_light_angles.is_none())
+        .filter(|(_, light)| light.spot_light_angles.is_none())
         .count();
 
-    let point_light_shadow_maps_count = point_light_count.min(max_texture_cubes);
+    let point_light_shadow_maps_count = point_lights
+        .iter()
+        .filter(|(_, light)| light.shadows_enabled && light.spot_light_angles.is_none())
+        .count()
+        .min(max_texture_cubes);
 
     let directional_shadow_maps_count = directional_lights
         .iter()
@@ -814,6 +818,13 @@ pub fn prepare_lights(
         .count()
         .min(max_texture_array_layers - directional_shadow_maps_count);
 
+    // dbg!((
+    //     point_light_count,
+    //     point_light_shadow_maps_count,
+    //     max_texture_array_layers,
+    //     directional_shadow_maps_count,
+    //     spot_light_shadow_maps_count,
+    // ));
     // Sort lights by
     // - point-light vs spot-light, so that we can iterate point lights and spot lights in contiguous blocks in the fragment shader,
     // - then those with shadows enabled first, so that the index can be used to render at most `point_light_shadow_maps_count`
@@ -1044,6 +1055,7 @@ pub fn prepare_lights(
             let spot_view_matrix = spot_light_view_matrix(&light.transform);
             let spot_view_transform = spot_view_matrix.into();
 
+            // dbg!((point_light_count, spot_light_shadow_maps_count, light_index));
             let angle = light.spot_light_angles.expect("lights should be sorted so that \
                 [point_light_shadow_maps_count..point_light_shadow_maps_count + spot_light_shadow_maps_count] are spot lights").1;
             let spot_projection = spot_light_projection_matrix(angle);
