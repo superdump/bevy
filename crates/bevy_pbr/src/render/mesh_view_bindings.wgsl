@@ -40,3 +40,15 @@ var<storage> cluster_light_index_lists: ClusterLightIndexLists;
 @group(0) @binding(8)
 var<storage> cluster_offsets_and_counts: ClusterOffsetsAndCounts;
 #endif
+
+#ifdef MULTISAMPLED
+@group(0) @binding(9)
+var depth_prepass_texture: texture_depth_multisampled_2d;
+@group(0) @binding(10)
+var normal_prepass_texture: texture_multisampled_2d<f32>;
+#else
+@group(0) @binding(9)
+var depth_prepass_texture: texture_depth_2d;
+@group(0) @binding(10)
+var normal_prepass_texture: texture_2d<f32>;
+#endif
