@@ -223,7 +223,7 @@ impl Plugin for PbrPlugin {
                 render::extract_lights.label(RenderLightSystems::ExtractLights),
             )
             .add_system_to_stage(
-                RenderStage::Prepare,
+                RenderStage::Queue,
                 // this is added as an exclusive system because it contributes new views. it must run (and have Commands applied)
                 // _before_ the `prepare_views()` system is run. ideally this becomes a normal system when "stageless" features come out
                 render::prepare_lights
@@ -231,7 +231,7 @@ impl Plugin for PbrPlugin {
                     .label(RenderLightSystems::PrepareLights),
             )
             .add_system_to_stage(
-                RenderStage::Prepare,
+                RenderStage::Queue,
                 // NOTE: This needs to run after prepare_lights. As prepare_lights is an exclusive system,
                 // just adding it to the non-exclusive systems in the Prepare stage means it runs after
                 // prepare_lights.
