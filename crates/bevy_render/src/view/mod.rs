@@ -47,8 +47,8 @@ impl Plugin for ViewPlugin {
                 .init_resource::<ViewUniforms>()
                 .add_system_to_stage(RenderStage::Prepare, prepare_view_uniforms)
                 .add_system_to_stage(
-                    RenderStage::Prepare,
-                    prepare_view_targets.after(WindowSystem::Prepare),
+                    RenderStage::Queue,
+                    prepare_view_targets.after(WindowSystem::Prepare).at_start(),
                 );
         }
     }

@@ -32,8 +32,8 @@ impl Plugin for WindowRenderPlugin {
                 .init_resource::<NonSendMarker>()
                 .add_system_to_stage(RenderStage::Extract, extract_windows)
                 .add_system_to_stage(
-                    RenderStage::Prepare,
-                    prepare_windows.label(WindowSystem::Prepare),
+                    RenderStage::Queue,
+                    prepare_windows.label(WindowSystem::Prepare).at_start(),
                 );
         }
     }
