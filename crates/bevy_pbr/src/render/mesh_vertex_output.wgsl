@@ -11,3 +11,4 @@
 #ifdef VERTEX_COLORS
 @location(4) color: vec4<f32>,
 #endif
+@location(5) mesh_index: u32,
