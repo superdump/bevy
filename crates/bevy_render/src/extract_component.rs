@@ -233,7 +233,7 @@ impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> ComponentVecUni
             temp: MaxCapacityArray(Vec::with_capacity(capacity), capacity),
             current_offset: 0,
             uniforms: DynamicUniformBuffer::<MaxCapacityArray<Vec<C>>>::from_alignment(alignment),
-            dynamic_offset_alignment: alignment as u32,
+            dynamic_offset_alignment: alignment,
         }
     }
 
