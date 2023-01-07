@@ -104,8 +104,17 @@ impl<C> Default for UniformComponentPlugin<C> {
 impl<C: Component + ShaderType + WriteInto + Clone> Plugin for UniformComponentPlugin<C> {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            let limits = render_app
+                .world
+                .get_resource::<RenderDevice>()
+                .expect(
+                    "RenderDevice Resource must exist before a UniformComponentVecPlugin is added",
+                )
+                .limits();
             render_app
-                .insert_resource(ComponentUniforms::<C>::default())
+                .insert_resource(ComponentUniforms::<C>::from_alignment(
+                    limits.min_uniform_buffer_offset_alignment,
+                ))
                 .add_system_to_stage(RenderStage::Prepare, prepare_uniform_components::<C>);
         }
     }
@@ -126,18 +135,16 @@ impl<C: Component + ShaderType> Deref for ComponentUniforms<C> {
     }
 }
 
-impl<C: Component + ShaderType> ComponentUniforms<C> {
+impl<C: Component + ShaderType + WriteInto> ComponentUniforms<C> {
+    pub fn from_alignment(alignment: u32) -> Self {
+        Self {
+            uniforms: DynamicUniformBuffer::<C>::from_alignment(alignment),
+        }
+    }
+
     #[inline]
     pub fn uniforms(&self) -> &DynamicUniformBuffer<C> {
         &self.uniforms
-    }
-}
-
-impl<C: Component + ShaderType> Default for ComponentUniforms<C> {
-    fn default() -> Self {
-        Self {
-            uniforms: Default::default(),
-        }
     }
 }
 
@@ -194,9 +201,17 @@ impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> Plugin
 {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            let limits = render_app
+                .world
+                .get_resource::<RenderDevice>()
+                .expect(
+                    "RenderDevice Resource must exist before a UniformComponentVecPlugin is added",
+                )
+                .limits();
             render_app
-                .insert_resource(ComponentVecUniforms::<C>::from_capacity(
-                    16384 / C::min_size().get() as usize,
+                .insert_resource(ComponentVecUniforms::<C>::new(
+                    (limits.max_uniform_buffer_binding_size as u64 / C::min_size().get()) as usize,
+                    limits.min_uniform_buffer_offset_alignment,
                 ))
                 .add_system_to_stage(RenderStage::Prepare, prepare_uniform_component_vecs::<C>);
         }
@@ -209,14 +224,16 @@ pub struct ComponentVecUniforms<C: Component + ShaderType + ShaderSize> {
     uniforms: DynamicUniformBuffer<MaxCapacityArray<Vec<C>>>,
     temp: MaxCapacityArray<Vec<C>>,
     current_offset: u32,
+    dynamic_offset_alignment: u32,
 }
 
 impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> ComponentVecUniforms<C> {
-    pub fn from_capacity(capacity: usize) -> Self {
+    pub fn new(capacity: usize, alignment: u32) -> Self {
         Self {
             temp: MaxCapacityArray(Vec::with_capacity(capacity), capacity),
             current_offset: 0,
-            uniforms: DynamicUniformBuffer::<MaxCapacityArray<Vec<C>>>::default(),
+            uniforms: DynamicUniformBuffer::<MaxCapacityArray<Vec<C>>>::from_alignment(alignment),
+            dynamic_offset_alignment: alignment as u32,
         }
     }
 
@@ -247,10 +264,11 @@ impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> ComponentVecUni
     pub fn flush(&mut self) {
         self.uniforms.push(self.temp.clone());
 
-        let size = self.temp.size().get();
-        self.current_offset += size as u32;
-        if size % 256 > 0 {
-            self.current_offset += 256 - (size % 256) as u32;
+        let size = self.temp.size().get() as u32;
+        self.current_offset += size;
+        if size % self.dynamic_offset_alignment > 0 {
+            self.current_offset +=
+                self.dynamic_offset_alignment - (size % self.dynamic_offset_alignment);
         }
 
         self.temp.0.clear();

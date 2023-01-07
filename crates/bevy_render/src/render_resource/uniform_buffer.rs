@@ -148,20 +148,18 @@ pub struct DynamicUniformBuffer<T: ShaderType> {
     label_changed: bool,
 }
 
-impl<T: ShaderType> Default for DynamicUniformBuffer<T> {
-    fn default() -> Self {
+impl<T: ShaderType + WriteInto> DynamicUniformBuffer<T> {
+    pub fn from_alignment(alignment: u32) -> Self {
         Self {
             values: Vec::new(),
-            scratch: DynamicUniformBufferWrapper::new(Vec::new()),
+            scratch: DynamicUniformBufferWrapper::new_with_alignment(Vec::new(), alignment as u64),
             buffer: None,
             capacity: 0,
             label: None,
             label_changed: false,
         }
     }
-}
 
-impl<T: ShaderType + WriteInto> DynamicUniformBuffer<T> {
     #[inline]
     pub fn buffer(&self) -> Option<&Buffer> {
         self.buffer.as_ref()

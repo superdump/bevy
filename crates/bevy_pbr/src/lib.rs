@@ -48,6 +48,7 @@ use bevy_render::{
     render_graph::RenderGraph,
     render_phase::{sort_phase_system, AddRenderCommand, DrawFunctions},
     render_resource::{Shader, SpecializedMeshPipelines},
+    renderer::RenderDevice,
     view::VisibilitySystems,
     RenderApp, RenderStage,
 };
@@ -213,6 +214,12 @@ impl Plugin for PbrPlugin {
             Err(_) => return,
         };
 
+        let limits = render_app
+            .world
+            .get_resource::<RenderDevice>()
+            .expect("RenderDevice Resource must exist before a UniformComponentVecPlugin is added")
+            .limits();
+
         render_app
             .add_system_to_stage(
                 RenderStage::Extract,
@@ -245,7 +252,9 @@ impl Plugin for PbrPlugin {
             .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Shadow>)
             .init_resource::<ShadowPipeline>()
             .init_resource::<DrawFunctions<Shadow>>()
-            .init_resource::<LightMeta>()
+            .insert_resource(LightMeta::from_alignment(
+                limits.min_uniform_buffer_offset_alignment,
+            ))
             .init_resource::<GlobalLightMeta>()
             .init_resource::<SpecializedMeshPipelines<ShadowPipeline>>();
 
