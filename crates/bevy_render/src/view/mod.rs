@@ -43,8 +43,17 @@ impl Plugin for ViewPlugin {
             .add_plugin(VisibilityPlugin);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            let limits = render_app
+                .world
+                .get_resource::<RenderDevice>()
+                .expect(
+                    "RenderDevice Resource must exist before a UniformComponentVecPlugin is added",
+                )
+                .limits();
             render_app
-                .init_resource::<ViewUniforms>()
+                .insert_resource(ViewUniforms::from_alignment(
+                    limits.min_uniform_buffer_offset_alignment,
+                ))
                 .add_system_to_stage(RenderStage::Prepare, prepare_view_uniforms)
                 .add_system_to_stage(
                     RenderStage::Queue,
@@ -112,9 +121,17 @@ pub struct ViewUniform {
     viewport: Vec4,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct ViewUniforms {
     pub uniforms: DynamicUniformBuffer<ViewUniform>,
+}
+
+impl ViewUniforms {
+    pub fn from_alignment(alignment: u32) -> Self {
+        Self {
+            uniforms: DynamicUniformBuffer::<ViewUniform>::from_alignment(alignment),
+        }
+    }
 }
 
 #[derive(Component)]

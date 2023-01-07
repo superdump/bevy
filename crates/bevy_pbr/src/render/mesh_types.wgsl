@@ -7,6 +7,10 @@ struct Mesh {
     flags: u32,
 };
 
+struct Meshes {
+    data: array<Mesh, #{MESHES_UNIFORM_ARRAY_LEN}u>,
+}
+
 #ifdef SKINNED
 struct SkinnedMesh {
     data: array<mat4x4<f32>, 256u>,

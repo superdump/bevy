@@ -32,6 +32,8 @@ fn fragment(in: FragmentInput) -> @location(0) vec4<f32> {
         // the material members
         var pbr_input: PbrInput;
 
+        pbr_input.mesh_flags = meshes.data[in.mesh_index].flags;
+
         pbr_input.material.base_color = output_color;
         pbr_input.material.reflectance = material.reflectance;
         pbr_input.material.flags = material.flags;

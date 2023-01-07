@@ -686,10 +686,19 @@ impl GlobalLightMeta {
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct LightMeta {
     pub view_gpu_lights: DynamicUniformBuffer<GpuLights>,
     pub shadow_view_bind_group: Option<BindGroup>,
+}
+
+impl LightMeta {
+    pub fn from_alignment(alignment: u32) -> Self {
+        Self {
+            view_gpu_lights: DynamicUniformBuffer::<GpuLights>::from_alignment(alignment),
+            shadow_view_bind_group: None,
+        }
+    }
 }
 
 #[derive(Component)]

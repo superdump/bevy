@@ -13,7 +13,10 @@ use bevy_ecs::{
 use bevy_math::{Mat3A, Mat4, Vec2};
 use bevy_reflect::TypeUuid;
 use bevy_render::{
-    extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
+    extract_component::{
+        ComponentVecUniforms, DynamicUniformIndices, UniformComponentVecPlugin,
+        MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE,
+    },
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{
         skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
@@ -92,7 +95,9 @@ impl Plugin for MeshRenderPlugin {
         load_internal_asset!(app, MESH_SHADER_HANDLE, "mesh.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, SKINNING_HANDLE, "skinning.wgsl", Shader::from_wgsl);
 
-        app.add_plugin(UniformComponentPlugin::<MeshUniform>::default());
+        // NOTE: This plugin must be inserted before the MeshPipeline resource
+        // as MeshPipeline initialization uses information from it
+        app.add_plugin(UniformComponentVecPlugin::<MeshUniform>::default());
 
         let Ok(render_app) = app.get_sub_app_mut(RenderApp) else { return };
         render_app
@@ -106,7 +111,7 @@ impl Plugin for MeshRenderPlugin {
     }
 }
 
-#[derive(Component, ShaderType, Clone)]
+#[derive(Default, Component, ShaderType, Clone, Copy)]
 pub struct MeshUniform {
     pub transform: Mat4,
     pub inverse_transpose_model: Mat4,
@@ -258,6 +263,7 @@ pub struct MeshPipeline {
     // This dummy white texture is to be used in place of optional StandardMaterial textures
     pub dummy_white_gpu_image: GpuImage,
     pub clustered_forward_buffer_binding_type: BufferBindingType,
+    pub mesh_uniform_array_len: u32,
 }
 
 impl FromWorld for MeshPipeline {
@@ -266,8 +272,10 @@ impl FromWorld for MeshPipeline {
             Res<RenderDevice>,
             Res<DefaultImageSampler>,
             Res<RenderQueue>,
+            Res<ComponentVecUniforms<MeshUniform>>,
         )> = SystemState::new(world);
-        let (render_device, default_sampler, render_queue) = system_state.get_mut(world);
+        let (render_device, default_sampler, render_queue, mesh_uniforms) =
+            system_state.get_mut(world);
         let clustered_forward_buffer_binding_type = render_device
             .get_supported_read_only_binding_type(CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT);
 
@@ -400,7 +408,7 @@ impl FromWorld for MeshPipeline {
             ty: BindingType::Buffer {
                 ty: BufferBindingType::Uniform,
                 has_dynamic_offset: true,
-                min_binding_size: Some(MeshUniform::min_size()),
+                min_binding_size: Some(mesh_uniforms.size()),
             },
             count: None,
         };
@@ -483,6 +491,12 @@ impl FromWorld for MeshPipeline {
             skinned_mesh_layout,
             clustered_forward_buffer_binding_type,
             dummy_white_gpu_image,
+            mesh_uniform_array_len: (render_device
+                .limits()
+                .max_uniform_buffer_binding_size
+                .min(MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE)
+                as u64
+                / MeshUniform::min_size().get()) as u32,
         }
     }
 }
@@ -589,6 +603,11 @@ impl SpecializedMeshPipeline for MeshPipeline {
         shader_defs.push(ShaderDefVal::UInt(
             "MAX_DIRECTIONAL_LIGHTS".to_string(),
             MAX_DIRECTIONAL_LIGHTS as u32,
+        ));
+
+        shader_defs.push(ShaderDefVal::UInt(
+            "MESHES_UNIFORM_ARRAY_LEN".to_string(),
+            self.mesh_uniform_array_len,
         ));
 
         if layout.contains(Mesh::ATTRIBUTE_UV_0) {
@@ -713,10 +732,10 @@ pub fn queue_mesh_bind_group(
     mut commands: Commands,
     mesh_pipeline: Res<MeshPipeline>,
     render_device: Res<RenderDevice>,
-    mesh_uniforms: Res<ComponentUniforms<MeshUniform>>,
+    mesh_uniforms: Res<ComponentVecUniforms<MeshUniform>>,
     skinned_mesh_uniform: Res<SkinnedMeshUniform>,
 ) {
-    if let Some(mesh_binding) = mesh_uniforms.uniforms().binding() {
+    if let Some(mesh_binding) = mesh_uniforms.binding() {
         let mut mesh_bind_group = MeshBindGroup {
             normal: render_device.create_bind_group(&BindGroupDescriptor {
                 entries: &[BindGroupEntry {
@@ -905,14 +924,14 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
     type Param = SRes<MeshBindGroup>;
     type ViewWorldQuery = ();
     type ItemWorldQuery = (
-        Read<DynamicUniformIndex<MeshUniform>>,
+        Read<DynamicUniformIndices<MeshUniform>>,
         Option<Read<SkinnedMeshJoints>>,
     );
     #[inline]
     fn render<'w>(
         _item: &P,
         _view: (),
-        (mesh_index, skinned_mesh_joints): ROQueryItem<'_, Self::ItemWorldQuery>,
+        (mesh_indices, skinned_mesh_joints): ROQueryItem<'_, Self::ItemWorldQuery>,
         mesh_bind_group: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -920,13 +939,13 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
             pass.set_bind_group(
                 I,
                 mesh_bind_group.into_inner().skinned.as_ref().unwrap(),
-                &[mesh_index.index(), joints.index],
+                &[mesh_indices.offset(), joints.index],
             );
         } else {
             pass.set_bind_group(
                 I,
                 &mesh_bind_group.into_inner().normal,
-                &[mesh_index.index()],
+                &[mesh_indices.offset()],
             );
         }
         RenderCommandResult::Success
@@ -937,12 +956,12 @@ pub struct DrawMesh;
 impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
     type Param = SRes<RenderAssets<Mesh>>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = Read<Handle<Mesh>>;
+    type ItemWorldQuery = (Read<Handle<Mesh>>, Read<DynamicUniformIndices<MeshUniform>>);
     #[inline]
     fn render<'w>(
         _item: &P,
         _view: (),
-        mesh_handle: ROQueryItem<'_, Self::ItemWorldQuery>,
+        (mesh_handle, mesh_indices): ROQueryItem<'_, Self::ItemWorldQuery>,
         meshes: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -955,10 +974,13 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
                     count,
                 } => {
                     pass.set_index_buffer(buffer.slice(..), 0, *index_format);
-                    pass.draw_indexed(0..*count, 0, 0..1);
+                    pass.draw_indexed(0..*count, 0, mesh_indices.index()..mesh_indices.index() + 1);
                 }
                 GpuBufferInfo::NonIndexed { vertex_count } => {
-                    pass.draw(0..*vertex_count, 0..1);
+                    pass.draw(
+                        0..*vertex_count,
+                        mesh_indices.index()..mesh_indices.index() + 1,
+                    );
                 }
             }
             RenderCommandResult::Success

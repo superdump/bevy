@@ -130,6 +130,7 @@ struct PbrInput {
     // view world position
     V: vec3<f32>,
     is_orthographic: bool,
+    mesh_flags: u32,
 };
 
 // Creates a PbrInput with default values
@@ -197,7 +198,7 @@ fn pbr(
     for (var i: u32 = offset_and_counts[0]; i < offset_and_counts[0] + offset_and_counts[1]; i = i + 1u) {
         let light_id = get_light_id(i);
         var shadow: f32 = 1.0;
-        if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+        if ((in.mesh_flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
                 && (point_lights.data[light_id].flags & POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
             shadow = fetch_point_shadow(light_id, in.world_position, in.world_normal);
         }
@@ -209,7 +210,7 @@ fn pbr(
     for (var i: u32 = offset_and_counts[0] + offset_and_counts[1]; i < offset_and_counts[0] + offset_and_counts[1] + offset_and_counts[2]; i = i + 1u) {
         let light_id = get_light_id(i);
         var shadow: f32 = 1.0;
-        if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+        if ((in.mesh_flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
                 && (point_lights.data[light_id].flags & POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
             shadow = fetch_spot_shadow(light_id, in.world_position, in.world_normal);
         }
@@ -220,7 +221,7 @@ fn pbr(
     let n_directional_lights = lights.n_directional_lights;
     for (var i: u32 = 0u; i < n_directional_lights; i = i + 1u) {
         var shadow: f32 = 1.0;
-        if ((mesh.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+        if ((in.mesh_flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
                 && (lights.directional_lights[i].flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
             shadow = fetch_directional_shadow(i, in.world_position, in.world_normal);
         }

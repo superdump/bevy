@@ -12,7 +12,9 @@ use bevy_ecs::{
     query::{QueryItem, ReadOnlyWorldQuery, WorldQuery},
     system::lifetimeless::Read,
 };
-use std::{marker::PhantomData, ops::Deref};
+use encase::{MaxCapacityArray, ShaderSize};
+use std::{marker::PhantomData, num::NonZeroU64, ops::Deref};
+use wgpu::BindingResource;
 
 /// Stores the index of a uniform inside of [`ComponentUniforms`].
 #[derive(Component)]
@@ -22,6 +24,29 @@ pub struct DynamicUniformIndex<C: Component> {
 }
 
 impl<C: Component> DynamicUniformIndex<C> {
+    #[inline]
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+}
+
+/// Stores the indices of a uniform inside of [`ComponentVecUniforms`].
+#[derive(Component)]
+pub struct DynamicUniformIndices<C: Component> {
+    /// The dynamic offset within the uniform buffer at which to bind
+    offset: u32,
+    /// The index within the array in the binding at that offset at which the
+    /// entity's component data can be looked up in a shader
+    index: u32,
+    marker: PhantomData<C>,
+}
+
+impl<C: Component> DynamicUniformIndices<C> {
+    #[inline]
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
+
     #[inline]
     pub fn index(&self) -> u32 {
         self.index
@@ -79,8 +104,17 @@ impl<C> Default for UniformComponentPlugin<C> {
 impl<C: Component + ShaderType + WriteInto + Clone> Plugin for UniformComponentPlugin<C> {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            let limits = render_app
+                .world
+                .get_resource::<RenderDevice>()
+                .expect(
+                    "RenderDevice Resource must exist before a UniformComponentVecPlugin is added",
+                )
+                .limits();
             render_app
-                .insert_resource(ComponentUniforms::<C>::default())
+                .insert_resource(ComponentUniforms::<C>::from_alignment(
+                    limits.min_uniform_buffer_offset_alignment,
+                ))
                 .add_system_to_stage(RenderStage::Prepare, prepare_uniform_components::<C>);
         }
     }
@@ -101,18 +135,16 @@ impl<C: Component + ShaderType> Deref for ComponentUniforms<C> {
     }
 }
 
-impl<C: Component + ShaderType> ComponentUniforms<C> {
+impl<C: Component + ShaderType + WriteInto> ComponentUniforms<C> {
+    pub fn from_alignment(alignment: u32) -> Self {
+        Self {
+            uniforms: DynamicUniformBuffer::<C>::from_alignment(alignment),
+        }
+    }
+
     #[inline]
     pub fn uniforms(&self) -> &DynamicUniformBuffer<C> {
         &self.uniforms
-    }
-}
-
-impl<C: Component + ShaderType> Default for ComponentUniforms<C> {
-    fn default() -> Self {
-        Self {
-            uniforms: Default::default(),
-        }
     }
 }
 
@@ -145,6 +177,146 @@ fn prepare_uniform_components<C: Component>(
     component_uniforms
         .uniforms
         .write_buffer(&render_device, &render_queue);
+}
+
+/// This plugin prepares the components of the corresponding type for the GPU
+/// by transforming them into uniforms.
+///
+/// They can then be accessed from the [`ComponentVecUniforms`] resource.
+/// For referencing the newly created uniforms a [`DynamicUniformIndices`] is inserted
+/// for every processed entity.
+///
+/// Therefore it sets up the [`RenderStage::Prepare`](crate::RenderStage::Prepare) step
+/// for the specified [`ExtractComponent`].
+pub struct UniformComponentVecPlugin<C>(PhantomData<fn() -> C>);
+
+impl<C> Default for UniformComponentVecPlugin<C> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+// 1MB else we will make really large arrays on macOS which reports very large
+// `max_uniform_buffer_binding_size`. On macOS this ends up being the minimum
+// size of the uniform buffer as well as the size of each chunk of data at a
+// dynamic offset.
+pub const MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE: u32 = 1 << 20;
+
+impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> Plugin
+    for UniformComponentVecPlugin<C>
+{
+    fn build(&self, app: &mut App) {
+        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            let limits = render_app
+                .world
+                .get_resource::<RenderDevice>()
+                .expect(
+                    "RenderDevice Resource must exist before a UniformComponentVecPlugin is added",
+                )
+                .limits();
+            render_app
+                .insert_resource(ComponentVecUniforms::<C>::new(
+                    (limits
+                        .max_uniform_buffer_binding_size
+                        .min(MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE)
+                        as u64
+                        / C::min_size().get()) as usize,
+                    limits.min_uniform_buffer_offset_alignment,
+                ))
+                .add_system_to_stage(RenderStage::Prepare, prepare_uniform_component_vecs::<C>);
+        }
+    }
+}
+
+/// Stores all uniforms of the component type.
+#[derive(Resource)]
+pub struct ComponentVecUniforms<C: Component + ShaderType + ShaderSize> {
+    uniforms: DynamicUniformBuffer<MaxCapacityArray<Vec<C>>>,
+    temp: MaxCapacityArray<Vec<C>>,
+    current_offset: u32,
+    dynamic_offset_alignment: u32,
+}
+
+#[inline]
+fn round_up(v: u64, a: u64) -> u64 {
+    ((v + a - 1) / a) * a
+}
+
+impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> ComponentVecUniforms<C> {
+    pub fn new(capacity: usize, alignment: u32) -> Self {
+        Self {
+            temp: MaxCapacityArray(Vec::with_capacity(capacity), capacity),
+            current_offset: 0,
+            uniforms: DynamicUniformBuffer::<MaxCapacityArray<Vec<C>>>::from_alignment(alignment),
+            dynamic_offset_alignment: alignment,
+        }
+    }
+
+    #[inline]
+    pub fn size(&self) -> NonZeroU64 {
+        self.temp.size()
+    }
+
+    pub fn clear(&mut self) {
+        self.uniforms.clear();
+        self.current_offset = 0;
+        self.temp.0.clear();
+    }
+
+    pub fn push(&mut self, component: C) -> DynamicUniformIndices<C> {
+        let result = DynamicUniformIndices::<C> {
+            offset: self.current_offset,
+            index: self.temp.0.len() as u32,
+            marker: PhantomData,
+        };
+        self.temp.0.push(component);
+        if self.temp.0.len() == self.temp.1 {
+            self.flush();
+        }
+        result
+    }
+
+    pub fn flush(&mut self) {
+        self.uniforms.push(self.temp.clone());
+
+        self.current_offset +=
+            round_up(self.temp.size().get(), self.dynamic_offset_alignment as u64) as u32;
+
+        self.temp.0.clear();
+    }
+
+    pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
+        if !self.temp.0.is_empty() {
+            self.flush();
+        }
+        self.uniforms.write_buffer(device, queue);
+    }
+
+    #[inline]
+    pub fn binding(&self) -> Option<BindingResource> {
+        self.uniforms.binding()
+    }
+}
+
+/// This system prepares all components of the corresponding component type.
+/// They are transformed into uniforms and stored in the [`ComponentVecUniforms`] resource.
+fn prepare_uniform_component_vecs<C: Component + ShaderType + ShaderSize>(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    mut component_vec_uniforms: ResMut<ComponentVecUniforms<C>>,
+    components: Query<(Entity, &C)>,
+) where
+    C: ShaderType + WriteInto + Clone,
+{
+    component_vec_uniforms.clear();
+    let entities = components
+        .iter()
+        .map(|(entity, component)| (entity, component_vec_uniforms.push(component.clone())))
+        .collect::<Vec<_>>();
+    commands.insert_or_spawn_batch(entities);
+
+    component_vec_uniforms.write_buffer(&render_device, &render_queue);
 }
 
 /// This plugin extracts the components into the "render world".
