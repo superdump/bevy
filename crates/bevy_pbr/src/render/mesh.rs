@@ -20,7 +20,7 @@ use bevy_render::{
     },
     render_asset::RenderAssets,
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
-    render_resource::*,
+    render_resource::{encase::MaxCapacityArray, *},
     renderer::{RenderDevice, RenderQueue},
     texture::{
         BevyDefault, DefaultImageSampler, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
@@ -93,9 +93,11 @@ impl Plugin for MeshRenderPlugin {
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
+                // NOTE: MeshUniforms needs to be added before MeshPipeline as
+                // MeshPipeline initialization uses MeshUniforms
+                .insert_resource(MeshUniforms::from_capacity(16384 / 144))
                 .init_resource::<MeshPipeline>()
                 .init_resource::<SkinnedMeshUniform>()
-                .init_resource::<MeshUniforms>()
                 .add_system_to_stage(RenderStage::Extract, extract_meshes)
                 .add_system_to_stage(RenderStage::Extract, extract_skinned_meshes)
                 .add_system_to_stage(RenderStage::Prepare, prepare_mesh_uniforms)
@@ -113,50 +115,42 @@ pub struct MeshUniform {
     pub flags: u32,
 }
 
-#[derive(Clone, ShaderType)]
-struct MeshUniformsInner {
-    data: [MeshUniform; MeshUniformsInner::ARRAY_LEN],
-}
+type MeshUniformsInner = MaxCapacityArray<Vec<MeshUniform>>;
 
-impl MeshUniformsInner {
-    const ARRAY_LEN: usize = 16384 / 144;
-
-    fn size(&self) -> u32 {
-        (((MeshUniform::min_size().get() * Self::ARRAY_LEN as u64) as u32 + 255) / 256) * 256
-    }
-}
-
-impl Default for MeshUniformsInner {
-    fn default() -> Self {
-        Self {
-            data: [MeshUniform::default(); Self::ARRAY_LEN],
-        }
-    }
-}
-
-#[derive(Default, Resource)]
+#[derive(Resource)]
 pub struct MeshUniforms {
     temp: MeshUniformsInner,
-    count: usize,
     current_offset: u32,
     uniforms: DynamicUniformBuffer<MeshUniformsInner>,
 }
 
 impl MeshUniforms {
+    pub fn from_capacity(capacity: usize) -> Self {
+        Self {
+            temp: MaxCapacityArray(Vec::with_capacity(capacity), capacity),
+            current_offset: 0,
+            uniforms: DynamicUniformBuffer::<MeshUniformsInner>::default(),
+        }
+    }
+
+    fn size(&self) -> NonZeroU64 {
+        dbg!(self.temp.size());
+        self.temp.size()
+    }
+
     fn clear(&mut self) {
         self.uniforms.clear();
         self.current_offset = 0;
-        self.count = 0;
+        self.temp.0.clear();
     }
 
     fn push(&mut self, mesh_uniform: MeshUniform) -> MeshIndices {
-        self.temp.data[self.count] = mesh_uniform;
         let result = MeshIndices {
             index: self.current_offset,
-            mesh_index: self.count as u32,
+            mesh_index: self.temp.0.len() as u32,
         };
-        self.count += 1;
-        if self.count == self.temp.data.len() {
+        self.temp.0.push(mesh_uniform);
+        if self.temp.0.len() == self.temp.1 {
             self.flush();
         }
         result
@@ -164,12 +158,18 @@ impl MeshUniforms {
 
     fn flush(&mut self) {
         self.uniforms.push(self.temp.clone());
-        self.current_offset += self.temp.size();
-        self.count = 0;
+
+        let size = self.temp.size().get();
+        self.current_offset += size as u32;
+        if size % 256 > 0 {
+            self.current_offset += 256 - (size % 256) as u32;
+        }
+
+        self.temp.0.clear();
     }
 
     fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
-        if self.count > 0 {
+        if !self.temp.0.is_empty() {
             self.flush();
         }
         self.uniforms.write_buffer(device, queue);
@@ -352,8 +352,10 @@ impl FromWorld for MeshPipeline {
             Res<RenderDevice>,
             Res<DefaultImageSampler>,
             Res<RenderQueue>,
+            Res<MeshUniforms>,
         )> = SystemState::new(world);
-        let (render_device, default_sampler, render_queue) = system_state.get_mut(world);
+        let (render_device, default_sampler, render_queue, mesh_uniforms) =
+            system_state.get_mut(world);
         let clustered_forward_buffer_binding_type = render_device
             .get_supported_read_only_binding_type(CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT);
 
@@ -486,7 +488,7 @@ impl FromWorld for MeshPipeline {
             ty: BindingType::Buffer {
                 ty: BufferBindingType::Uniform,
                 has_dynamic_offset: true,
-                min_binding_size: None,
+                min_binding_size: Some(mesh_uniforms.size()),
             },
             count: None,
         };
@@ -675,6 +677,11 @@ impl SpecializedMeshPipeline for MeshPipeline {
         shader_defs.push(ShaderDefVal::UInt(
             "MAX_DIRECTIONAL_LIGHTS".to_string(),
             MAX_DIRECTIONAL_LIGHTS as u32,
+        ));
+
+        shader_defs.push(ShaderDefVal::UInt(
+            "MESHES_UNIFORM_ARRAY_LEN".to_string(),
+            (16384 / MeshUniform::min_size().get()) as u32,
         ));
 
         if layout.contains(Mesh::ATTRIBUTE_UV_0) {

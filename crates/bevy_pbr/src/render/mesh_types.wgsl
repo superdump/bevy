@@ -8,7 +8,7 @@ struct Mesh {
 };
 
 struct Meshes {
-    data: array<Mesh, 113u>,
+    data: array<Mesh, #{MESHES_UNIFORM_ARRAY_LEN}u>,
 }
 
 #ifdef SKINNED

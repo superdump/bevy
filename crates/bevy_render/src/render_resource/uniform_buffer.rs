@@ -172,7 +172,9 @@ impl<T: ShaderType + WriteInto> DynamicUniformBuffer<T> {
         Some(BindingResource::Buffer(BufferBinding {
             buffer: self.buffer()?,
             offset: 0,
-            size: Some(T::min_size()),
+            // NOTE: Using the value size here as some types can be
+            // runtime-sized
+            size: Some(self.values.get(0)?.size()),
         }))
     }
 
