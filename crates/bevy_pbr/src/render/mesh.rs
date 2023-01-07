@@ -13,6 +13,7 @@ use bevy_ecs::{
 use bevy_math::{Mat3A, Mat4, Vec2};
 use bevy_reflect::TypeUuid;
 use bevy_render::{
+    extract_component::{ComponentVecUniforms, DynamicUniformIndices, UniformComponentVecPlugin},
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{
         skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
@@ -20,7 +21,7 @@ use bevy_render::{
     },
     render_asset::RenderAssets,
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
-    render_resource::{encase::MaxCapacityArray, *},
+    render_resource::*,
     renderer::{RenderDevice, RenderQueue},
     texture::{
         BevyDefault, DefaultImageSampler, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
@@ -91,16 +92,16 @@ impl Plugin for MeshRenderPlugin {
         load_internal_asset!(app, MESH_SHADER_HANDLE, "mesh.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, SKINNING_HANDLE, "skinning.wgsl", Shader::from_wgsl);
 
+        // NOTE: This plugin must be inserted before the MeshPipeline resource
+        // as MeshPipeline initialization uses information from it
+        app.add_plugin(UniformComponentVecPlugin::<MeshUniform>::default());
+
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
-                // NOTE: MeshUniforms needs to be added before MeshPipeline as
-                // MeshPipeline initialization uses MeshUniforms
-                .insert_resource(MeshUniforms::from_capacity(16384 / 144))
                 .init_resource::<MeshPipeline>()
                 .init_resource::<SkinnedMeshUniform>()
                 .add_system_to_stage(RenderStage::Extract, extract_meshes)
                 .add_system_to_stage(RenderStage::Extract, extract_skinned_meshes)
-                .add_system_to_stage(RenderStage::Prepare, prepare_mesh_uniforms)
                 .add_system_to_stage(RenderStage::Prepare, prepare_skinned_meshes)
                 .add_system_to_stage(RenderStage::Queue, queue_mesh_bind_group)
                 .add_system_to_stage(RenderStage::Queue, queue_mesh_view_bind_groups);
@@ -113,90 +114,6 @@ pub struct MeshUniform {
     pub transform: Mat4,
     pub inverse_transpose_model: Mat4,
     pub flags: u32,
-}
-
-type MeshUniformsInner = MaxCapacityArray<Vec<MeshUniform>>;
-
-#[derive(Resource)]
-pub struct MeshUniforms {
-    temp: MeshUniformsInner,
-    current_offset: u32,
-    uniforms: DynamicUniformBuffer<MeshUniformsInner>,
-}
-
-impl MeshUniforms {
-    pub fn from_capacity(capacity: usize) -> Self {
-        Self {
-            temp: MaxCapacityArray(Vec::with_capacity(capacity), capacity),
-            current_offset: 0,
-            uniforms: DynamicUniformBuffer::<MeshUniformsInner>::default(),
-        }
-    }
-
-    fn size(&self) -> NonZeroU64 {
-        dbg!(self.temp.size());
-        self.temp.size()
-    }
-
-    fn clear(&mut self) {
-        self.uniforms.clear();
-        self.current_offset = 0;
-        self.temp.0.clear();
-    }
-
-    fn push(&mut self, mesh_uniform: MeshUniform) -> MeshIndices {
-        let result = MeshIndices {
-            index: self.current_offset,
-            mesh_index: self.temp.0.len() as u32,
-        };
-        self.temp.0.push(mesh_uniform);
-        if self.temp.0.len() == self.temp.1 {
-            self.flush();
-        }
-        result
-    }
-
-    fn flush(&mut self) {
-        self.uniforms.push(self.temp.clone());
-
-        let size = self.temp.size().get();
-        self.current_offset += size as u32;
-        if size % 256 > 0 {
-            self.current_offset += 256 - (size % 256) as u32;
-        }
-
-        self.temp.0.clear();
-    }
-
-    fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
-        if !self.temp.0.is_empty() {
-            self.flush();
-        }
-        self.uniforms.write_buffer(device, queue);
-    }
-}
-
-#[derive(Component)]
-pub struct MeshIndices {
-    index: u32,
-    mesh_index: u32,
-}
-
-fn prepare_mesh_uniforms(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
-    mut mesh_uniforms: ResMut<MeshUniforms>,
-    meshes: Query<(Entity, &MeshUniform)>,
-) {
-    mesh_uniforms.clear();
-    let entities = meshes
-        .iter()
-        .map(|(entity, component)| (entity, mesh_uniforms.push(*component)))
-        .collect::<Vec<_>>();
-    commands.insert_or_spawn_batch(entities);
-
-    mesh_uniforms.write_buffer(&render_device, &render_queue);
 }
 
 // NOTE: These must match the bit flags in bevy_pbr/src/render/mesh_types.wgsl!
@@ -352,7 +269,7 @@ impl FromWorld for MeshPipeline {
             Res<RenderDevice>,
             Res<DefaultImageSampler>,
             Res<RenderQueue>,
-            Res<MeshUniforms>,
+            Res<ComponentVecUniforms<MeshUniform>>,
         )> = SystemState::new(world);
         let (render_device, default_sampler, render_queue, mesh_uniforms) =
             system_state.get_mut(world);
@@ -806,10 +723,10 @@ pub fn queue_mesh_bind_group(
     mut commands: Commands,
     mesh_pipeline: Res<MeshPipeline>,
     render_device: Res<RenderDevice>,
-    mesh_uniforms: Res<MeshUniforms>,
+    mesh_uniforms: Res<ComponentVecUniforms<MeshUniform>>,
     skinned_mesh_uniform: Res<SkinnedMeshUniform>,
 ) {
-    if let Some(mesh_binding) = mesh_uniforms.uniforms.binding() {
+    if let Some(mesh_binding) = mesh_uniforms.binding() {
         let mut mesh_bind_group = MeshBindGroup {
             normal: render_device.create_bind_group(&BindGroupDescriptor {
                 entries: &[BindGroupEntry {
@@ -997,12 +914,15 @@ pub struct SetMeshBindGroup<const I: usize>;
 impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
     type Param = SRes<MeshBindGroup>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = (Read<MeshIndices>, Option<Read<SkinnedMeshJoints>>);
+    type ItemWorldQuery = (
+        Read<DynamicUniformIndices<MeshUniform>>,
+        Option<Read<SkinnedMeshJoints>>,
+    );
     #[inline]
     fn render<'w>(
         _item: &P,
         _view: (),
-        (mesh_index, skinned_mesh_joints): ROQueryItem<'_, Self::ItemWorldQuery>,
+        (mesh_indices, skinned_mesh_joints): ROQueryItem<'_, Self::ItemWorldQuery>,
         mesh_bind_group: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -1010,10 +930,14 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
             pass.set_bind_group(
                 I,
                 mesh_bind_group.into_inner().skinned.as_ref().unwrap(),
-                &[mesh_index.index, joints.index],
+                &[mesh_indices.offset(), joints.index],
             );
         } else {
-            pass.set_bind_group(I, &mesh_bind_group.into_inner().normal, &[mesh_index.index]);
+            pass.set_bind_group(
+                I,
+                &mesh_bind_group.into_inner().normal,
+                &[mesh_indices.offset()],
+            );
         }
         RenderCommandResult::Success
     }
@@ -1023,7 +947,7 @@ pub struct DrawMesh;
 impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
     type Param = SRes<RenderAssets<Mesh>>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = (Read<Handle<Mesh>>, Read<MeshIndices>);
+    type ItemWorldQuery = (Read<Handle<Mesh>>, Read<DynamicUniformIndices<MeshUniform>>);
     #[inline]
     fn render<'w>(
         _item: &P,
@@ -1041,16 +965,12 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
                     count,
                 } => {
                     pass.set_index_buffer(buffer.slice(..), 0, *index_format);
-                    pass.draw_indexed(
-                        0..*count,
-                        0,
-                        mesh_indices.mesh_index..mesh_indices.mesh_index + 1,
-                    );
+                    pass.draw_indexed(0..*count, 0, mesh_indices.index()..mesh_indices.index() + 1);
                 }
                 GpuBufferInfo::NonIndexed { vertex_count } => {
                     pass.draw(
                         0..*vertex_count,
-                        mesh_indices.mesh_index..mesh_indices.mesh_index + 1,
+                        mesh_indices.index()..mesh_indices.index() + 1,
                     );
                 }
             }
