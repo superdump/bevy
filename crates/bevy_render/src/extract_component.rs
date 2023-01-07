@@ -196,6 +196,12 @@ impl<C> Default for UniformComponentVecPlugin<C> {
     }
 }
 
+// 1MB else we will make really large arrays on macOS which reports very large
+// `max_uniform_buffer_binding_size`. On macOS this ends up being the minimum
+// size of the uniform buffer as well as the size of each chunk of data at a
+// dynamic offset.
+pub const MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE: u32 = 1 << 20;
+
 impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> Plugin
     for UniformComponentVecPlugin<C>
 {
@@ -210,7 +216,11 @@ impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> Plugin
                 .limits();
             render_app
                 .insert_resource(ComponentVecUniforms::<C>::new(
-                    (limits.max_uniform_buffer_binding_size as u64 / C::min_size().get()) as usize,
+                    (limits
+                        .max_uniform_buffer_binding_size
+                        .min(MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE)
+                        as u64
+                        / C::min_size().get()) as usize,
                     limits.min_uniform_buffer_offset_alignment,
                 ))
                 .add_system_to_stage(RenderStage::Prepare, prepare_uniform_component_vecs::<C>);
@@ -225,6 +235,11 @@ pub struct ComponentVecUniforms<C: Component + ShaderType + ShaderSize> {
     temp: MaxCapacityArray<Vec<C>>,
     current_offset: u32,
     dynamic_offset_alignment: u32,
+}
+
+#[inline]
+fn round_up(v: u64, a: u64) -> u64 {
+    ((v + a - 1) / a) * a
 }
 
 impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> ComponentVecUniforms<C> {
@@ -264,12 +279,8 @@ impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> ComponentVecUni
     pub fn flush(&mut self) {
         self.uniforms.push(self.temp.clone());
 
-        let size = self.temp.size().get() as u32;
-        self.current_offset += size;
-        if size % self.dynamic_offset_alignment > 0 {
-            self.current_offset +=
-                self.dynamic_offset_alignment - (size % self.dynamic_offset_alignment);
-        }
+        self.current_offset +=
+            round_up(self.temp.size().get(), self.dynamic_offset_alignment as u64) as u32;
 
         self.temp.0.clear();
     }
