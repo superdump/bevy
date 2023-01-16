@@ -16,6 +16,7 @@ pub mod graph {
     }
 }
 
+use bevy_asset::HandleId;
 pub use camera_2d::*;
 pub use main_pass_2d_node::*;
 
@@ -26,8 +27,8 @@ use bevy_render::{
     extract_component::ExtractComponentPlugin,
     render_graph::{EmptyNode, RenderGraph, SlotInfo, SlotType},
     render_phase::{
-        batch_phase_system, sort_phase_system, BatchedPhaseItem, CachedRenderPipelinePhaseItem,
-        DrawFunctionId, DrawFunctions, PhaseItem, RenderPhase,
+        sort_phase_system, BatchedPhaseItem, CachedRenderPipelinePhaseItem, DrawFunctionId,
+        DrawFunctions, PhaseItem, RenderPhase,
     },
     render_resource::CachedRenderPipelineId,
     Extract, RenderApp, RenderStage,
@@ -52,11 +53,7 @@ impl Plugin for Core2dPlugin {
         render_app
             .init_resource::<DrawFunctions<Transparent2d>>()
             .add_system_to_stage(RenderStage::Extract, extract_core_2d_camera_phases)
-            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Transparent2d>)
-            .add_system_to_stage(
-                RenderStage::PhaseSort,
-                batch_phase_system::<Transparent2d>.after(sort_phase_system::<Transparent2d>),
-            );
+            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Transparent2d>);
 
         let pass_node_2d = MainPass2dNode::new(&mut render_app.world);
         let tonemapping = TonemappingNode::new(&mut render_app.world);
@@ -104,16 +101,17 @@ impl Plugin for Core2dPlugin {
 }
 
 pub struct Transparent2d {
-    pub sort_key: FloatOrd,
+    pub sort_key: <Self as PhaseItem>::SortKey,
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
     /// Range in the vertex buffer of this item
     pub batch_range: Option<Range<u32>>,
+    pub dynamic_offset: Option<u32>,
 }
 
 impl PhaseItem for Transparent2d {
-    type SortKey = FloatOrd;
+    type SortKey = (FloatOrd, HandleId);
 
     #[inline]
     fn entity(&self) -> Entity {
@@ -150,6 +148,14 @@ impl BatchedPhaseItem for Transparent2d {
 
     fn batch_range_mut(&mut self) -> &mut Option<Range<u32>> {
         &mut self.batch_range
+    }
+
+    fn batch_dynamic_offset(&self) -> &Option<u32> {
+        &self.dynamic_offset
+    }
+
+    fn batch_dynamic_offset_mut(&mut self) -> &mut Option<u32> {
+        &mut self.dynamic_offset
     }
 }
 

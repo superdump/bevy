@@ -35,7 +35,7 @@ pub trait Draw<P: PhaseItem>: Send + Sync + 'static {
         pass: &mut TrackedRenderPass<'w>,
         view: Entity,
         item: &P,
-    );
+    ) -> usize;
 }
 
 /// An item which will be drawn to the screen. A phase item should be queued up for rendering
@@ -197,6 +197,7 @@ pub trait RenderCommand<P: PhaseItem> {
 }
 
 pub enum RenderCommandResult {
+    SuccessfulDraw(usize),
     Success,
     Failure,
 }
@@ -218,6 +219,10 @@ pub trait BatchedPhaseItem: PhaseItem {
 
     /// Range in the vertex buffer of this item
     fn batch_range_mut(&mut self) -> &mut Option<Range<u32>>;
+
+    fn batch_dynamic_offset(&self) -> &Option<u32>;
+
+    fn batch_dynamic_offset_mut(&mut self) -> &mut Option<u32>;
 
     /// Batches another item within this item if they are compatible.
     /// Items can be batched together if they have the same entity, and consecutive ranges.
@@ -291,10 +296,13 @@ macro_rules! render_command_tuple_impl {
                 ($($name,)*): SystemParamItem<'w, '_, Self::Param>,
                 _pass: &mut TrackedRenderPass<'w>,
             ) -> RenderCommandResult {
-                $(if let RenderCommandResult::Failure = $name::render(_item, $view, $entity, $name, _pass) {
-                    return RenderCommandResult::Failure;
+                let mut drawn_items = 0;
+                $(match $name::render(_item, $view, $entity, $name, _pass) {
+                    RenderCommandResult::SuccessfulDraw(v) => drawn_items += v,
+                    RenderCommandResult::Success => {},
+                    RenderCommandResult::Failure => return RenderCommandResult::Failure,
                 })*
-                RenderCommandResult::Success
+                RenderCommandResult::SuccessfulDraw(drawn_items)
             }
         }
     };
@@ -336,11 +344,14 @@ where
         pass: &mut TrackedRenderPass<'w>,
         view: Entity,
         item: &P,
-    ) {
+    ) -> usize {
         let param = self.state.get(world);
         let view = self.view.get_manual(world, view).unwrap();
         let entity = self.entity.get_manual(world, item.entity()).unwrap();
-        C::render(item, view, entity, param, pass);
+        match C::render(item, view, entity, param, pass) {
+            RenderCommandResult::SuccessfulDraw(v) => v,
+            _ => 0,
+        }
     }
 }
 

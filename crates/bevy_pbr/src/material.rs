@@ -11,7 +11,7 @@ use bevy_core_pipeline::{
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     event::EventReader,
-    prelude::World,
+    prelude::{Component, World},
     schedule::IntoSystemDescriptor,
     system::{
         lifetimeless::{Read, SRes},
@@ -30,9 +30,9 @@ use bevy_render::{
         RenderPhase, SetItemPipeline, TrackedRenderPass,
     },
     render_resource::{
-        AsBindGroup, AsBindGroupError, BindGroup, BindGroupLayout, OwnedBindingResource,
-        PipelineCache, RenderPipelineDescriptor, Shader, ShaderRef, SpecializedMeshPipeline,
-        SpecializedMeshPipelineError, SpecializedMeshPipelines,
+        AsBindGroup, AsBindGroupError, BindGroup, BindGroupId, BindGroupLayout,
+        OwnedBindingResource, PipelineCache, RenderPipelineDescriptor, Shader, ShaderRef,
+        SpecializedMeshPipeline, SpecializedMeshPipelineError, SpecializedMeshPipelines,
     },
     renderer::RenderDevice,
     texture::FallbackImage,
@@ -166,9 +166,9 @@ where
             .add_plugin(ExtractComponentPlugin::<Handle<M>>::extract_visible());
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
-                .add_render_command::<Transparent3d, DrawMaterial<M>>()
                 .add_render_command::<Opaque3d, DrawMaterial<M>>()
                 .add_render_command::<AlphaMask3d, DrawMaterial<M>>()
+                .add_render_command::<Transparent3d, DrawMaterial<M>>()
                 .init_resource::<MaterialPipeline<M>>()
                 .init_resource::<ExtractedMaterials<M>>()
                 .init_resource::<RenderMaterials<M>>()
@@ -325,7 +325,12 @@ pub fn queue_material_meshes<M: Material>(
     msaa: Res<Msaa>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderMaterials<M>>,
-    material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshUniform)>,
+    mut material_meshes: Query<(
+        &Handle<M>,
+        &mut MaterialBindingMeta,
+        &Handle<Mesh>,
+        &MeshUniform,
+    )>,
     mut views: Query<(
         &ExtractedView,
         &VisibleEntities,
@@ -365,8 +370,8 @@ pub fn queue_material_meshes<M: Material>(
         let rangefinder = view.rangefinder3d();
 
         for visible_entity in &visible_entities.entities {
-            if let Ok((material_handle, mesh_handle, mesh_uniform)) =
-                material_meshes.get(*visible_entity)
+            if let Ok((material_handle, mut material_binding_meta, mesh_handle, mesh_uniform)) =
+                material_meshes.get_mut(*visible_entity)
             {
                 if let Some(material) = render_materials.get(material_handle) {
                     if let Some(mesh) = render_meshes.get(mesh_handle) {
@@ -395,6 +400,8 @@ pub fn queue_material_meshes<M: Material>(
                             }
                         };
 
+                        *material_binding_meta = material.get_binding_meta();
+
                         let distance = rangefinder.distance(&mesh_uniform.transform)
                             + material.properties.depth_bias;
                         match alpha_mode {
@@ -404,6 +411,8 @@ pub fn queue_material_meshes<M: Material>(
                                     draw_function: draw_opaque_pbr,
                                     pipeline: pipeline_id,
                                     distance,
+                                    batch_range: None,
+                                    dynamic_offset: None,
                                 });
                             }
                             AlphaMode::Mask(_) => {
@@ -412,6 +421,8 @@ pub fn queue_material_meshes<M: Material>(
                                     draw_function: draw_alpha_mask_pbr,
                                     pipeline: pipeline_id,
                                     distance,
+                                    batch_range: None,
+                                    dynamic_offset: None,
                                 });
                             }
                             AlphaMode::Blend => {
@@ -420,6 +431,8 @@ pub fn queue_material_meshes<M: Material>(
                                     draw_function: draw_transparent_pbr,
                                     pipeline: pipeline_id,
                                     distance,
+                                    batch_range: None,
+                                    dynamic_offset: None,
                                 });
                             }
                         }
@@ -442,9 +455,25 @@ pub struct MaterialProperties {
 /// Data prepared for a [`Material`] instance.
 pub struct PreparedMaterial<T: Material> {
     pub bindings: Vec<OwnedBindingResource>,
+    pub dynamic_offsets: Vec<u32>,
     pub bind_group: BindGroup,
     pub key: T::Data,
     pub properties: MaterialProperties,
+}
+
+impl<T: Material> PreparedMaterial<T> {
+    pub fn get_binding_meta(&self) -> MaterialBindingMeta {
+        MaterialBindingMeta {
+            bind_group_id: Some(self.bind_group.id()),
+            dynamic_offsets: self.dynamic_offsets.clone(),
+        }
+    }
+}
+
+#[derive(Component, Default, PartialEq, Eq)]
+pub struct MaterialBindingMeta {
+    bind_group_id: Option<BindGroupId>,
+    dynamic_offsets: Vec<u32>,
 }
 
 #[derive(Resource)]
@@ -585,6 +614,7 @@ fn prepare_material<M: Material>(
     )?;
     Ok(PreparedMaterial {
         bindings: prepared.bindings,
+        dynamic_offsets: prepared.dynamic_offsets,
         bind_group: prepared.bind_group,
         key: prepared.data,
         properties: MaterialProperties {

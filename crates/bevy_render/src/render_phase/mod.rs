@@ -42,10 +42,17 @@ impl<I: PhaseItem> RenderPhase<I> {
         let mut draw_functions = draw_functions.write();
         draw_functions.prepare(world);
 
-        for item in &self.items {
-            let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
-            draw_function.draw(world, render_pass, view, item);
+        let mut i = 0;
+        // let mut n_draws = 0;
+        let n_items = self.items.len();
+        while i < n_items {
+            let draw_function = draw_functions
+                .get_mut(self.items[i].draw_function())
+                .unwrap();
+            i += draw_function.draw(world, render_pass, view, &self.items[i]);
+            // n_draws += 1;
         }
+        // dbg!(n_draws);
     }
 }
 
@@ -104,6 +111,7 @@ mod tests {
         struct TestPhaseItem {
             entity: Entity,
             batch_range: Option<Range<u32>>,
+            dynamic_offset: Option<u32>,
         }
         impl PhaseItem for TestPhaseItem {
             type SortKey = ();
@@ -119,6 +127,14 @@ mod tests {
             }
         }
         impl BatchedPhaseItem for TestPhaseItem {
+            fn batch_dynamic_offset(&self) -> &Option<u32> {
+                &self.dynamic_offset
+            }
+
+            fn batch_dynamic_offset_mut(&mut self) -> &mut Option<u32> {
+                &mut self.dynamic_offset
+            }
+
             fn batch_range(&self) -> &Option<std::ops::Range<u32>> {
                 &self.batch_range
             }
@@ -132,45 +148,55 @@ mod tests {
             TestPhaseItem {
                 entity: Entity::from_raw(0),
                 batch_range: Some(0..5),
+                dynamic_offset: Some(0),
             },
             // This item should be batched
             TestPhaseItem {
                 entity: Entity::from_raw(0),
                 batch_range: Some(5..10),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(0..5),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(0),
                 batch_range: Some(10..15),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(5..10),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: None,
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(10..15),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(20..25),
+                dynamic_offset: Some(0),
             },
             // This item should be batched
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(25..30),
+                dynamic_offset: Some(0),
             },
             // This item should be batched
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(30..35),
+                dynamic_offset: Some(0),
             },
         ];
         for item in items {
@@ -181,30 +207,37 @@ mod tests {
             TestPhaseItem {
                 entity: Entity::from_raw(0),
                 batch_range: Some(0..10),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(0..5),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(0),
                 batch_range: Some(10..15),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(5..10),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: None,
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(10..15),
+                dynamic_offset: Some(0),
             },
             TestPhaseItem {
                 entity: Entity::from_raw(1),
                 batch_range: Some(20..35),
+                dynamic_offset: Some(0),
             },
         ];
         assert_eq!(&*render_phase.items, items_batched);

@@ -18,8 +18,8 @@ use bevy_render::{
     render_asset::RenderAssets,
     render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
     render_phase::{
-        CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, PhaseItem, RenderCommand,
-        RenderCommandResult, RenderPhase, SetItemPipeline, TrackedRenderPass,
+        BatchedPhaseItem, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, PhaseItem,
+        RenderCommand, RenderCommandResult, RenderPhase, SetItemPipeline, TrackedRenderPass,
     },
     render_resource::*,
     renderer::{RenderContext, RenderDevice, RenderQueue},
@@ -36,7 +36,10 @@ use bevy_utils::{
     tracing::{error, warn},
     HashMap,
 };
-use std::num::{NonZeroU32, NonZeroU64};
+use std::{
+    num::{NonZeroU32, NonZeroU64},
+    ops::Range,
+};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 pub enum RenderLightSystems {
@@ -220,6 +223,7 @@ pub struct ShadowPipeline {
     pub skinned_mesh_layout: BindGroupLayout,
     pub point_light_sampler: Sampler,
     pub directional_light_sampler: Sampler,
+    pub mesh_uniform_array_len: u32,
 }
 
 // TODO: this pattern for initializing the shaders / pipeline isn't ideal. this should be handled by the asset system
@@ -271,6 +275,7 @@ impl FromWorld for ShadowPipeline {
                 compare: Some(CompareFunction::GreaterEqual),
                 ..Default::default()
             }),
+            mesh_uniform_array_len: mesh_pipeline.mesh_uniform_array_len,
         }
     }
 }
@@ -323,6 +328,10 @@ impl SpecializedMeshPipeline for ShadowPipeline {
         shader_defs.push(ShaderDefVal::UInt(
             "MAX_DIRECTIONAL_LIGHTS".to_string(),
             MAX_DIRECTIONAL_LIGHTS as u32,
+        ));
+        shader_defs.push(ShaderDefVal::UInt(
+            "MESHES_UNIFORM_ARRAY_LEN".to_string(),
+            self.mesh_uniform_array_len,
         ));
 
         if layout.contains(Mesh::ATTRIBUTE_JOINT_INDEX)
@@ -1689,6 +1698,8 @@ pub fn queue_shadows(
                             pipeline: pipeline_id,
                             entity,
                             distance: 0.0, // TODO: sort back-to-front
+                            batch_range: None,
+                            dynamic_offset: None,
                         });
                     }
                 }
@@ -1702,6 +1713,8 @@ pub struct Shadow {
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub batch_range: Option<Range<u32>>,
+    pub dynamic_offset: Option<u32>,
 }
 
 impl PhaseItem for Shadow {
@@ -1732,6 +1745,24 @@ impl CachedRenderPipelinePhaseItem for Shadow {
     #[inline]
     fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.pipeline
+    }
+}
+
+impl BatchedPhaseItem for Shadow {
+    fn batch_range(&self) -> &Option<std::ops::Range<u32>> {
+        &self.batch_range
+    }
+
+    fn batch_range_mut(&mut self) -> &mut Option<std::ops::Range<u32>> {
+        &mut self.batch_range
+    }
+
+    fn batch_dynamic_offset(&self) -> &Option<u32> {
+        &self.dynamic_offset
+    }
+
+    fn batch_dynamic_offset_mut(&mut self) -> &mut Option<u32> {
+        &mut self.dynamic_offset
     }
 }
 

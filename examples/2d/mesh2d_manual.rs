@@ -6,6 +6,7 @@
 use std::f32::consts::PI;
 
 use bevy::{
+    asset::HandleId,
     core_pipeline::core_2d::Transparent2d,
     prelude::*,
     reflect::TypeUuid,
@@ -27,7 +28,7 @@ use bevy::{
         DrawMesh2d, Mesh2dHandle, Mesh2dPipeline, Mesh2dPipelineKey, Mesh2dUniform,
         SetMesh2dBindGroup, SetMesh2dViewBindGroup,
     },
-    utils::FloatOrd,
+    utils::{FloatOrd, Uuid},
 };
 
 fn main() {
@@ -352,9 +353,10 @@ pub fn queue_colored_mesh2d(
                     pipeline: pipeline_id,
                     // The 2d render items are sorted according to their z value before rendering,
                     // in order to get correct transparency
-                    sort_key: FloatOrd(mesh_z),
+                    sort_key: (FloatOrd(mesh_z), HandleId::Id(Uuid::nil(), u64::MAX)),
                     // This material is not batched
                     batch_range: None,
+                    dynamic_offset: None,
                 });
             }
         }

@@ -1286,6 +1286,16 @@ category = "Stress Tests"
 wasm = true
 
 [[example]]
+name = "bevymark_mesh2d"
+path = "examples/stress_tests/bevymark_mesh2d.rs"
+
+[package.metadata.example.bevymark_mesh2d]
+name = "Bevymark"
+description = "A heavy MaterialMesh2d rendering workload to benchmark your system with Bevy"
+category = "Stress Tests"
+wasm = true
+
+[[example]]
 name = "many_animated_sprites"
 path = "examples/stress_tests/many_animated_sprites.rs"
 
@@ -1613,3 +1623,7 @@ codegen-units = 1
 inherits = "release"
 lto = "fat"
 panic = "abort"
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

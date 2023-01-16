@@ -2,6 +2,7 @@ mod pipeline;
 mod render_pass;
 
 use bevy_core_pipeline::{core_2d::Camera2d, core_3d::Camera3d};
+use bevy_render::render_phase::BatchedPhaseItem;
 pub use pipeline::*;
 pub use render_pass::*;
 
@@ -68,7 +69,6 @@ pub fn build_ui_render(app: &mut App) {
         .init_resource::<SpecializedRenderPipelines<UiPipeline>>()
         .init_resource::<UiImageBindGroups>()
         .init_resource::<UiMeta>()
-        .init_resource::<ExtractedUiNodes>()
         .init_resource::<DrawFunctions<TransparentUi>>()
         .add_render_command::<TransparentUi, DrawUi>()
         .add_system_to_stage(
@@ -166,6 +166,7 @@ fn get_ui_graph(render_app: &mut App) -> RenderGraph {
     ui_graph
 }
 
+#[derive(Component)]
 pub struct ExtractedUiNode {
     pub stack_index: usize,
     pub transform: Mat4,
@@ -179,13 +180,8 @@ pub struct ExtractedUiNode {
     pub scale_factor: f32,
 }
 
-#[derive(Resource, Default)]
-pub struct ExtractedUiNodes {
-    pub uinodes: Vec<ExtractedUiNode>,
-}
-
 pub fn extract_uinodes(
-    mut extracted_uinodes: ResMut<ExtractedUiNodes>,
+    mut commands: Commands,
     images: Extract<Res<Assets<Image>>>,
     ui_stack: Extract<Res<UiStack>>,
     windows: Extract<Res<Windows>>,
@@ -199,9 +195,11 @@ pub fn extract_uinodes(
             Option<&CalculatedClip>,
         )>,
     >,
+    mut prev_ui_nodes_len: Local<usize>,
 ) {
+    let mut ui_nodes = Vec::with_capacity(*prev_ui_nodes_len);
+
     let scale_factor = windows.scale_factor(WindowId::primary()) as f32;
-    extracted_uinodes.uinodes.clear();
     for (stack_index, entity) in ui_stack.uinodes.iter().enumerate() {
         if let Ok((uinode, transform, color, maybe_image, visibility, clip)) =
             uinode_query.get(*entity)
@@ -223,23 +221,29 @@ pub fn extract_uinodes(
                 continue;
             }
 
-            extracted_uinodes.uinodes.push(ExtractedUiNode {
-                stack_index,
-                transform: transform.compute_matrix(),
-                background_color: color.0,
-                rect: Rect {
-                    min: Vec2::ZERO,
-                    max: uinode.calculated_size,
+            ui_nodes.push((
+                *entity,
+                ExtractedUiNode {
+                    stack_index,
+                    transform: transform.compute_matrix(),
+                    background_color: color.0,
+                    rect: Rect {
+                        min: Vec2::ZERO,
+                        max: uinode.calculated_size,
+                    },
+                    image,
+                    atlas_size: None,
+                    clip: clip.map(|clip| clip.clip),
+                    flip_x,
+                    flip_y,
+                    scale_factor,
                 },
-                image,
-                atlas_size: None,
-                clip: clip.map(|clip| clip.clip),
-                flip_x,
-                flip_y,
-                scale_factor,
-            });
+            ));
         }
     }
+
+    *prev_ui_nodes_len = ui_nodes.len();
+    commands.insert_or_spawn_batch(ui_nodes);
 }
 
 /// The UI camera is "moved back" by this many units (plus the [`UI_CAMERA_TRANSFORM_OFFSET`]) and also has a view
@@ -298,8 +302,11 @@ pub fn extract_default_ui_camera_view<T: Component>(
     }
 }
 
+#[derive(Component)]
+struct ExtractedTextGlyphs {}
+
 pub fn extract_text_uinodes(
-    mut extracted_uinodes: ResMut<ExtractedUiNodes>,
+    mut commands: Commands,
     texture_atlases: Extract<Res<Assets<TextureAtlas>>>,
     windows: Extract<Res<Windows>>,
     ui_stack: Extract<Res<UiStack>>,
@@ -313,7 +320,10 @@ pub fn extract_text_uinodes(
             Option<&CalculatedClip>,
         )>,
     >,
+    mut prev_ui_nodes_len: Local<usize>,
 ) {
+    let mut ui_nodes = Vec::with_capacity(*prev_ui_nodes_len);
+
     let scale_factor = windows.scale_factor(WindowId::primary()) as f32;
     for (stack_index, entity) in ui_stack.uinodes.iter().enumerate() {
         if let Ok((uinode, global_transform, text, text_layout_info, visibility, clip)) =
@@ -354,7 +364,7 @@ pub fn extract_text_uinodes(
                         alignment_offset * scale_factor + text_glyph.position.extend(0.),
                     );
 
-                extracted_uinodes.uinodes.push(ExtractedUiNode {
+                ui_nodes.push(ExtractedUiNode {
                     stack_index,
                     transform: extracted_transform,
                     background_color: color,
@@ -369,6 +379,9 @@ pub fn extract_text_uinodes(
             }
         }
     }
+
+    *prev_ui_nodes_len = ui_nodes.len();
+    commands.spawn_batch(ui_nodes);
 }
 
 #[repr(C)]
@@ -411,162 +424,15 @@ pub struct UiBatch {
 }
 
 pub fn prepare_uinodes(
-    mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut ui_meta: ResMut<UiMeta>,
-    mut extracted_uinodes: ResMut<ExtractedUiNodes>,
-) {
-    ui_meta.vertices.clear();
-
-    // sort by ui stack index, starting from the deepest node
-    extracted_uinodes
-        .uinodes
-        .sort_by_key(|node| node.stack_index);
-
-    let mut start = 0;
-    let mut end = 0;
-    let mut current_batch_handle = Default::default();
-    let mut last_z = 0.0;
-    for extracted_uinode in &extracted_uinodes.uinodes {
-        if current_batch_handle != extracted_uinode.image {
-            if start != end {
-                commands.spawn(UiBatch {
-                    range: start..end,
-                    image: current_batch_handle,
-                    z: last_z,
-                });
-                start = end;
-            }
-            current_batch_handle = extracted_uinode.image.clone_weak();
-        }
-
-        let uinode_rect = extracted_uinode.rect;
-        let rect_size = uinode_rect.size().extend(1.0);
-
-        // Specify the corners of the node
-        let positions = QUAD_VERTEX_POSITIONS
-            .map(|pos| (extracted_uinode.transform * (pos * rect_size).extend(1.)).xyz());
-
-        // Calculate the effect of clipping
-        // Note: this won't work with rotation/scaling, but that's much more complex (may need more that 2 quads)
-        let positions_diff = if let Some(clip) = extracted_uinode.clip {
-            [
-                Vec2::new(
-                    f32::max(clip.min.x - positions[0].x, 0.),
-                    f32::max(clip.min.y - positions[0].y, 0.),
-                ),
-                Vec2::new(
-                    f32::min(clip.max.x - positions[1].x, 0.),
-                    f32::max(clip.min.y - positions[1].y, 0.),
-                ),
-                Vec2::new(
-                    f32::min(clip.max.x - positions[2].x, 0.),
-                    f32::min(clip.max.y - positions[2].y, 0.),
-                ),
-                Vec2::new(
-                    f32::max(clip.min.x - positions[3].x, 0.),
-                    f32::min(clip.max.y - positions[3].y, 0.),
-                ),
-            ]
-        } else {
-            [Vec2::ZERO; 4]
-        };
-
-        let positions_clipped = [
-            positions[0] + positions_diff[0].extend(0.),
-            positions[1] + positions_diff[1].extend(0.),
-            positions[2] + positions_diff[2].extend(0.),
-            positions[3] + positions_diff[3].extend(0.),
-        ];
-
-        let transformed_rect_size = extracted_uinode.transform.transform_vector3(rect_size);
-
-        // Don't try to cull nodes that have a rotation
-        // In a rotation around the Z-axis, this value is 0.0 for an angle of 0.0 or π
-        // In those two cases, the culling check can proceed normally as corners will be on
-        // horizontal / vertical lines
-        // For all other angles, bypass the culling check
-        // This does not properly handles all rotations on all axis
-        if extracted_uinode.transform.x_axis[1] == 0.0 {
-            // Cull nodes that are completely clipped
-            if positions_diff[0].x - positions_diff[1].x >= transformed_rect_size.x
-                || positions_diff[1].y - positions_diff[2].y >= transformed_rect_size.y
-            {
-                continue;
-            }
-        }
-
-        let atlas_extent = extracted_uinode.atlas_size.unwrap_or(uinode_rect.max);
-        let mut uvs = [
-            Vec2::new(
-                uinode_rect.min.x + positions_diff[0].x * extracted_uinode.scale_factor,
-                uinode_rect.min.y + positions_diff[0].y * extracted_uinode.scale_factor,
-            ),
-            Vec2::new(
-                uinode_rect.max.x + positions_diff[1].x * extracted_uinode.scale_factor,
-                uinode_rect.min.y + positions_diff[1].y * extracted_uinode.scale_factor,
-            ),
-            Vec2::new(
-                uinode_rect.max.x + positions_diff[2].x * extracted_uinode.scale_factor,
-                uinode_rect.max.y + positions_diff[2].y * extracted_uinode.scale_factor,
-            ),
-            Vec2::new(
-                uinode_rect.min.x + positions_diff[3].x * extracted_uinode.scale_factor,
-                uinode_rect.max.y + positions_diff[3].y * extracted_uinode.scale_factor,
-            ),
-        ]
-        .map(|pos| pos / atlas_extent);
-
-        if extracted_uinode.flip_x {
-            uvs = [uvs[1], uvs[0], uvs[3], uvs[2]];
-        }
-        if extracted_uinode.flip_y {
-            uvs = [uvs[3], uvs[2], uvs[1], uvs[0]];
-        }
-
-        for i in QUAD_INDICES {
-            ui_meta.vertices.push(UiVertex {
-                position: positions_clipped[i].into(),
-                uv: uvs[i].into(),
-                color: extracted_uinode.background_color.as_linear_rgba_f32(),
-            });
-        }
-
-        last_z = extracted_uinode.transform.w_axis[2];
-        end += QUAD_INDICES.len() as u32;
-    }
-
-    // if start != end, there is one last batch to process
-    if start != end {
-        commands.spawn(UiBatch {
-            range: start..end,
-            image: current_batch_handle,
-            z: last_z,
-        });
-    }
-
-    ui_meta.vertices.write_buffer(&render_device, &render_queue);
-}
-
-#[derive(Resource, Default)]
-pub struct UiImageBindGroups {
-    pub values: HashMap<Handle<Image>, BindGroup>,
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn queue_uinodes(
-    draw_functions: Res<DrawFunctions<TransparentUi>>,
-    render_device: Res<RenderDevice>,
-    mut ui_meta: ResMut<UiMeta>,
+    extracted_uinodes: Query<&ExtractedUiNode>,
+    mut views: Query<&mut RenderPhase<TransparentUi>>,
     view_uniforms: Res<ViewUniforms>,
     ui_pipeline: Res<UiPipeline>,
-    mut pipelines: ResMut<SpecializedRenderPipelines<UiPipeline>>,
-    mut pipeline_cache: ResMut<PipelineCache>,
     mut image_bind_groups: ResMut<UiImageBindGroups>,
     gpu_images: Res<RenderAssets<Image>>,
-    ui_batches: Query<(Entity, &UiBatch)>,
-    mut views: Query<(&ExtractedView, &mut RenderPhase<TransparentUi>)>,
     events: Res<SpriteAssetEvents>,
 ) {
     // If an image has changed, the GpuImage has (probably) changed
@@ -579,6 +445,7 @@ pub fn queue_uinodes(
         };
     }
 
+    ui_meta.vertices.clear();
     if let Some(view_binding) = view_uniforms.uniforms.binding() {
         ui_meta.view_bind_group = Some(render_device.create_bind_group(&BindGroupDescriptor {
             entries: &[BindGroupEntry {
@@ -588,19 +455,150 @@ pub fn queue_uinodes(
             label: Some("ui_view_bind_group"),
             layout: &ui_pipeline.view_layout,
         }));
-        let draw_ui_function = draw_functions.read().id::<DrawUi>();
-        for (view, mut transparent_phase) in &mut views {
-            let pipeline = pipelines.specialize(
-                &mut pipeline_cache,
-                &ui_pipeline,
-                UiPipelineKey { hdr: view.hdr },
-            );
-            for (entity, batch) in &ui_batches {
+
+        let mut start = 0;
+        let mut end = 0;
+        let mut current_batch_handle: Handle<Image> = Default::default();
+        for mut transparent_ui_phase in &mut views {
+            let mut phase_item_index = 0;
+            for item_index in 0..transparent_ui_phase.items.len() {
+                let item = &mut transparent_ui_phase.items[item_index];
+                let Ok(extracted_uinode) = extracted_uinodes.get(item.entity) else { continue };
+                if current_batch_handle != extracted_uinode.image {
+                    if start != end {
+                        dbg!(&current_batch_handle);
+                        image_bind_groups
+                            .values
+                            .entry(current_batch_handle.clone_weak())
+                            .or_insert_with(|| {
+                                let gpu_image = gpu_images.get(&current_batch_handle).unwrap();
+                                render_device.create_bind_group(&BindGroupDescriptor {
+                                    entries: &[
+                                        BindGroupEntry {
+                                            binding: 0,
+                                            resource: BindingResource::TextureView(
+                                                &gpu_image.texture_view,
+                                            ),
+                                        },
+                                        BindGroupEntry {
+                                            binding: 1,
+                                            resource: BindingResource::Sampler(&gpu_image.sampler),
+                                        },
+                                    ],
+                                    label: Some("ui_material_bind_group"),
+                                    layout: &ui_pipeline.image_layout,
+                                })
+                            });
+                        *transparent_ui_phase.items[phase_item_index].batch_range_mut() =
+                            Some(start..end);
+                        phase_item_index = item_index;
+                        start = end;
+                    }
+                    current_batch_handle = extracted_uinode.image.clone_weak();
+                }
+
+                let uinode_rect = extracted_uinode.rect;
+                let rect_size = uinode_rect.size().extend(1.0);
+
+                // Specify the corners of the node
+                let positions = QUAD_VERTEX_POSITIONS
+                    .map(|pos| (extracted_uinode.transform * (pos * rect_size).extend(1.)).xyz());
+
+                // Calculate the effect of clipping
+                // Note: this won't work with rotation/scaling, but that's much more complex (may need more that 2 quads)
+                let positions_diff = if let Some(clip) = extracted_uinode.clip {
+                    [
+                        Vec2::new(
+                            f32::max(clip.min.x - positions[0].x, 0.),
+                            f32::max(clip.min.y - positions[0].y, 0.),
+                        ),
+                        Vec2::new(
+                            f32::min(clip.max.x - positions[1].x, 0.),
+                            f32::max(clip.min.y - positions[1].y, 0.),
+                        ),
+                        Vec2::new(
+                            f32::min(clip.max.x - positions[2].x, 0.),
+                            f32::min(clip.max.y - positions[2].y, 0.),
+                        ),
+                        Vec2::new(
+                            f32::max(clip.min.x - positions[3].x, 0.),
+                            f32::min(clip.max.y - positions[3].y, 0.),
+                        ),
+                    ]
+                } else {
+                    [Vec2::ZERO; 4]
+                };
+
+                let positions_clipped = [
+                    positions[0] + positions_diff[0].extend(0.),
+                    positions[1] + positions_diff[1].extend(0.),
+                    positions[2] + positions_diff[2].extend(0.),
+                    positions[3] + positions_diff[3].extend(0.),
+                ];
+
+                let transformed_rect_size = extracted_uinode.transform.transform_vector3(rect_size);
+
+                // Don't try to cull nodes that have a rotation
+                // In a rotation around the Z-axis, this value is 0.0 for an angle of 0.0 or π
+                // In those two cases, the culling check can proceed normally as corners will be on
+                // horizontal / vertical lines
+                // For all other angles, bypass the culling check
+                // This does not properly handles all rotations on all axis
+                if extracted_uinode.transform.x_axis[1] == 0.0 {
+                    // Cull nodes that are completely clipped
+                    if positions_diff[0].x - positions_diff[1].x >= transformed_rect_size.x
+                        || positions_diff[1].y - positions_diff[2].y >= transformed_rect_size.y
+                    {
+                        continue;
+                    }
+                }
+
+                let atlas_extent = extracted_uinode.atlas_size.unwrap_or(uinode_rect.max);
+                let mut uvs = [
+                    Vec2::new(
+                        uinode_rect.min.x + positions_diff[0].x * extracted_uinode.scale_factor,
+                        uinode_rect.min.y + positions_diff[0].y * extracted_uinode.scale_factor,
+                    ),
+                    Vec2::new(
+                        uinode_rect.max.x + positions_diff[1].x * extracted_uinode.scale_factor,
+                        uinode_rect.min.y + positions_diff[1].y * extracted_uinode.scale_factor,
+                    ),
+                    Vec2::new(
+                        uinode_rect.max.x + positions_diff[2].x * extracted_uinode.scale_factor,
+                        uinode_rect.max.y + positions_diff[2].y * extracted_uinode.scale_factor,
+                    ),
+                    Vec2::new(
+                        uinode_rect.min.x + positions_diff[3].x * extracted_uinode.scale_factor,
+                        uinode_rect.max.y + positions_diff[3].y * extracted_uinode.scale_factor,
+                    ),
+                ]
+                .map(|pos| pos / atlas_extent);
+
+                if extracted_uinode.flip_x {
+                    uvs = [uvs[1], uvs[0], uvs[3], uvs[2]];
+                }
+                if extracted_uinode.flip_y {
+                    uvs = [uvs[3], uvs[2], uvs[1], uvs[0]];
+                }
+
+                for i in QUAD_INDICES {
+                    ui_meta.vertices.push(UiVertex {
+                        position: positions_clipped[i].into(),
+                        uv: uvs[i].into(),
+                        color: extracted_uinode.background_color.as_linear_rgba_f32(),
+                    });
+                }
+
+                end += QUAD_INDICES.len() as u32;
+            }
+
+            // if start != end, there is one last batch to process
+            if start != end {
                 image_bind_groups
                     .values
-                    .entry(batch.image.clone_weak())
+                    .entry(current_batch_handle.clone_weak())
                     .or_insert_with(|| {
-                        let gpu_image = gpu_images.get(&batch.image).unwrap();
+                        let gpu_image = gpu_images.get(&current_batch_handle).unwrap();
                         render_device.create_bind_group(&BindGroupDescriptor {
                             entries: &[
                                 BindGroupEntry {
@@ -616,13 +614,47 @@ pub fn queue_uinodes(
                             layout: &ui_pipeline.image_layout,
                         })
                     });
-                transparent_phase.add(TransparentUi {
-                    draw_function: draw_ui_function,
-                    pipeline,
-                    entity,
-                    sort_key: FloatOrd(batch.z),
-                });
+                *transparent_ui_phase.items[phase_item_index].batch_range_mut() = Some(start..end);
             }
+        }
+    }
+
+    ui_meta.vertices.write_buffer(&render_device, &render_queue);
+}
+
+#[derive(Resource, Default)]
+pub struct UiImageBindGroups {
+    pub values: HashMap<Handle<Image>, BindGroup>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn queue_uinodes(
+    draw_functions: Res<DrawFunctions<TransparentUi>>,
+    ui_pipeline: Res<UiPipeline>,
+    mut pipelines: ResMut<SpecializedRenderPipelines<UiPipeline>>,
+    mut pipeline_cache: ResMut<PipelineCache>,
+    extracted_ui_nodes: Query<(Entity, &ExtractedUiNode)>,
+    mut views: Query<(&ExtractedView, &mut RenderPhase<TransparentUi>)>,
+) {
+    let draw_ui_function = draw_functions.read().id::<DrawUi>();
+    for (view, mut transparent_phase) in &mut views {
+        let pipeline = pipelines.specialize(
+            &mut pipeline_cache,
+            &ui_pipeline,
+            UiPipelineKey { hdr: view.hdr },
+        );
+        for (entity, extracted_ui_node) in &extracted_ui_nodes {
+            transparent_phase.add(TransparentUi {
+                draw_function: draw_ui_function,
+                pipeline,
+                entity,
+                sort_key: (
+                    extracted_ui_node.stack_index,
+                    FloatOrd(extracted_ui_node.transform.w_axis[2]),
+                ),
+                batch_range: None,
+                dynamic_offset: None,
+            });
         }
     }
 }

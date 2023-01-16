@@ -67,15 +67,17 @@ impl Plugin for SpritePlugin {
                 .init_resource::<SpritePipeline>()
                 .init_resource::<SpecializedRenderPipelines<SpritePipeline>>()
                 .init_resource::<SpriteMeta>()
-                .init_resource::<ExtractedSprites>()
                 .init_resource::<SpriteAssetEvents>()
+                .init_resource::<ExtractedSprites>()
                 .add_render_command::<Transparent2d, DrawSprite>()
                 .add_system_to_stage(
                     RenderStage::Extract,
                     render::extract_sprites.label(SpriteSystem::ExtractSprites),
                 )
                 .add_system_to_stage(RenderStage::Extract, render::extract_sprite_events)
-                .add_system_to_stage(RenderStage::Queue, queue_sprites);
+                .add_system_to_stage(RenderStage::Queue, queue_sprites)
+                // .add_system_to_stage(RenderStage::Prepare, prepare_sprites)
+                ;
         };
     }
 }

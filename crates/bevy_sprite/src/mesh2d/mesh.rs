@@ -1,34 +1,42 @@
 use bevy_app::Plugin;
-use bevy_asset::{load_internal_asset, Handle, HandleUntyped};
+use bevy_asset::{load_internal_asset, Handle, HandleId, HandleUntyped};
+use bevy_core_pipeline::core_2d::Transparent2d;
 use bevy_ecs::{
     prelude::*,
     query::ROQueryItem,
     system::{lifetimeless::*, SystemParamItem, SystemState},
 };
-use bevy_math::{Mat4, Vec2};
-use bevy_reflect::{Reflect, TypeUuid};
+use bevy_math::{Mat4, Vec2, Vec4};
+use bevy_reflect::{Reflect, TypeUuid, Uuid};
 use bevy_render::{
-    extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
+    extract_component::{ComponentVecUniforms, MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE},
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{GpuBufferInfo, Mesh, MeshVertexBufferLayout},
     render_asset::RenderAssets,
-    render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
+    render_phase::{
+        BatchedPhaseItem, CachedRenderPipelinePhaseItem, DrawFunctionId, PhaseItem, RenderCommand,
+        RenderCommandResult, RenderPhase, TrackedRenderPass,
+    },
     render_resource::*,
-    renderer::{RenderDevice, RenderQueue},
+    renderer::{render_system, RenderDevice, RenderQueue},
     texture::{
         BevyDefault, DefaultImageSampler, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
     },
     view::{
-        ComputedVisibility, ExtractedView, ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms,
+        ComputedVisibility, ExtractedView, ViewTarget, ViewUniform, ViewUniformOffset,
+        ViewUniforms, VisibleEntities,
     },
     Extract, RenderApp, RenderStage,
 };
 use bevy_transform::components::GlobalTransform;
+use bevy_utils::{hashbrown, PassHash};
+
+use crate::{Material2dBindingMeta, Material2dHandle};
 
 /// Component for rendering with meshes in the 2d pipeline, usually with a [2d material](crate::Material2d) such as [`ColorMaterial`](crate::ColorMaterial).
 ///
 /// It wraps a [`Handle<Mesh>`] to differentiate from the 3d pipelines which use the handles directly as components
-#[derive(Default, Clone, Component, Debug, Reflect)]
+#[derive(Default, Clone, Component, Debug, Reflect, PartialEq, Eq)]
 #[reflect(Component)]
 pub struct Mesh2dHandle(pub Handle<Mesh>);
 
@@ -96,25 +104,265 @@ impl Plugin for Mesh2dRenderPlugin {
         );
         load_internal_asset!(app, MESH2D_SHADER_HANDLE, "mesh2d.wgsl", Shader::from_wgsl);
 
-        app.add_plugin(UniformComponentPlugin::<Mesh2dUniform>::default());
-
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            let limits = render_app
+                .world
+                .get_resource::<RenderDevice>()
+                .expect(
+                    "RenderDevice Resource must exist before a UniformComponentVecPlugin is added",
+                )
+                .limits();
+
             render_app
+                // NOTE: ComponentVecUniforms<Mesh2dUniform> must be inserted before
+                // the Mesh2dPipeline resource as Mesh2dPipeline initialization uses
+                // information from it
+                .insert_resource(ComponentVecUniforms::<Mesh2dUniform>::new(
+                    (limits
+                        .max_uniform_buffer_binding_size
+                        .min(MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE)
+                        as u64
+                        / Mesh2dUniform::min_size().get()) as usize,
+                    limits.min_uniform_buffer_offset_alignment,
+                ))
                 .init_resource::<Mesh2dPipeline>()
+                .init_resource::<ExtractedMeshes2d>()
                 .init_resource::<SpecializedMeshPipelines<Mesh2dPipeline>>()
-                .add_system_to_stage(RenderStage::Extract, extract_mesh2d)
-                .add_system_to_stage(RenderStage::Queue, queue_mesh2d_bind_group)
-                .add_system_to_stage(RenderStage::Queue, queue_mesh2d_view_bind_groups);
+                .add_system_to_stage(RenderStage::Prepare, prepare_mesh2d_uniforms)
+                .add_system_to_stage(
+                    RenderStage::Prepare,
+                    queue_mesh2d_bind_group.after(prepare_mesh2d_uniforms),
+                )
+                .add_system_to_stage(RenderStage::Prepare, queue_mesh2d_view_bind_groups);
         }
     }
 }
 
-#[derive(Component, ShaderType, Clone)]
-pub struct Mesh2dUniform {
-    pub transform: Mat4,
-    pub inverse_transpose_model: Mat4,
-    pub flags: u32,
+/// Data necessary to be equal for two draw commands to be mergeable
+///
+/// This is based on the following assumptions:
+/// - Only entities with prepared assets (pipelines, materials, meshes) are
+///   queued to phases
+/// - View bindings are constant across a phase for a given draw function as
+///   phases are per-view
+/// - `prepare_mesh_uniforms` is the only system that performs this batching
+///   and has sole responsibility for preparing the per-object data. As such
+///   the mesh binding and dynamic offsets are assumed to only be variable as a
+///   result of the `prepare_mesh_uniforms` system, e.g. due to having to split
+///   data across separate uniform bindings within the same buffer due to the
+///   maximum uniform buffer binding size.
+#[derive(Default, PartialEq, Eq)]
+struct BatchMeta<'mat> {
+    /// The pipeline id encompasses all pipeline configuration including vertex
+    /// buffers and layouts, shaders and their specializations, bind group
+    /// layouts, etc.
+    pipeline_id: Option<CachedRenderPipelineId>,
+    /// The draw function id defines the RenderCommands that are called to
+    /// set the pipeline and bindings, and make the draw command
+    draw_function_id: Option<DrawFunctionId>,
+    dynamic_offset: u32,
+    mesh_handle: Option<HandleId>,
+    /// The material binding meta includes the material bind group id and
+    /// dynamic offsets.
+    material2d_binding_meta: Option<&'mat Material2dBindingMeta>,
 }
+
+// impl<'mat> BatchMeta<'mat> {
+//     fn matches(&self, other: &BatchMeta<'mat>, consider_material: bool) -> bool {
+//         self.pipeline_id == other.pipeline_id
+//             && self.draw_function_id == other.draw_function_id
+//             && self.mesh_handle == other.mesh_handle
+//             && self.dynamic_offset == other.dynamic_offset
+//             && (!consider_material || self.material2d_binding_meta == other.material2d_binding_meta)
+//     }
+// }
+
+#[derive(Default)]
+struct BatchState<'mat> {
+    meta: BatchMeta<'mat>,
+    /// The base index in the object data binding's array
+    index: u32,
+    /// The number of entities in the batch
+    count: u32,
+    item_index: usize,
+}
+
+#[inline]
+fn update_batch_data<I: BatchedPhaseItem>(item: &mut I, batch: &BatchState) {
+    let &BatchState {
+        meta: BatchMeta {
+            dynamic_offset: offset,
+            ..
+        },
+        index,
+        count,
+        ..
+    } = batch;
+    *item.batch_dynamic_offset_mut() = Some(offset);
+    *item.batch_range_mut() = Some(index..index + count);
+}
+
+fn process_phase<I: CachedRenderPipelinePhaseItem + BatchedPhaseItem>(
+    batches: &mut Vec<(Entity, (Material2dHandle, Mesh2dHandle))>,
+    object_data_buffer: &mut ComponentVecUniforms<Mesh2dUniform>,
+    // object_query: &mut ObjectQuery,
+    extracted_meshes: &mut ExtractedMeshes2d,
+    phase: &mut RenderPhase<I>,
+    consider_material: bool,
+) {
+    let mut batch = BatchState::default();
+    // dbg!(phase.items.len());
+    // let flags = MeshFlags::NONE.bits;
+    let mut i = 0;
+    while i < phase.items.len() {
+        let item = &mut phase.items[i];
+        let Some(extracted_mesh) = extracted_meshes.meshes.get(&item.entity().to_bits()) else {continue;};
+        let transform = extracted_mesh.transform.affine();
+        // let indices = object_data_buffer.push(Mesh2dUniform {
+        //     transform: Mat4::from(transform),
+        //     inverse_transpose_model: Mat4::from(transform.inverse()).transpose(),
+        //     flags,
+        // });
+        let indices = object_data_buffer.push(Mesh2dUniform {
+            local_to_world: [
+                transform.matrix3.x_axis.extend(transform.translation.x),
+                transform.matrix3.y_axis.extend(transform.translation.y),
+                transform.matrix3.z_axis.extend(transform.translation.z),
+            ],
+        });
+        // let batch_meta = BatchMeta {
+        //     pipeline_id: Some(item.cached_pipeline()),
+        //     draw_function_id: Some(item.draw_function()),
+        //     material2d_binding_meta: Some(&extracted_mesh.material2d_binding_meta),
+        //     mesh_handle: Some(extracted_mesh.mesh_handle_id),
+        //     dynamic_offset: indices.offset(),
+        // };
+        if indices.offset() != batch.meta.dynamic_offset
+            || Some(extracted_mesh.mesh_handle_id) != batch.meta.mesh_handle
+            || Some(&extracted_mesh.material2d_binding_meta) != batch.meta.material2d_binding_meta
+            || Some(item.draw_function()) != batch.meta.draw_function_id
+            || Some(item.cached_pipeline()) != batch.meta.pipeline_id
+        {
+            let pipeline_id = item.cached_pipeline();
+            let draw_function_id = item.draw_function();
+            // !batch_meta.matches(&batch.meta, consider_material) {
+            if batch.count > 0 {
+                update_batch_data(&mut phase.items[batch.item_index], &batch);
+                let entity = phase.items[batch.item_index].entity();
+                let extracted_mesh = extracted_meshes.meshes.get(&entity.to_bits()).unwrap();
+                batches.push((
+                    entity,
+                    (
+                        Material2dHandle(extracted_mesh.material_handle_id),
+                        Mesh2dHandle(Handle::weak(extracted_mesh.mesh_handle_id)),
+                    ),
+                ));
+            }
+
+            batch.meta = BatchMeta {
+                pipeline_id: Some(pipeline_id),
+                draw_function_id: Some(draw_function_id),
+                material2d_binding_meta: Some(&extracted_mesh.material2d_binding_meta),
+                mesh_handle: Some(extracted_mesh.mesh_handle_id),
+                dynamic_offset: indices.offset(),
+            };
+            batch.index = indices.index();
+            batch.count = 0;
+            batch.item_index = i;
+        }
+        batch.count += 1;
+        i += 1;
+    }
+    if !phase.items.is_empty() {
+        update_batch_data(&mut phase.items[batch.item_index], &batch);
+        let entity = phase.items[batch.item_index].entity();
+        let extracted_mesh = extracted_meshes.meshes.get(&entity.to_bits()).unwrap();
+        batches.push((
+            entity,
+            (
+                Material2dHandle(extracted_mesh.material_handle_id),
+                Mesh2dHandle(Handle::weak(extracted_mesh.mesh_handle_id)),
+            ),
+        ));
+    }
+}
+
+type ObjectQuery<'w, 's, 'mat, 'mesh, 'data> = Query<
+    'w,
+    's,
+    (
+        Option<&'mat Material2dBindingMeta>,
+        &'mesh Mesh2dHandle,
+        &'data Mesh2dUniform,
+    ),
+>;
+
+/// This system prepares all components of the corresponding component type.
+/// They are transformed into uniforms and stored in the [`ComponentVecUniforms`] resource.
+fn prepare_mesh2d_uniforms(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    object_data_buffer: ResMut<ComponentVecUniforms<Mesh2dUniform>>,
+    // mut object_query: ObjectQuery,
+    extracted_meshes: ResMut<ExtractedMeshes2d>,
+    mut views: Query<(&VisibleEntities, &mut RenderPhase<Transparent2d>)>,
+    mut previous_len: Local<usize>,
+) {
+    #[cfg(feature = "trace")]
+    let _span = bevy_utils::tracing::info_span!("vec_alloc").entered();
+    let mut batches = Vec::with_capacity(*previous_len);
+    #[cfg(feature = "trace")]
+    drop(_span);
+
+    let object_data_buffer = object_data_buffer.into_inner();
+    object_data_buffer.clear();
+
+    #[cfg(feature = "trace")]
+    let _span = bevy_utils::tracing::info_span!("sort_views").entered();
+    let mut views = views.iter_mut().collect::<Vec<_>>();
+    views.sort_unstable_by(|a, b| a.0.len().cmp(&b.0.len()));
+    #[cfg(feature = "trace")]
+    drop(_span);
+
+    let extracted_meshes = extracted_meshes.into_inner();
+    for (_, transparent) in views.into_iter() {
+        #[cfg(feature = "trace")]
+        let _span = bevy_utils::tracing::info_span!("process_phase").entered();
+        process_phase(
+            &mut batches,
+            object_data_buffer,
+            // &mut object_query,
+            extracted_meshes,
+            transparent.into_inner(),
+            true,
+        );
+        #[cfg(feature = "trace")]
+        drop(_span);
+    }
+
+    *previous_len = batches.len();
+    commands.insert_or_spawn_batch(batches);
+
+    #[cfg(feature = "trace")]
+    let _span = bevy_utils::tracing::info_span!("write_buffer").entered();
+    object_data_buffer.write_buffer(&render_device, &render_queue);
+    #[cfg(feature = "trace")]
+    drop(_span);
+}
+
+#[derive(Component, ShaderType, Clone, Copy)]
+pub struct Mesh2dUniform {
+    /// Affine transform packed as column-major 3x3 in the xyz elements
+    /// and translation in the w elements
+    pub local_to_world: [Vec4; 3],
+}
+// #[derive(Component, ShaderType, Clone, Copy)]
+// pub struct Mesh2dUniform {
+//     pub transform: Mat4,
+//     pub inverse_transpose_model: Mat4,
+//     pub flags: u32,
+// }
 
 // NOTE: These must match the bit flags in bevy_sprite/src/mesh2d/mesh2d.wgsl!
 bitflags::bitflags! {
@@ -125,31 +373,20 @@ bitflags::bitflags! {
     }
 }
 
-pub fn extract_mesh2d(
-    mut commands: Commands,
-    mut previous_len: Local<usize>,
-    query: Extract<Query<(Entity, &ComputedVisibility, &GlobalTransform, &Mesh2dHandle)>>,
-) {
-    let mut values = Vec::with_capacity(*previous_len);
-    for (entity, computed_visibility, transform, handle) in &query {
-        if !computed_visibility.is_visible() {
-            continue;
-        }
-        let transform = transform.compute_matrix();
-        values.push((
-            entity,
-            (
-                Mesh2dHandle(handle.0.clone_weak()),
-                Mesh2dUniform {
-                    flags: MeshFlags::empty().bits,
-                    transform,
-                    inverse_transpose_model: transform.inverse().transpose(),
-                },
-            ),
-        ));
-    }
-    *previous_len = values.len();
-    commands.insert_or_spawn_batch(values);
+#[derive(Component, Clone)]
+pub struct ExtractedMaterialMesh2d {
+    pub entity: Entity,
+    pub transform: GlobalTransform,
+    /// PERF: storing a `HandleId` instead of `Handle<Image>` enables some optimizations (`ExtractedSprite` becomes `Copy` and doesn't need to be dropped)
+    pub mesh_handle_id: HandleId,
+    /// PERF: storing a `HandleId` instead of `Handle<Image>` enables some optimizations (`ExtractedSprite` becomes `Copy` and doesn't need to be dropped)
+    pub material_handle_id: HandleId,
+    pub material2d_binding_meta: Material2dBindingMeta,
+}
+
+#[derive(Default, Resource)]
+pub struct ExtractedMeshes2d {
+    pub meshes: hashbrown::HashMap<u64, ExtractedMaterialMesh2d, PassHash>,
 }
 
 #[derive(Resource, Clone)]
@@ -158,13 +395,17 @@ pub struct Mesh2dPipeline {
     pub mesh_layout: BindGroupLayout,
     // This dummy white texture is to be used in place of optional textures
     pub dummy_white_gpu_image: GpuImage,
+    pub mesh2d_uniform_array_len: u32,
 }
 
 impl FromWorld for Mesh2dPipeline {
     fn from_world(world: &mut World) -> Self {
-        let mut system_state: SystemState<(Res<RenderDevice>, Res<DefaultImageSampler>)> =
-            SystemState::new(world);
-        let (render_device, default_sampler) = system_state.get_mut(world);
+        let mut system_state: SystemState<(
+            Res<RenderDevice>,
+            Res<DefaultImageSampler>,
+            Res<ComponentVecUniforms<Mesh2dUniform>>,
+        )> = SystemState::new(world);
+        let (render_device, default_sampler, mesh2d_uniforms) = system_state.get_mut(world);
         let view_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[
                 // View
@@ -199,12 +440,20 @@ impl FromWorld for Mesh2dPipeline {
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
                     has_dynamic_offset: true,
-                    min_binding_size: Some(Mesh2dUniform::min_size()),
+                    min_binding_size: Some(mesh2d_uniforms.size()),
                 },
                 count: None,
             }],
             label: Some("mesh2d_layout"),
         });
+
+        let mesh2d_uniform_array_len = (render_device
+            .limits()
+            .max_uniform_buffer_binding_size
+            .min(MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE)
+            as u64
+            / Mesh2dUniform::min_size().get()) as u32;
+
         // A 1x1x1 'all 1.0' texture to use as a dummy texture to use in place of optional StandardMaterial textures
         let dummy_white_gpu_image = {
             let image = Image::new_fill(
@@ -258,6 +507,7 @@ impl FromWorld for Mesh2dPipeline {
             view_layout,
             mesh_layout,
             dummy_white_gpu_image,
+            mesh2d_uniform_array_len,
         }
     }
 }
@@ -385,6 +635,11 @@ impl SpecializedMeshPipeline for Mesh2dPipeline {
             }
         }
 
+        shader_defs.push(ShaderDefVal::UInt(
+            "MESHES_2D_UNIFORM_ARRAY_LEN".to_string(),
+            self.mesh2d_uniform_array_len,
+        ));
+
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
 
         let format = match key.contains(Mesh2dPipelineKey::HDR) {
@@ -439,9 +694,9 @@ pub fn queue_mesh2d_bind_group(
     mut commands: Commands,
     mesh2d_pipeline: Res<Mesh2dPipeline>,
     render_device: Res<RenderDevice>,
-    mesh2d_uniforms: Res<ComponentUniforms<Mesh2dUniform>>,
+    mesh2d_uniforms: Res<ComponentVecUniforms<Mesh2dUniform>>,
 ) {
-    if let Some(binding) = mesh2d_uniforms.uniforms().binding() {
+    if let Some(binding) = mesh2d_uniforms.binding() {
         commands.insert_resource(Mesh2dBindGroup {
             value: render_device.create_bind_group(&BindGroupDescriptor {
                 entries: &[BindGroupEntry {
@@ -516,37 +771,37 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMesh2dViewBindGroup<I
 }
 
 pub struct SetMesh2dBindGroup<const I: usize>;
-impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMesh2dBindGroup<I> {
+impl<P: BatchedPhaseItem, const I: usize> RenderCommand<P> for SetMesh2dBindGroup<I> {
     type Param = SRes<Mesh2dBindGroup>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = Read<DynamicUniformIndex<Mesh2dUniform>>;
+    type ItemWorldQuery = ();
 
     #[inline]
     fn render<'w>(
-        _item: &P,
+        item: &P,
         _view: (),
-        mesh2d_index: &'_ DynamicUniformIndex<Mesh2dUniform>,
+        _: ROQueryItem<'_, Self::ItemWorldQuery>,
         mesh2d_bind_group: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         pass.set_bind_group(
             I,
             &mesh2d_bind_group.into_inner().value,
-            &[mesh2d_index.index()],
+            &[item.batch_dynamic_offset().unwrap()],
         );
         RenderCommandResult::Success
     }
 }
 
 pub struct DrawMesh2d;
-impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
+impl<P: BatchedPhaseItem> RenderCommand<P> for DrawMesh2d {
     type Param = SRes<RenderAssets<Mesh>>;
     type ViewWorldQuery = ();
     type ItemWorldQuery = Read<Mesh2dHandle>;
 
     #[inline]
     fn render<'w>(
-        _item: &P,
+        item: &P,
         _view: (),
         mesh_handle: ROQueryItem<'w, Self::ItemWorldQuery>,
         meshes: SystemParamItem<'w, '_, Self::Param>,
@@ -554,6 +809,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
     ) -> RenderCommandResult {
         if let Some(gpu_mesh) = meshes.into_inner().get(&mesh_handle.0) {
             pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+            let batch_range = item.batch_range().as_ref().unwrap();
             match &gpu_mesh.buffer_info {
                 GpuBufferInfo::Indexed {
                     buffer,
@@ -561,13 +817,13 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
                     count,
                 } => {
                     pass.set_index_buffer(buffer.slice(..), 0, *index_format);
-                    pass.draw_indexed(0..*count, 0, 0..1);
+                    pass.draw_indexed(0..*count, 0, batch_range.clone());
                 }
                 GpuBufferInfo::NonIndexed { vertex_count } => {
-                    pass.draw(0..*vertex_count, 0..1);
+                    pass.draw(0..*vertex_count, batch_range.clone());
                 }
             }
-            RenderCommandResult::Success
+            RenderCommandResult::SuccessfulDraw(batch_range.len())
         } else {
             RenderCommandResult::Failure
         }

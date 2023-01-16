@@ -245,10 +245,12 @@ impl Plugin for PbrPlugin {
                 render::prepare_clusters.label(RenderLightSystems::PrepareClusters),
             )
             .add_system_to_stage(
-                RenderStage::Queue,
-                render::queue_shadows.label(RenderLightSystems::QueueShadows),
+                RenderStage::Prepare,
+                render::queue_shadows
+                    .label(RenderLightSystems::QueueShadows)
+                    .at_start(),
             )
-            .add_system_to_stage(RenderStage::Queue, render::queue_shadow_view_bind_group)
+            .add_system_to_stage(RenderStage::Prepare, render::queue_shadow_view_bind_group)
             .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Shadow>)
             .init_resource::<ShadowPipeline>()
             .init_resource::<DrawFunctions<Shadow>>()

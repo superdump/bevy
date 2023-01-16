@@ -16,7 +16,7 @@ use bevy_render::{
     view::{ComputedVisibility, Visibility},
     Extract,
 };
-use bevy_sprite::{Anchor, ExtractedSprite, ExtractedSprites, TextureAtlas};
+use bevy_sprite::{Anchor, ExtractedSprite, TextureAtlas};
 use bevy_transform::prelude::{GlobalTransform, Transform};
 use bevy_utils::HashSet;
 use bevy_window::{WindowId, WindowScaleFactorChanged, Windows};
@@ -68,7 +68,7 @@ pub struct Text2dBundle {
 }
 
 pub fn extract_text2d_sprite(
-    mut extracted_sprites: ResMut<ExtractedSprites>,
+    mut commands: Commands,
     texture_atlases: Extract<Res<Assets<TextureAtlas>>>,
     windows: Extract<Res<Windows>>,
     text2d_query: Extract<
@@ -81,7 +81,10 @@ pub fn extract_text2d_sprite(
             &Text2dSize,
         )>,
     >,
+    mut prev_sprite_count: Local<usize>,
 ) {
+    let mut sprites = Vec::with_capacity(*prev_sprite_count);
+
     let scale_factor = windows.scale_factor(WindowId::primary()) as f32;
 
     for (entity, computed_visibility, text, text_layout_info, text_transform, calculated_size) in
@@ -128,19 +131,26 @@ pub fn extract_text2d_sprite(
                 * GlobalTransform::from_scale(Vec3::splat(scale_factor.recip()))
                 * glyph_transform;
 
-            extracted_sprites.sprites.push(ExtractedSprite {
+            dbg!(entity);
+            sprites.push((
                 entity,
-                transform,
-                color,
-                rect,
-                custom_size: None,
-                image_handle_id: handle.id(),
-                flip_x: false,
-                flip_y: false,
-                anchor: Anchor::Center.as_vec(),
-            });
+                ExtractedSprite {
+                    entity,
+                    transform,
+                    color,
+                    rect,
+                    custom_size: None,
+                    image_handle_id: handle.id(),
+                    flip_x: false,
+                    flip_y: false,
+                    anchor: Anchor::Center.as_vec(),
+                },
+            ));
         }
     }
+
+    *prev_sprite_count = sprites.len();
+    commands.insert_or_spawn_batch(sprites);
 }
 
 /// Updates the layout and size information whenever the text or style is changed.

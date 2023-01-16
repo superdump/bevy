@@ -1,5 +1,7 @@
-use super::{UiBatch, UiImageBindGroups, UiMeta};
-use crate::{prelude::UiCameraConfig, DefaultCameraView};
+use std::ops::Range;
+
+use super::{UiImageBindGroups, UiMeta};
+use crate::{prelude::UiCameraConfig, DefaultCameraView, ExtractedUiNode};
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemParamItem},
@@ -97,14 +99,16 @@ impl Node for UiPassNode {
 }
 
 pub struct TransparentUi {
-    pub sort_key: FloatOrd,
+    pub sort_key: <Self as PhaseItem>::SortKey,
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub batch_range: Option<Range<u32>>,
+    pub dynamic_offset: Option<u32>,
 }
 
 impl PhaseItem for TransparentUi {
-    type SortKey = FloatOrd;
+    type SortKey = (usize, FloatOrd);
 
     #[inline]
     fn entity(&self) -> Entity {
@@ -126,6 +130,24 @@ impl CachedRenderPipelinePhaseItem for TransparentUi {
     #[inline]
     fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.pipeline
+    }
+}
+
+impl BatchedPhaseItem for TransparentUi {
+    fn batch_range(&self) -> &Option<std::ops::Range<u32>> {
+        &self.batch_range
+    }
+
+    fn batch_range_mut(&mut self) -> &mut Option<std::ops::Range<u32>> {
+        &mut self.batch_range
+    }
+
+    fn batch_dynamic_offset(&self) -> &Option<u32> {
+        &self.dynamic_offset
+    }
+
+    fn batch_dynamic_offset_mut(&mut self) -> &mut Option<u32> {
+        &mut self.dynamic_offset
     }
 }
 
@@ -161,37 +183,38 @@ pub struct SetUiTextureBindGroup<const I: usize>;
 impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetUiTextureBindGroup<I> {
     type Param = SRes<UiImageBindGroups>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = Read<UiBatch>;
+    type ItemWorldQuery = Read<ExtractedUiNode>;
 
     #[inline]
     fn render<'w>(
         _item: &P,
         _view: (),
-        batch: &'w UiBatch,
+        uinode: &'w ExtractedUiNode,
         image_bind_groups: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let image_bind_groups = image_bind_groups.into_inner();
-        pass.set_bind_group(I, image_bind_groups.values.get(&batch.image).unwrap(), &[]);
+        pass.set_bind_group(I, image_bind_groups.values.get(&uinode.image).unwrap(), &[]);
         RenderCommandResult::Success
     }
 }
 pub struct DrawUiNode;
-impl<P: PhaseItem> RenderCommand<P> for DrawUiNode {
+impl<P: BatchedPhaseItem> RenderCommand<P> for DrawUiNode {
     type Param = SRes<UiMeta>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = Read<UiBatch>;
+    type ItemWorldQuery = ();
 
     #[inline]
     fn render<'w>(
-        _item: &P,
+        item: &P,
         _view: (),
-        batch: &'w UiBatch,
+        _: (),
         ui_meta: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         pass.set_vertex_buffer(0, ui_meta.into_inner().vertices.buffer().unwrap().slice(..));
-        pass.draw(batch.range.clone(), 0..1);
-        RenderCommandResult::Success
+        let batch_range = item.batch_range().as_ref().unwrap();
+        pass.draw(batch_range.clone(), 0..1);
+        RenderCommandResult::SuccessfulDraw(batch_range.len() / 6)
     }
 }

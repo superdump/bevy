@@ -13,7 +13,11 @@ use bevy_ecs::{
     system::lifetimeless::Read,
 };
 use encase::{MaxCapacityArray, ShaderSize};
-use std::{marker::PhantomData, num::NonZeroU64, ops::Deref};
+use std::{
+    marker::PhantomData,
+    num::NonZeroU64,
+    ops::{Deref, Range},
+};
 use wgpu::BindingResource;
 
 /// Stores the index of a uniform inside of [`ComponentUniforms`].
@@ -31,14 +35,16 @@ impl<C: Component> DynamicUniformIndex<C> {
 }
 
 /// Stores the indices of a uniform inside of [`ComponentVecUniforms`].
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct DynamicUniformIndices<C: Component> {
     /// The dynamic offset within the uniform buffer at which to bind
-    offset: u32,
-    /// The index within the array in the binding at that offset at which the
-    /// entity's component data can be looked up in a shader
-    index: u32,
-    marker: PhantomData<C>,
+    pub offset: u32,
+    /// The index within the array in the dynamically-offset binding at which
+    /// the entity's component data can be looked up in a shader
+    pub index: u32,
+    /// The number of entities drawn in this batch
+    pub count: u32,
+    pub marker: PhantomData<C>,
 }
 
 impl<C: Component> DynamicUniformIndices<C> {
@@ -50,6 +56,11 @@ impl<C: Component> DynamicUniformIndices<C> {
     #[inline]
     pub fn index(&self) -> u32 {
         self.index
+    }
+
+    #[inline]
+    pub fn batch_range(&self) -> Range<u32> {
+        self.index..self.index + self.count
     }
 }
 
@@ -267,6 +278,7 @@ impl<C: Component + ShaderType + ShaderSize + WriteInto + Clone> ComponentVecUni
         let result = DynamicUniformIndices::<C> {
             offset: self.current_offset,
             index: self.temp.0.len() as u32,
+            count: 1,
             marker: PhantomData,
         };
         self.temp.0.push(component);

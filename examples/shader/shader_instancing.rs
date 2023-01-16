@@ -128,6 +128,8 @@ fn queue_custom(
                     pipeline,
                     draw_function: draw_custom,
                     distance: rangefinder.distance(&mesh_uniform.transform),
+                    batch_range: None,
+                    dynamic_offset: None,
                 });
             }
         }
@@ -257,6 +259,6 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstanced {
                 pass.draw(0..*vertex_count, 0..instance_buffer.length as u32);
             }
         }
-        RenderCommandResult::Success
+        RenderCommandResult::SuccessfulDraw(instance_buffer.length)
     }
 }

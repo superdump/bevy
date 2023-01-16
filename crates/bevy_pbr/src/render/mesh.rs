@@ -1,10 +1,11 @@
 use crate::{
-    GlobalLightMeta, GpuLights, GpuPointLights, LightMeta, NotShadowCaster, NotShadowReceiver,
-    ShadowPipeline, ViewClusterBindings, ViewLightsUniformOffset, ViewShadowBindings,
-    CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT, MAX_DIRECTIONAL_LIGHTS,
+    GlobalLightMeta, GpuLights, GpuPointLights, LightMeta, MaterialBindingMeta, NotShadowCaster,
+    NotShadowReceiver, Shadow, ShadowPipeline, ViewClusterBindings, ViewLightsUniformOffset,
+    ViewShadowBindings, CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT, MAX_DIRECTIONAL_LIGHTS,
 };
 use bevy_app::Plugin;
 use bevy_asset::{load_internal_asset, Assets, Handle, HandleUntyped};
+use bevy_core_pipeline::core_3d::{AlphaMask3d, Opaque3d, Transparent3d};
 use bevy_ecs::{
     prelude::*,
     query::ROQueryItem,
@@ -13,23 +14,26 @@ use bevy_ecs::{
 use bevy_math::{Mat3A, Mat4, Vec2};
 use bevy_reflect::TypeUuid;
 use bevy_render::{
-    extract_component::{
-        ComponentVecUniforms, DynamicUniformIndices, UniformComponentVecPlugin,
-        MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE,
-    },
+    extract_component::{ComponentVecUniforms, MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE},
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{
         skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
         GpuBufferInfo, Mesh, MeshVertexBufferLayout,
     },
     render_asset::RenderAssets,
-    render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
+    render_phase::{
+        BatchedPhaseItem, CachedRenderPipelinePhaseItem, DrawFunctionId, PhaseItem, RenderCommand,
+        RenderCommandResult, RenderPhase, TrackedRenderPass,
+    },
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
     texture::{
         BevyDefault, DefaultImageSampler, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
     },
-    view::{ComputedVisibility, ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
+    view::{
+        ComputedVisibility, ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms,
+        VisibleEntities,
+    },
     Extract, RenderApp, RenderStage,
 };
 use bevy_transform::components::GlobalTransform;
@@ -95,20 +99,199 @@ impl Plugin for MeshRenderPlugin {
         load_internal_asset!(app, MESH_SHADER_HANDLE, "mesh.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, SKINNING_HANDLE, "skinning.wgsl", Shader::from_wgsl);
 
-        // NOTE: This plugin must be inserted before the MeshPipeline resource
-        // as MeshPipeline initialization uses information from it
-        app.add_plugin(UniformComponentVecPlugin::<MeshUniform>::default());
-
         let Ok(render_app) = app.get_sub_app_mut(RenderApp) else { return };
+        let limits = render_app
+            .world
+            .get_resource::<RenderDevice>()
+            .expect("RenderDevice Resource must exist before a UniformComponentVecPlugin is added")
+            .limits();
         render_app
+            // NOTE: ComponentVecUniforms<MeshUniform> must be inserted before
+            // the MeshPipeline resource as MeshPipeline initialization uses
+            // information from it
+            .insert_resource(ComponentVecUniforms::<MeshUniform>::new(
+                (limits
+                    .max_uniform_buffer_binding_size
+                    .min(MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE) as u64
+                    / MeshUniform::min_size().get()) as usize,
+                limits.min_uniform_buffer_offset_alignment,
+            ))
             .init_resource::<MeshPipeline>()
             .init_resource::<SkinnedMeshUniform>()
             .add_system_to_stage(RenderStage::Extract, extract_meshes)
             .add_system_to_stage(RenderStage::Extract, extract_skinned_meshes)
+            .add_system_to_stage(RenderStage::Prepare, prepare_mesh_uniforms)
             .add_system_to_stage(RenderStage::Prepare, prepare_skinned_meshes)
-            .add_system_to_stage(RenderStage::Prepare, queue_mesh_bind_group)
+            .add_system_to_stage(
+                RenderStage::Prepare,
+                queue_mesh_bind_group.after(prepare_mesh_uniforms),
+            )
             .add_system_to_stage(RenderStage::Prepare, queue_mesh_view_bind_groups);
     }
+}
+
+/// Data necessary to be equal for two draw commands to be mergeable
+///
+/// This is based on the following assumptions:
+/// - Only entities with prepared assets (pipelines, materials, meshes) are
+///   queued to phases
+/// - View bindings are constant across a phase for a given draw function as
+///   phases are per-view
+/// - `prepare_mesh_uniforms` is the only system that performs this batching
+///   and has sole responsibility for preparing the per-object data. As such
+///   the mesh binding and dynamic offsets are assumed to only be variable as a
+///   result of the `prepare_mesh_uniforms` system, e.g. due to having to split
+///   data across separate uniform bindings within the same buffer due to the
+///   maximum uniform buffer binding size.
+#[derive(Default, PartialEq, Eq)]
+struct BatchMeta<'mat, 'mesh> {
+    /// The pipeline id encompasses all pipeline configuration including vertex
+    /// buffers and layouts, shaders and their specializations, bind group
+    /// layouts, etc.
+    pipeline_id: Option<CachedRenderPipelineId>,
+    /// The draw function id defines the RenderCommands that are called to
+    /// set the pipeline and bindings, and make the draw command
+    draw_function_id: Option<DrawFunctionId>,
+    /// The material binding meta includes the material bind group id and
+    /// dynamic offsets.
+    material_binding_meta: Option<&'mat MaterialBindingMeta>,
+    mesh_handle: Option<&'mesh Handle<Mesh>>,
+    dynamic_offset: u32,
+}
+
+impl<'mat, 'mesh> BatchMeta<'mat, 'mesh> {
+    fn matches(&self, other: &BatchMeta<'mat, 'mesh>, consider_material: bool) -> bool {
+        self.pipeline_id == other.pipeline_id
+            && self.draw_function_id == other.draw_function_id
+            && self.mesh_handle == other.mesh_handle
+            && self.dynamic_offset == other.dynamic_offset
+            && (!consider_material || self.material_binding_meta == other.material_binding_meta)
+    }
+}
+
+#[derive(Default)]
+struct BatchState<'mat, 'mesh> {
+    meta: BatchMeta<'mat, 'mesh>,
+    /// The base index in the object data binding's array
+    index: u32,
+    /// The number of entities in the batch
+    count: u32,
+    item_index: usize,
+}
+
+fn update_batch_data<I: BatchedPhaseItem>(item: &mut I, batch: &BatchState) {
+    let &BatchState {
+        meta: BatchMeta {
+            dynamic_offset: offset,
+            ..
+        },
+        index,
+        count,
+        ..
+    } = batch;
+    *item.batch_dynamic_offset_mut() = Some(offset);
+    *item.batch_range_mut() = Some(index..index + count);
+}
+
+fn process_phase<I: CachedRenderPipelinePhaseItem + BatchedPhaseItem>(
+    object_data_buffer: &mut ComponentVecUniforms<MeshUniform>,
+    object_query: &mut ObjectQuery,
+    phase: &mut RenderPhase<I>,
+    consider_material: bool,
+) {
+    let mut batch = BatchState::default();
+    let mut i = 0;
+    while i < phase.items.len() {
+        let item = &mut phase.items[i];
+        let Ok((material_binding_meta, mesh_handle, mesh_uniform)) = object_query.get(item.entity()) else {continue;};
+        let indices = object_data_buffer.push(*mesh_uniform);
+        let batch_meta = BatchMeta {
+            pipeline_id: Some(item.cached_pipeline()),
+            draw_function_id: Some(item.draw_function()),
+            material_binding_meta,
+            mesh_handle: Some(mesh_handle),
+            dynamic_offset: indices.offset(),
+        };
+        if !batch_meta.matches(&batch.meta, consider_material) {
+            if batch.count > 0 {
+                update_batch_data(&mut phase.items[batch.item_index], &batch);
+            }
+
+            batch.meta = batch_meta;
+            batch.index = indices.index();
+            batch.count = 0;
+            batch.item_index = i;
+        }
+        batch.count += 1;
+        i += 1;
+    }
+    if !phase.items.is_empty() {
+        update_batch_data(&mut phase.items[batch.item_index], &batch);
+    }
+}
+
+type ObjectQuery<'w, 's, 'mat, 'mesh, 'data> = Query<
+    'w,
+    's,
+    (
+        Option<&'mat MaterialBindingMeta>,
+        &'mesh Handle<Mesh>,
+        &'data MeshUniform,
+    ),
+>;
+
+/// This system prepares all components of the corresponding component type.
+/// They are transformed into uniforms and stored in the [`ComponentVecUniforms`] resource.
+fn prepare_mesh_uniforms(
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    object_data_buffer: ResMut<ComponentVecUniforms<MeshUniform>>,
+    mut object_query: ObjectQuery,
+    mut views: Query<(
+        &VisibleEntities,
+        &mut RenderPhase<Opaque3d>,
+        &mut RenderPhase<AlphaMask3d>,
+        &mut RenderPhase<Transparent3d>,
+    )>,
+    mut shadow_views: Query<&mut RenderPhase<Shadow>>,
+) {
+    let object_data_buffer = object_data_buffer.into_inner();
+    object_data_buffer.clear();
+
+    let mut views = views.iter_mut().collect::<Vec<_>>();
+    views.sort_unstable_by(|a, b| a.0.len().cmp(&b.0.len()));
+
+    for (_, opaque, alpha_mask, transparent) in views.into_iter() {
+        process_phase(
+            object_data_buffer,
+            &mut object_query,
+            opaque.into_inner(),
+            true,
+        );
+        process_phase(
+            object_data_buffer,
+            &mut object_query,
+            alpha_mask.into_inner(),
+            true,
+        );
+        process_phase(
+            object_data_buffer,
+            &mut object_query,
+            transparent.into_inner(),
+            true,
+        );
+    }
+
+    for shadow in &mut shadow_views {
+        process_phase(
+            object_data_buffer,
+            &mut object_query,
+            shadow.into_inner(),
+            false,
+        );
+    }
+
+    object_data_buffer.write_buffer(&render_device, &render_queue);
 }
 
 #[derive(Default, Component, ShaderType, Clone, Copy)]
@@ -166,9 +349,24 @@ pub fn extract_meshes(
             inverse_transpose_model: transform.inverse().transpose(),
         };
         if not_caster.is_some() {
-            not_caster_commands.push((entity, (handle.clone_weak(), uniform, NotShadowCaster)));
+            not_caster_commands.push((
+                entity,
+                (
+                    handle.clone_weak(),
+                    uniform,
+                    // NOTE: MaterialBindingMeta is inserted here as it is
+                    // required for batching and this way it can be modified
+                    // in-place, avoiding ECS table moves later due to
+                    // archetype changes on component insertion
+                    MaterialBindingMeta::default(),
+                    NotShadowCaster,
+                ),
+            ));
         } else {
-            caster_commands.push((entity, (handle.clone_weak(), uniform)));
+            caster_commands.push((
+                entity,
+                (handle.clone_weak(), uniform, MaterialBindingMeta::default()),
+            ));
         }
     }
     *prev_caster_commands_len = caster_commands.len();
@@ -920,18 +1118,15 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshViewBindGroup<I> 
 }
 
 pub struct SetMeshBindGroup<const I: usize>;
-impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
+impl<P: BatchedPhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
     type Param = SRes<MeshBindGroup>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = (
-        Read<DynamicUniformIndices<MeshUniform>>,
-        Option<Read<SkinnedMeshJoints>>,
-    );
+    type ItemWorldQuery = Option<Read<SkinnedMeshJoints>>;
     #[inline]
     fn render<'w>(
-        _item: &P,
+        item: &P,
         _view: (),
-        (mesh_indices, skinned_mesh_joints): ROQueryItem<'_, Self::ItemWorldQuery>,
+        skinned_mesh_joints: ROQueryItem<'_, Self::ItemWorldQuery>,
         mesh_bind_group: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -939,13 +1134,13 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
             pass.set_bind_group(
                 I,
                 mesh_bind_group.into_inner().skinned.as_ref().unwrap(),
-                &[mesh_indices.offset(), joints.index],
+                &[item.batch_dynamic_offset().unwrap(), joints.index],
             );
         } else {
             pass.set_bind_group(
                 I,
                 &mesh_bind_group.into_inner().normal,
-                &[mesh_indices.offset()],
+                &[item.batch_dynamic_offset().unwrap()],
             );
         }
         RenderCommandResult::Success
@@ -953,20 +1148,21 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
 }
 
 pub struct DrawMesh;
-impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
+impl<P: BatchedPhaseItem> RenderCommand<P> for DrawMesh {
     type Param = SRes<RenderAssets<Mesh>>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = (Read<Handle<Mesh>>, Read<DynamicUniformIndices<MeshUniform>>);
+    type ItemWorldQuery = Read<Handle<Mesh>>;
     #[inline]
     fn render<'w>(
-        _item: &P,
+        item: &P,
         _view: (),
-        (mesh_handle, mesh_indices): ROQueryItem<'_, Self::ItemWorldQuery>,
+        mesh_handle: ROQueryItem<'_, Self::ItemWorldQuery>,
         meshes: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         if let Some(gpu_mesh) = meshes.into_inner().get(mesh_handle) {
             pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+            let batch_range = item.batch_range().as_ref().unwrap();
             match &gpu_mesh.buffer_info {
                 GpuBufferInfo::Indexed {
                     buffer,
@@ -974,16 +1170,13 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
                     count,
                 } => {
                     pass.set_index_buffer(buffer.slice(..), 0, *index_format);
-                    pass.draw_indexed(0..*count, 0, mesh_indices.index()..mesh_indices.index() + 1);
+                    pass.draw_indexed(0..*count, 0, batch_range.clone());
                 }
                 GpuBufferInfo::NonIndexed { vertex_count } => {
-                    pass.draw(
-                        0..*vertex_count,
-                        mesh_indices.index()..mesh_indices.index() + 1,
-                    );
+                    pass.draw(0..*vertex_count, batch_range.clone());
                 }
             }
-            RenderCommandResult::Success
+            RenderCommandResult::SuccessfulDraw(batch_range.len())
         } else {
             RenderCommandResult::Failure
         }

@@ -5,6 +5,7 @@
 #import bevy_sprite::mesh2d_functions
 
 struct Vertex {
+    @builtin(instance_index) instance_index: u32,
 #ifdef VERTEX_POSITIONS
     @location(0) position: vec3<f32>,
 #endif
@@ -29,6 +30,8 @@ struct VertexOutput {
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
+    unpack_local_to_world(vertex.instance_index);
+
     var out: VertexOutput;
 
 #ifdef VERTEX_UVS
@@ -36,21 +39,23 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 #endif
 
 #ifdef VERTEX_POSITIONS
-    out.world_position = mesh2d_position_local_to_world(mesh.model, vec4<f32>(vertex.position, 1.0));
+    out.world_position = mesh2d_position_local_to_world(local_to_world, vec4<f32>(vertex.position, 1.0));
     out.clip_position = mesh2d_position_world_to_clip(out.world_position);
 #endif
 
-#ifdef VERTEX_NORMALS
-    out.world_normal = mesh2d_normal_local_to_world(vertex.normal);
-#endif
+// #ifdef VERTEX_NORMALS
+//     out.world_normal = mesh2d_normal_local_to_world(vertex.instance_index, vertex.normal);
+// #endif
 
 #ifdef VERTEX_TANGENTS
-    out.world_tangent = mesh2d_tangent_local_to_world(mesh.model, vertex.tangent);
+    out.world_tangent = mesh2d_tangent_local_to_world(local_to_world, vertex.tangent);
 #endif
 
 #ifdef VERTEX_COLORS
     out.color = vertex.color;
 #endif
+
+    out.mesh_index = vertex.instance_index;
     return out;
 }
 
