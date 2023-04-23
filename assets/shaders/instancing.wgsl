@@ -2,7 +2,12 @@
 #import bevy_pbr::mesh_view_bindings
 
 @group(1) @binding(0)
-var<uniform> mesh: Mesh;
+#ifdef MESH_BATCH_SIZE
+var<uniform> mesh: array<Mesh, #{MESH_BATCH_SIZE}u>;
+#else
+var<storage> mesh: array<Mesh>;
+#endif
+
 
 // NOTE: Bindings must come before functions that use them!
 #import bevy_pbr::mesh_functions
@@ -25,7 +30,11 @@ struct VertexOutput {
 fn vertex(vertex: Vertex) -> VertexOutput {
     let position = vertex.position * vertex.i_pos_scale.w + vertex.i_pos_scale.xyz;
     var out: VertexOutput;
-    out.clip_position = mesh_position_local_to_clip(mesh.model, vec4<f32>(position, 1.0));
+    // NOTE: The 0 index into the Mesh array is a hack for this example as the
+    // instance_index builtin would map to the wrong index in the Mesh array.
+    // This index could be passed in via another uniform instead but it's
+    // unnecessary for the example.
+    out.clip_position = mesh_position_local_to_clip(mesh[0].model, vec4<f32>(position, 1.0));
     out.color = vertex.i_color;
     return out;
 }

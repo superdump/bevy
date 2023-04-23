@@ -11,3 +11,6 @@
 #ifdef VERTEX_COLORS
 @location(4) color: vec4<f32>,
 #endif
+#ifdef INSTANCE_INDEX
+@location(5) instance_index: u32,
+#endif

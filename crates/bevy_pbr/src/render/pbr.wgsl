@@ -124,7 +124,7 @@ fn fragment(in: FragmentInput) -> @location(0) vec4<f32> {
         pbr_input.V = V;
         pbr_input.occlusion = occlusion;
 
-        pbr_input.flags = mesh.flags;
+        pbr_input.flags = mesh[in.instance_index].flags;
 
         output_color = pbr(pbr_input);
     } else {

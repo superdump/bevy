@@ -1,4 +1,3 @@
-#import bevy_pbr::mesh_types
 // The time since startup data is in the globals binding which is part of the mesh_view_bindings import
 #import bevy_pbr::mesh_view_bindings
 

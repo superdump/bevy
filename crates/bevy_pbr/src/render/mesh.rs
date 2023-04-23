@@ -21,8 +21,8 @@ use bevy_ecs::{
 use bevy_math::{Mat3A, Mat4, Vec2};
 use bevy_reflect::TypeUuid;
 use bevy_render::{
-    extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
     globals::{GlobalsBuffer, GlobalsUniform},
+    gpu_component_list::GpuComponentListPlugin,
     mesh::{
         skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
         GpuBufferInfo, Mesh, MeshVertexBufferLayout,
@@ -102,7 +102,7 @@ impl Plugin for MeshRenderPlugin {
         load_internal_asset!(app, MESH_SHADER_HANDLE, "mesh.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, SKINNING_HANDLE, "skinning.wgsl", Shader::from_wgsl);
 
-        app.add_plugin(UniformComponentPlugin::<MeshUniform>::default());
+        app.add_plugin(GpuComponentListPlugin::<MeshUniform>::default());
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -276,6 +276,7 @@ pub struct MeshPipeline {
     pub view_layout: BindGroupLayout,
     pub view_layout_multisampled: BindGroupLayout,
     pub mesh_layout: BindGroupLayout,
+    pub mesh_buffer_batch_size: Option<u32>,
     pub skinned_mesh_layout: BindGroupLayout,
     // This dummy white texture is to be used in place of optional StandardMaterial textures
     pub dummy_white_gpu_image: GpuImage,
@@ -460,16 +461,11 @@ impl FromWorld for MeshPipeline {
                 entries: &layout_entries(clustered_forward_buffer_binding_type, true),
             });
 
-        let mesh_binding = BindGroupLayoutEntry {
-            binding: 0,
-            visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
-            ty: BindingType::Buffer {
-                ty: BufferBindingType::Uniform,
-                has_dynamic_offset: true,
-                min_binding_size: Some(MeshUniform::min_size()),
-            },
-            count: None,
-        };
+        let mesh_binding = GpuList::<MeshUniform>::binding_layout(
+            0,
+            ShaderStages::VERTEX_FRAGMENT,
+            render_device.as_ref(),
+        );
 
         let mesh_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[mesh_binding],
@@ -538,6 +534,7 @@ impl FromWorld for MeshPipeline {
             view_layout,
             view_layout_multisampled,
             mesh_layout,
+            mesh_buffer_batch_size: GpuList::<MeshUniform>::batch_size(render_device.as_ref()),
             skinned_mesh_layout,
             clustered_forward_buffer_binding_type,
             dummy_white_gpu_image,
@@ -659,6 +656,11 @@ impl SpecializedMeshPipeline for MeshPipeline {
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
         let mut shader_defs = Vec::new();
         let mut vertex_attributes = Vec::new();
+
+        shader_defs.push("INSTANCE_INDEX".into());
+        if let Some(batch_size) = self.mesh_buffer_batch_size {
+            shader_defs.push(ShaderDefVal::UInt("MESH_BATCH_SIZE".into(), batch_size));
+        }
 
         if key.contains(MeshPipelineKey::NORMAL_PREPASS) {
             shader_defs.push("LOAD_PREPASS_NORMALS".into());
@@ -862,10 +864,10 @@ pub fn queue_mesh_bind_group(
     mut commands: Commands,
     mesh_pipeline: Res<MeshPipeline>,
     render_device: Res<RenderDevice>,
-    mesh_uniforms: Res<ComponentUniforms<MeshUniform>>,
+    mesh_uniforms: Res<GpuList<MeshUniform>>,
     skinned_mesh_uniform: Res<SkinnedMeshUniform>,
 ) {
-    if let Some(mesh_binding) = mesh_uniforms.uniforms().binding() {
+    if let Some(mesh_binding) = mesh_uniforms.binding() {
         let mut mesh_bind_group = MeshBindGroup {
             normal: render_device.create_bind_group(&BindGroupDescriptor {
                 entries: &[BindGroupEntry {
@@ -1120,28 +1122,33 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
     type Param = SRes<MeshBindGroup>;
     type ViewWorldQuery = ();
     type ItemWorldQuery = (
-        Read<DynamicUniformIndex<MeshUniform>>,
+        Read<GpuListIndex<MeshUniform>>,
         Option<Read<SkinnedMeshJoints>>,
     );
     #[inline]
     fn render<'w>(
         _item: &P,
         _view: (),
-        (mesh_index, skinned_mesh_joints): ROQueryItem<'_, Self::ItemWorldQuery>,
+        (batch_indices, skinned_mesh_joints): ROQueryItem<'_, Self::ItemWorldQuery>,
         mesh_bind_group: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
+        let mut dynamic_uniform_indices = Vec::with_capacity(2);
+        if let Some(batch_dynamic_offset) = batch_indices.dynamic_offset {
+            dynamic_uniform_indices.push(batch_dynamic_offset);
+        }
         if let Some(joints) = skinned_mesh_joints {
+            dynamic_uniform_indices.push(joints.index);
             pass.set_bind_group(
                 I,
                 mesh_bind_group.into_inner().skinned.as_ref().unwrap(),
-                &[mesh_index.index(), joints.index],
+                &dynamic_uniform_indices,
             );
         } else {
             pass.set_bind_group(
                 I,
                 &mesh_bind_group.into_inner().normal,
-                &[mesh_index.index()],
+                &dynamic_uniform_indices,
             );
         }
         RenderCommandResult::Success
@@ -1152,12 +1159,12 @@ pub struct DrawMesh;
 impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
     type Param = SRes<RenderAssets<Mesh>>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = Read<Handle<Mesh>>;
+    type ItemWorldQuery = (Read<GpuListIndex<MeshUniform>>, Read<Handle<Mesh>>);
     #[inline]
     fn render<'w>(
         _item: &P,
         _view: (),
-        mesh_handle: ROQueryItem<'_, Self::ItemWorldQuery>,
+        (batch_indices, mesh_handle): ROQueryItem<'_, Self::ItemWorldQuery>,
         meshes: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -1170,10 +1177,13 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
                     count,
                 } => {
                     pass.set_index_buffer(buffer.slice(..), 0, *index_format);
-                    pass.draw_indexed(0..*count, 0, 0..1);
+                    pass.draw_indexed(0..*count, 0, batch_indices.index..batch_indices.index + 1);
                 }
                 GpuBufferInfo::NonIndexed => {
-                    pass.draw(0..gpu_mesh.vertex_count, 0..1);
+                    pass.draw(
+                        0..gpu_mesh.vertex_count,
+                        batch_indices.index..batch_indices.index + 1,
+                    );
                 }
             }
             RenderCommandResult::Success

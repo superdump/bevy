@@ -5,6 +5,7 @@
 #import bevy_pbr::mesh_functions
 
 struct Vertex {
+    @builtin(instance_index) instance_index: u32,
 #ifdef VERTEX_POSITIONS
     @location(0) position: vec3<f32>,
 #endif
@@ -38,14 +39,14 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 #ifdef SKINNED
     var model = skin_model(vertex.joint_indices, vertex.joint_weights);
 #else
-    var model = mesh.model;
+    var model = mesh[vertex.instance_index].model;
 #endif
 
 #ifdef VERTEX_NORMALS
 #ifdef SKINNED
     out.world_normal = skin_normals(model, vertex.normal);
 #else
-    out.world_normal = mesh_normal_local_to_world(vertex.normal);
+    out.world_normal = mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
 #endif
 #endif
 
@@ -59,11 +60,15 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 #endif
 
 #ifdef VERTEX_TANGENTS
-    out.world_tangent = mesh_tangent_local_to_world(model, vertex.tangent);
+    out.world_tangent = mesh_tangent_local_to_world(model, vertex.tangent, vertex.instance_index);
 #endif
 
 #ifdef VERTEX_COLORS
     out.color = vertex.color;
+#endif
+
+#ifdef INSTANCE_INDEX
+    out.instance_index = vertex.instance_index;
 #endif
 
     return out;

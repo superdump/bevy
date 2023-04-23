@@ -2,7 +2,11 @@
 #import bevy_pbr::mesh_view_bindings
 
 @group(1) @binding(0)
-var<uniform> mesh: Mesh;
+#ifdef MESH_BATCH_SIZE
+var<uniform> mesh: array<Mesh, #{MESH_BATCH_SIZE}u>;
+#else
+var<storage> mesh: array<Mesh>;
+#endif
 
 #ifdef SKINNED
 @group(1) @binding(1)
@@ -14,6 +18,7 @@ var<uniform> joint_matrices: SkinnedMesh;
 #import bevy_pbr::mesh_functions
 
 struct Vertex {
+    @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
 #ifdef SKINNED
     @location(4) joint_indexes: vec4<u32>,
@@ -30,7 +35,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 #ifdef SKINNED
     let model = skin_model(vertex.joint_indexes, vertex.joint_weights);
 #else
-    let model = mesh.model;
+    let model = mesh[vertex.instance_index].model;
 #endif
 
     var out: VertexOutput;

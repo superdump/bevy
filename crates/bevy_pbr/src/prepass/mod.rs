@@ -221,6 +221,7 @@ pub struct PrepassPipeline<M: Material> {
     pub view_layout_motion_vectors: BindGroupLayout,
     pub view_layout_no_motion_vectors: BindGroupLayout,
     pub mesh_layout: BindGroupLayout,
+    pub mesh_buffer_batch_size: Option<u32>,
     pub skinned_mesh_layout: BindGroupLayout,
     pub material_layout: BindGroupLayout,
     pub material_vertex_shader: Option<Handle<Shader>>,
@@ -309,6 +310,7 @@ impl<M: Material> FromWorld for PrepassPipeline<M> {
             view_layout_motion_vectors,
             view_layout_no_motion_vectors,
             mesh_layout: mesh_pipeline.mesh_layout.clone(),
+            mesh_buffer_batch_size: mesh_pipeline.mesh_buffer_batch_size,
             skinned_mesh_layout: mesh_pipeline.skinned_mesh_layout.clone(),
             material_vertex_shader: match M::prepass_vertex_shader() {
                 ShaderRef::Default => None,
@@ -348,6 +350,10 @@ where
         }];
         let mut shader_defs = Vec::new();
         let mut vertex_attributes = Vec::new();
+
+        if let Some(batch_size) = self.mesh_buffer_batch_size {
+            shader_defs.push(ShaderDefVal::UInt("MESH_BATCH_SIZE".into(), batch_size));
+        }
 
         // NOTE: Eventually, it would be nice to only add this when the shaders are overloaded by the Material.
         // The main limitation right now is that bind group order is hardcoded in shaders.
