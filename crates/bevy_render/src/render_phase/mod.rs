@@ -33,6 +33,7 @@ pub use draw::*;
 pub use draw_state::*;
 pub use rangefinder::*;
 
+use core::ops::Range;
 use crate::render_resource::{CachedRenderPipelineId, PipelineCache};
 use bevy_ecs::{
     prelude::*,
@@ -106,8 +107,8 @@ impl<I: PhaseItem> RenderPhase<I> {
 
         let mut index = range.start;
         while index < range.end {
-            let mut item = &self.items[index];
-            let mut draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
+            let item = &self.items[index];
+            let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
             draw_function.draw(world, render_pass, view, item);
             index += item.batch_size();
         }
