@@ -33,12 +33,12 @@ pub use draw::*;
 pub use draw_state::*;
 pub use rangefinder::*;
 
-use core::ops::Range;
 use crate::render_resource::{CachedRenderPipelineId, PipelineCache};
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::SRes, SystemParamItem},
 };
+use core::ops::Range;
 
 /// A collection of all rendering instructions, that will be executed by the GPU, for a
 /// single render phase for a single view.
