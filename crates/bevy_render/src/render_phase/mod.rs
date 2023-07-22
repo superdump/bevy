@@ -122,8 +122,8 @@ pub trait PhaseItem: Sized + Send + Sync + 'static {
     /// Specifies the [`Draw`] function used to render the item.
     fn draw_function(&self) -> DrawFunctionId;
 
-    /// Sorts a slice of phase items into render order. Generally if the same type
-    /// is batched this should use a stable sort like [`slice::sort_by_key`].
+    /// Sorts a slice of phase items into render order. Generally if you are intending
+    /// to batch the implementing type this should use a stable sort like [`slice::sort_by_key`].
     /// In almost all other cases, this should not be altered from the default,
     /// which uses a unstable sort, as this provides the best balance of CPU and GPU
     /// performance.
@@ -141,6 +141,29 @@ pub trait PhaseItem: Sized + Send + Sync + 'static {
 
     fn batch_size(&self) -> usize {
         1
+    }
+
+    /// Renders all [`PhaseItem`]s in the provided `range` (based on their index in `self.items`) using their corresponding draw functions.
+    pub fn render_range<'w>(
+        &self,
+        render_pass: &mut TrackedRenderPass<'w>,
+        world: &'w World,
+        view: Entity,
+        range: Range<usize>,
+    ) {
+        let draw_functions = world.resource::<DrawFunctions<I>>();
+        let mut draw_functions = draw_functions.write();
+        draw_functions.prepare(world);
+
+        for item in self
+            .items
+            .get(range)
+            .expect("`Range` provided to `render_range()` is out of bounds")
+            .iter()
+        {
+            let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
+            draw_function.draw(world, render_pass, view, item);
+        }
     }
 }
 

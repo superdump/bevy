@@ -107,7 +107,7 @@ pub enum RenderSet {
     /// The copy of [`apply_deferred`] that runs immediately after [`Render`](RenderSet::Render).
     RenderFlush,
     /// Prepare render resources from the extracted data for the GPU based on their sorted order.
-    /// Create [`BindGroups`](crate::render_resource::BindGroup) that depend on those data.
+    /// Create [`BindGroups`](crate::render_resource::BindGroup) that depend on those resources.
     Prepare,
     /// The copy of [`apply_deferred`] that runs immediately after [`Prepare`](RenderSet::Prepare).
     PrepareFlush,
