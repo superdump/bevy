@@ -105,9 +105,10 @@ impl<I: PhaseItem> RenderPhase<I> {
         let mut draw_functions = draw_functions.write();
         draw_functions.prepare(world);
 
-        let mut index = range.start;
-        while index < range.end {
-            let item = &self.items[index];
+        let items = self.items.get(range).expect("`Range` provided to `render_range()` is out of bounds");
+        let mut index = 0;
+        while index < items.len() {
+            let item = &items[index];
             let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
             draw_function.draw(world, render_pass, view, item);
             index += item.batch_size();
