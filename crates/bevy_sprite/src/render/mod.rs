@@ -475,6 +475,7 @@ const QUAD_UVS: [Vec2; 4] = [
 pub struct SpriteBatch {
     image_handle_id: HandleId,
     range: Range<u32>,
+    color: bool,
 }
 
 #[derive(Resource, Default)]
@@ -605,8 +606,7 @@ pub fn prepare_sprites(
     }
 
     if let Some(view_binding) = view_uniforms.uniforms.binding() {
-        let mut batches: Vec<(Entity, (SpriteBatch, ExtractedSprite))> =
-            Vec::with_capacity(*previous_len);
+        let mut batches: Vec<(Entity, SpriteBatch)> = Vec::with_capacity(*previous_len);
         let sprite_meta = &mut sprite_meta;
 
         // Clear the vertex buffers
@@ -639,120 +639,111 @@ pub fn prepare_sprites(
             // Compatible items share the same entity.
             for item_index in 0..transparent_phase.items.len() {
                 let item = &transparent_phase.items[item_index];
-                if let Some(extracted_sprite) = extracted_sprites.sprites.get(item.entity) {
-                    // Take a reference to an existing compatible batch if one exists
-                    let mut existing_batch = batches.last_mut().filter(|_| {
-                        batch_image_handle == extracted_sprite.image_handle_id
-                            && batch_colored == (extracted_sprite.color != Color::WHITE)
-                    });
+                let Some(extracted_sprite) = extracted_sprites.sprites.get(item.entity) else { continue };
+                if batch_image_handle != extracted_sprite.image_handle_id
+                    || batch_colored != (extracted_sprite.color != Color::WHITE)
+                {
+                    let Some(gpu_image) =
+                            gpu_images.get(&Handle::weak(extracted_sprite.image_handle_id)) else { continue };
 
-                    if existing_batch.is_none() {
-                        if let Some(gpu_image) =
-                            gpu_images.get(&Handle::weak(extracted_sprite.image_handle_id))
-                        {
-                            batch_item_index = item_index;
-                            batch_image_size = Vec2::new(gpu_image.size.x, gpu_image.size.y);
-                            batch_image_handle = extracted_sprite.image_handle_id;
-                            batch_colored = extracted_sprite.color != Color::WHITE;
+                    batch_item_index = item_index;
+                    batch_image_size = Vec2::new(gpu_image.size.x, gpu_image.size.y);
+                    batch_image_handle = extracted_sprite.image_handle_id;
+                    batch_colored = extracted_sprite.color != Color::WHITE;
 
-                            let new_batch = SpriteBatch {
-                                image_handle_id: batch_image_handle,
-                                range: if batch_colored {
-                                    colored_index..colored_index
-                                } else {
-                                    index..index
-                                },
-                            };
-
-                            batches
-                                .push((item.entity, (new_batch.clone(), extracted_sprite.clone())));
-
-                            image_bind_groups
-                                .values
-                                .entry(Handle::weak(batch_image_handle))
-                                .or_insert_with(|| {
-                                    render_device.create_bind_group(&BindGroupDescriptor {
-                                        entries: &[
-                                            BindGroupEntry {
-                                                binding: 0,
-                                                resource: BindingResource::TextureView(
-                                                    &gpu_image.texture_view,
-                                                ),
-                                            },
-                                            BindGroupEntry {
-                                                binding: 1,
-                                                resource: BindingResource::Sampler(
-                                                    &gpu_image.sampler,
-                                                ),
-                                            },
-                                        ],
-                                        label: Some("sprite_material_bind_group"),
-                                        layout: &sprite_pipeline.material_layout,
-                                    })
-                                });
-                            existing_batch = batches.last_mut();
-                        }
+                    let new_batch = SpriteBatch {
+                        image_handle_id: batch_image_handle,
+                        range: if batch_colored {
+                            colored_index..colored_index
+                        } else {
+                            index..index
+                        },
+                        color: batch_colored,
                     };
 
-                    // Calculate vertex data for this item
-                    let mut uvs = QUAD_UVS;
-                    if extracted_sprite.flip_x {
-                        uvs = [uvs[1], uvs[0], uvs[3], uvs[2]];
-                    }
-                    if extracted_sprite.flip_y {
-                        uvs = [uvs[3], uvs[2], uvs[1], uvs[0]];
-                    }
+                    batches.push((item.entity, new_batch.clone()));
 
-                    // By default, the size of the quad is the size of the texture
-                    let mut quad_size = batch_image_size;
-
-                    // If a rect is specified, adjust UVs and the size of the quad
-                    if let Some(rect) = extracted_sprite.rect {
-                        let rect_size = rect.size();
-                        for uv in &mut uvs {
-                            *uv = (rect.min + *uv * rect_size) / batch_image_size;
-                        }
-                        quad_size = rect_size;
-                    }
-
-                    // // Override the size if a custom one is specified
-                    if let Some(custom_size) = extracted_sprite.custom_size {
-                        quad_size = custom_size;
-                    }
-
-                    // Apply size and global transform
-                    let positions = QUAD_VERTEX_POSITIONS.map(|quad_pos| {
-                        extracted_sprite
-                            .transform
-                            .transform_point(
-                                ((quad_pos - extracted_sprite.anchor) * quad_size).extend(0.),
-                            )
-                            .into()
-                    });
-
-                    // Store the vertex data and add the item to the render phase
-                    if batch_colored {
-                        let vertex_color = extracted_sprite.color.as_linear_rgba_f32();
-                        for i in QUAD_INDICES {
-                            sprite_meta.colored_vertices.push(ColoredSpriteVertex {
-                                position: positions[i],
-                                uv: uvs[i].into(),
-                                color: vertex_color,
-                            });
-                        }
-                        colored_index += QUAD_INDICES.len() as u32;
-                    } else {
-                        for i in QUAD_INDICES {
-                            sprite_meta.vertices.push(SpriteVertex {
-                                position: positions[i],
-                                uv: uvs[i].into(),
-                            });
-                        }
-                        index += QUAD_INDICES.len() as u32;
-                    }
-                    transparent_phase.items[batch_item_index].batch_size += 1;
-                    existing_batch.unwrap().1 .0.range.end += QUAD_INDICES.len() as u32;
+                    image_bind_groups
+                        .values
+                        .entry(Handle::weak(batch_image_handle))
+                        .or_insert_with(|| {
+                            render_device.create_bind_group(&BindGroupDescriptor {
+                                entries: &[
+                                    BindGroupEntry {
+                                        binding: 0,
+                                        resource: BindingResource::TextureView(
+                                            &gpu_image.texture_view,
+                                        ),
+                                    },
+                                    BindGroupEntry {
+                                        binding: 1,
+                                        resource: BindingResource::Sampler(&gpu_image.sampler),
+                                    },
+                                ],
+                                label: Some("sprite_material_bind_group"),
+                                layout: &sprite_pipeline.material_layout,
+                            })
+                        });
                 }
+
+                // Calculate vertex data for this item
+                let mut uvs = QUAD_UVS;
+                if extracted_sprite.flip_x {
+                    uvs = [uvs[1], uvs[0], uvs[3], uvs[2]];
+                }
+                if extracted_sprite.flip_y {
+                    uvs = [uvs[3], uvs[2], uvs[1], uvs[0]];
+                }
+
+                // By default, the size of the quad is the size of the texture
+                let mut quad_size = batch_image_size;
+
+                // If a rect is specified, adjust UVs and the size of the quad
+                if let Some(rect) = extracted_sprite.rect {
+                    let rect_size = rect.size();
+                    for uv in &mut uvs {
+                        *uv = (rect.min + *uv * rect_size) / batch_image_size;
+                    }
+                    quad_size = rect_size;
+                }
+
+                // // Override the size if a custom one is specified
+                if let Some(custom_size) = extracted_sprite.custom_size {
+                    quad_size = custom_size;
+                }
+
+                // Apply size and global transform
+                let positions = QUAD_VERTEX_POSITIONS.map(|quad_pos| {
+                    extracted_sprite
+                        .transform
+                        .transform_point(
+                            ((quad_pos - extracted_sprite.anchor) * quad_size).extend(0.),
+                        )
+                        .into()
+                });
+
+                // Store the vertex data and add the item to the render phase
+                if batch_colored {
+                    let vertex_color = extracted_sprite.color.as_linear_rgba_f32();
+                    for i in QUAD_INDICES {
+                        sprite_meta.colored_vertices.push(ColoredSpriteVertex {
+                            position: positions[i],
+                            uv: uvs[i].into(),
+                            color: vertex_color,
+                        });
+                    }
+                    colored_index += QUAD_INDICES.len() as u32;
+                } else {
+                    for i in QUAD_INDICES {
+                        sprite_meta.vertices.push(SpriteVertex {
+                            position: positions[i],
+                            uv: uvs[i].into(),
+                        });
+                    }
+                    index += QUAD_INDICES.len() as u32;
+                }
+                transparent_phase.items[batch_item_index].batch_size += 1;
+                batches.last_mut().unwrap().1.range.end += QUAD_INDICES.len() as u32;
             }
         }
         sprite_meta
@@ -798,12 +789,12 @@ pub struct SetSpriteTextureBindGroup<const I: usize>;
 impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteTextureBindGroup<I> {
     type Param = SRes<ImageBindGroups>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = Read<ExtractedSprite>;
+    type ItemWorldQuery = Read<SpriteBatch>;
 
     fn render<'w>(
         _item: &P,
         _view: (),
-        sprite: &'_ ExtractedSprite,
+        sprite: &'_ SpriteBatch,
         image_bind_groups: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -825,17 +816,17 @@ pub struct DrawSpriteBatch;
 impl<P: PhaseItem> RenderCommand<P> for DrawSpriteBatch {
     type Param = SRes<SpriteMeta>;
     type ViewWorldQuery = ();
-    type ItemWorldQuery = (Read<SpriteBatch>, Read<ExtractedSprite>);
+    type ItemWorldQuery = Read<SpriteBatch>;
 
     fn render<'w>(
         _item: &P,
         _view: (),
-        (sprite_batch, sprite): (&'_ SpriteBatch, &'_ ExtractedSprite),
+        sprite_batch: &'_ SpriteBatch,
         sprite_meta: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let sprite_meta = sprite_meta.into_inner();
-        if sprite.color != Color::WHITE {
+        if sprite_batch.color {
             pass.set_vertex_buffer(0, sprite_meta.colored_vertices.buffer().unwrap().slice(..));
         } else {
             pass.set_vertex_buffer(0, sprite_meta.vertices.buffer().unwrap().slice(..));
