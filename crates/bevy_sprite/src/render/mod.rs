@@ -42,7 +42,6 @@ use fixedbitset::FixedBitSet;
 pub struct SpritePipeline {
     view_layout: BindGroupLayout,
     material_layout: BindGroupLayout,
-    sprite_layout: BindGroupLayout,
     pub dummy_white_gpu_image: GpuImage,
 }
 
@@ -91,15 +90,6 @@ impl FromWorld for SpritePipeline {
             label: Some("sprite_material_layout"),
         });
 
-        let sprite_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            entries: &[GpuArrayBuffer::<GpuQuad>::binding_layout(
-                0,
-                ShaderStages::VERTEX_FRAGMENT,
-                &render_device,
-            )],
-            label: Some("sprite_layout"),
-        });
-
         let dummy_white_gpu_image = {
             let image = Image::default();
             let texture = render_device.create_texture(&image.texture_descriptor);
@@ -141,7 +131,6 @@ impl FromWorld for SpritePipeline {
         SpritePipeline {
             view_layout,
             material_layout,
-            sprite_layout,
             dummy_white_gpu_image,
         }
     }
@@ -249,12 +238,49 @@ impl SpecializedRenderPipeline for SpritePipeline {
             false => TextureFormat::bevy_default(),
         };
 
+        let instance_rate_vertex_buffer_layout = VertexBufferLayout {
+            array_stride: 80,
+            step_mode: VertexStepMode::Instance,
+            attributes: vec![
+                // @location(0) i_col0_tx: vec4<f32>,
+                VertexAttribute {
+                    format: VertexFormat::Float32x4,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                // @location(1) i_col1_ty: vec4<f32>,
+                VertexAttribute {
+                    format: VertexFormat::Float32x4,
+                    offset: 16,
+                    shader_location: 1,
+                },
+                // @location(2) i_col2_tz: vec4<f32>,
+                VertexAttribute {
+                    format: VertexFormat::Float32x4,
+                    offset: 32,
+                    shader_location: 2,
+                },
+                // @location(3) i_color: vec4<f32>,
+                VertexAttribute {
+                    format: VertexFormat::Float32x4,
+                    offset: 48,
+                    shader_location: 3,
+                },
+                // @location(4) i_uv_offset_scale: vec4<f32>,
+                VertexAttribute {
+                    format: VertexFormat::Float32x4,
+                    offset: 64,
+                    shader_location: 4,
+                },
+            ],
+        };
+
         RenderPipelineDescriptor {
             vertex: VertexState {
                 shader: SPRITE_SHADER_HANDLE.typed::<Shader>(),
                 entry_point: "vertex".into(),
                 shader_defs: shader_defs.clone(),
-                buffers: vec![],
+                buffers: vec![instance_rate_vertex_buffer_layout],
             },
             fragment: Some(FragmentState {
                 shader: SPRITE_SHADER_HANDLE.typed::<Shader>(),
@@ -266,11 +292,7 @@ impl SpecializedRenderPipeline for SpritePipeline {
                     write_mask: ColorWrites::ALL,
                 })],
             }),
-            layout: vec![
-                self.view_layout.clone(),
-                self.material_layout.clone(),
-                self.sprite_layout.clone(),
-            ],
+            layout: vec![self.view_layout.clone(), self.material_layout.clone()],
             primitive: PrimitiveState {
                 front_face: FrontFace::Ccw,
                 cull_mode: None,
@@ -422,32 +444,27 @@ pub fn extract_sprites(
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
-struct SpriteVertex {
-    pub position: [f32; 3],
-    pub uv: [f32; 2],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct ColoredSpriteVertex {
-    pub position: [f32; 3],
-    pub uv: [f32; 2],
-    pub color: [f32; 4],
+struct SpriteInstance {
+    pub i_col0_tx: [f32; 4],
+    pub i_col1_ty: [f32; 4],
+    pub i_col2_tz: [f32; 4],
+    pub i_color: [f32; 4],
+    pub i_uv_offset_scale: [f32; 4],
 }
 
 #[derive(Resource)]
 pub struct SpriteMeta {
     view_bind_group: Option<BindGroup>,
-    sprite_bind_group: Option<BindGroup>,
     sprite_index_buffer: BufferVec<u32>,
+    sprite_instance_buffer: BufferVec<SpriteInstance>,
 }
 
 impl Default for SpriteMeta {
     fn default() -> Self {
         Self {
             view_bind_group: None,
-            sprite_bind_group: None,
             sprite_index_buffer: BufferVec::<u32>::new(BufferUsages::INDEX),
+            sprite_instance_buffer: BufferVec::<SpriteInstance>::new(BufferUsages::VERTEX),
         }
     }
 }
@@ -560,16 +577,6 @@ pub fn queue_sprites(
     }
 }
 
-#[derive(Clone, ShaderType)]
-pub struct GpuQuad {
-    // Affine 4x3
-    pub col0_tx: Vec4,
-    pub col1_ty: Vec4,
-    pub col2_tz: Vec4,
-    pub color: [f32; 4],
-    pub uv_offset_scale: Vec4,
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_sprites(
     mut commands: Commands,
@@ -577,7 +584,6 @@ pub fn prepare_sprites(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut sprite_meta: ResMut<SpriteMeta>,
-    mut sprites: ResMut<GpuArrayBuffer<GpuQuad>>,
     view_uniforms: Res<ViewUniforms>,
     sprite_pipeline: Res<SpritePipeline>,
     mut image_bind_groups: ResMut<ImageBindGroups>,
@@ -597,11 +603,10 @@ pub fn prepare_sprites(
     }
 
     if let Some(view_binding) = view_uniforms.uniforms.binding() {
-        let mut batches: Vec<(Entity, (SpriteBatch, GpuArrayBufferIndex<GpuQuad>))> =
-            Vec::with_capacity(*previous_len);
+        let mut batches: Vec<(Entity, SpriteBatch)> = Vec::with_capacity(*previous_len);
 
-        // Clear the GpuArrayBuffer
-        sprites.clear();
+        // Clear the sprite instances
+        sprite_meta.sprite_instance_buffer.clear();
 
         sprite_meta.view_bind_group = Some(render_device.create_bind_group(&BindGroupDescriptor {
             entries: &[BindGroupEntry {
@@ -623,7 +628,6 @@ pub fn prepare_sprites(
             let mut batch_item_index = 0;
             let mut batch_image_size = Vec2::ZERO;
             let mut batch_image_handle = HandleId::Id(Uuid::nil(), u64::MAX);
-            let mut batch_dynamic_offset = None;
 
             // Iterate through the phase items and detect when successive sprites that can be batched.
             // Spawn an entity with a `SpriteBatch` component for each possible batch.
@@ -704,45 +708,47 @@ pub fn prepare_sprites(
                     );
 
                 // Store the vertex data and add the item to the render phase
-                let sprite_index = sprites.push(GpuQuad {
-                    col0_tx: transform.matrix3.x_axis.extend(transform.translation.x),
-                    col1_ty: transform.matrix3.y_axis.extend(transform.translation.y),
-                    col2_tz: transform.matrix3.z_axis.extend(transform.translation.z),
-                    color: extracted_sprite.color.as_linear_rgba_f32(),
-                    uv_offset_scale,
+                sprite_meta.sprite_instance_buffer.push(SpriteInstance {
+                    i_col0_tx: transform
+                        .matrix3
+                        .x_axis
+                        .extend(transform.translation.x)
+                        .to_array(),
+                    i_col1_ty: transform
+                        .matrix3
+                        .y_axis
+                        .extend(transform.translation.y)
+                        .to_array(),
+                    i_col2_tz: transform
+                        .matrix3
+                        .z_axis
+                        .extend(transform.translation.z)
+                        .to_array(),
+                    i_color: extracted_sprite.color.as_linear_rgba_f32(),
+                    i_uv_offset_scale: uv_offset_scale.to_array(),
                 });
 
-                if batch_image_changed || batch_dynamic_offset != sprite_index.dynamic_offset {
+                if batch_image_changed {
                     batch_item_index = item_index;
-                    batch_dynamic_offset = sprite_index.dynamic_offset;
 
                     let new_batch = SpriteBatch {
                         image_handle_id: batch_image_handle,
                         range: index..index,
                     };
 
-                    batches.push((item.entity, (new_batch.clone(), sprite_index)));
+                    batches.push((item.entity, new_batch.clone()));
                 }
 
                 transparent_phase.items[batch_item_index].batch_size += 1;
-                batches.last_mut().unwrap().1 .0.range.end += 6;
-                index += 6;
+                batches.last_mut().unwrap().1.range.end += 1;
+                index += 1;
             }
         }
-        sprites.write_buffer(&render_device, &render_queue);
-        if let Some(resource) = sprites.binding() {
-            sprite_meta.sprite_bind_group =
-                Some(render_device.create_bind_group(&BindGroupDescriptor {
-                    entries: &[BindGroupEntry {
-                        binding: 0,
-                        resource,
-                    }],
-                    label: Some("sprite_material_bind_group"),
-                    layout: &sprite_pipeline.sprite_layout,
-                }));
-        }
+        sprite_meta
+            .sprite_instance_buffer
+            .write_buffer(&render_device, &render_queue);
 
-        let total_indices = total_sprites * 6;
+        let total_indices = 6;
         let current_indices = sprite_meta.sprite_index_buffer.len();
         if total_indices > current_indices {
             sprite_meta
@@ -772,7 +778,6 @@ pub type DrawSprite = (
     SetItemPipeline,
     SetSpriteViewBindGroup<0>,
     SetSpriteTextureBindGroup<1>,
-    SetSpriteInstanceBindGroup<2>,
     DrawSpriteBatch,
 );
 
@@ -825,34 +830,6 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteTextureBindGrou
     }
 }
 
-pub struct SetSpriteInstanceBindGroup<const I: usize>;
-impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteInstanceBindGroup<I> {
-    type Param = SRes<SpriteMeta>;
-    type ViewWorldQuery = ();
-    type ItemWorldQuery = Read<GpuArrayBufferIndex<GpuQuad>>;
-
-    fn render<'w>(
-        _item: &P,
-        _view: (),
-        gpu_array_buffer_index: &'_ GpuArrayBufferIndex<GpuQuad>,
-        sprite_meta: SystemParamItem<'w, '_, Self::Param>,
-        pass: &mut TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        let mut dynamic_offsets: [u32; 1] = Default::default();
-        let mut dynamic_offset_count = 0;
-        if let Some(dynamic_offset) = gpu_array_buffer_index.dynamic_offset {
-            dynamic_offsets[dynamic_offset_count] = dynamic_offset;
-            dynamic_offset_count += 1;
-        }
-        pass.set_bind_group(
-            I,
-            sprite_meta.into_inner().sprite_bind_group.as_ref().unwrap(),
-            &dynamic_offsets[0..dynamic_offset_count],
-        );
-        RenderCommandResult::Success
-    }
-}
-
 pub struct DrawSpriteBatch;
 impl<P: PhaseItem> RenderCommand<P> for DrawSpriteBatch {
     type Param = SRes<SpriteMeta>;
@@ -872,7 +849,15 @@ impl<P: PhaseItem> RenderCommand<P> for DrawSpriteBatch {
             0,
             IndexFormat::Uint32,
         );
-        pass.draw_indexed(sprite_batch.range.clone(), 0, 0..1);
+        pass.set_vertex_buffer(
+            0,
+            sprite_meta
+                .sprite_instance_buffer
+                .buffer()
+                .unwrap()
+                .slice(..),
+        );
+        pass.draw_indexed(0..6, 0, sprite_batch.range.clone());
         RenderCommandResult::Success
     }
 }
