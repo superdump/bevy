@@ -14,7 +14,7 @@ use bevy_ecs::{
     storage::SparseSet,
     system::{lifetimeless::*, SystemParamItem, SystemState},
 };
-use bevy_math::{Rect, Vec2};
+use bevy_math::{Affine3A, Quat, Rect, Vec2, Vec4};
 use bevy_render::{
     color::Color,
     render_asset::RenderAssets,
@@ -42,6 +42,7 @@ use fixedbitset::FixedBitSet;
 pub struct SpritePipeline {
     view_layout: BindGroupLayout,
     material_layout: BindGroupLayout,
+    sprite_layout: BindGroupLayout,
     pub dummy_white_gpu_image: GpuImage,
 }
 
@@ -89,6 +90,16 @@ impl FromWorld for SpritePipeline {
             ],
             label: Some("sprite_material_layout"),
         });
+
+        let sprite_layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            entries: &[GpuArrayBuffer::<GpuQuad>::binding_layout(
+                0,
+                ShaderStages::VERTEX_FRAGMENT,
+                &render_device,
+            )],
+            label: Some("sprite_layout"),
+        });
+
         let dummy_white_gpu_image = {
             let image = Image::default();
             let texture = render_device.create_texture(&image.texture_descriptor);
@@ -130,6 +141,7 @@ impl FromWorld for SpritePipeline {
         SpritePipeline {
             view_layout,
             material_layout,
+            sprite_layout,
             dummy_white_gpu_image,
         }
     }
@@ -201,26 +213,7 @@ impl SpecializedRenderPipeline for SpritePipeline {
     type Key = SpritePipelineKey;
 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
-        let mut formats = vec![
-            // position
-            VertexFormat::Float32x3,
-            // uv
-            VertexFormat::Float32x2,
-        ];
-
-        if key.contains(SpritePipelineKey::COLORED) {
-            // color
-            formats.push(VertexFormat::Float32x4);
-        }
-
-        let vertex_layout =
-            VertexBufferLayout::from_vertex_formats(VertexStepMode::Vertex, formats);
-
         let mut shader_defs = Vec::new();
-        if key.contains(SpritePipelineKey::COLORED) {
-            shader_defs.push("COLORED".into());
-        }
-
         if key.contains(SpritePipelineKey::TONEMAP_IN_SHADER) {
             shader_defs.push("TONEMAP_IN_SHADER".into());
 
@@ -261,7 +254,7 @@ impl SpecializedRenderPipeline for SpritePipeline {
                 shader: SPRITE_SHADER_HANDLE.typed::<Shader>(),
                 entry_point: "vertex".into(),
                 shader_defs: shader_defs.clone(),
-                buffers: vec![vertex_layout],
+                buffers: vec![],
             },
             fragment: Some(FragmentState {
                 shader: SPRITE_SHADER_HANDLE.typed::<Shader>(),
@@ -273,7 +266,11 @@ impl SpecializedRenderPipeline for SpritePipeline {
                     write_mask: ColorWrites::ALL,
                 })],
             }),
-            layout: vec![self.view_layout.clone(), self.material_layout.clone()],
+            layout: vec![
+                self.view_layout.clone(),
+                self.material_layout.clone(),
+                self.sprite_layout.clone(),
+            ],
             primitive: PrimitiveState {
                 front_face: FrontFace::Ccw,
                 cull_mode: None,
@@ -440,42 +437,25 @@ struct ColoredSpriteVertex {
 
 #[derive(Resource)]
 pub struct SpriteMeta {
-    vertices: BufferVec<SpriteVertex>,
-    colored_vertices: BufferVec<ColoredSpriteVertex>,
     view_bind_group: Option<BindGroup>,
+    sprite_bind_group: Option<BindGroup>,
+    sprite_index_buffer: BufferVec<u32>,
 }
 
 impl Default for SpriteMeta {
     fn default() -> Self {
         Self {
-            vertices: BufferVec::new(BufferUsages::VERTEX),
-            colored_vertices: BufferVec::new(BufferUsages::VERTEX),
             view_bind_group: None,
+            sprite_bind_group: None,
+            sprite_index_buffer: BufferVec::<u32>::new(BufferUsages::INDEX),
         }
     }
 }
-
-const QUAD_INDICES: [usize; 6] = [0, 2, 3, 0, 1, 2];
-
-const QUAD_VERTEX_POSITIONS: [Vec2; 4] = [
-    Vec2::new(-0.5, -0.5),
-    Vec2::new(0.5, -0.5),
-    Vec2::new(0.5, 0.5),
-    Vec2::new(-0.5, 0.5),
-];
-
-const QUAD_UVS: [Vec2; 4] = [
-    Vec2::new(0., 1.),
-    Vec2::new(1., 1.),
-    Vec2::new(1., 0.),
-    Vec2::new(0., 0.),
-];
 
 #[derive(Component, Eq, PartialEq, Clone)]
 pub struct SpriteBatch {
     image_handle_id: HandleId,
     range: Range<u32>,
-    color: bool,
 }
 
 #[derive(Resource, Default)]
@@ -580,6 +560,16 @@ pub fn queue_sprites(
     }
 }
 
+#[derive(Clone, ShaderType)]
+pub struct GpuQuad {
+    // Affine 4x3
+    pub col0_tx: Vec4,
+    pub col1_ty: Vec4,
+    pub col2_tz: Vec4,
+    pub color: [f32; 4],
+    pub uv_offset_scale: Vec4,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_sprites(
     mut commands: Commands,
@@ -587,6 +577,7 @@ pub fn prepare_sprites(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     mut sprite_meta: ResMut<SpriteMeta>,
+    mut sprites: ResMut<GpuArrayBuffer<GpuQuad>>,
     view_uniforms: Res<ViewUniforms>,
     sprite_pipeline: Res<SpritePipeline>,
     mut image_bind_groups: ResMut<ImageBindGroups>,
@@ -606,12 +597,11 @@ pub fn prepare_sprites(
     }
 
     if let Some(view_binding) = view_uniforms.uniforms.binding() {
-        let mut batches: Vec<(Entity, SpriteBatch)> = Vec::with_capacity(*previous_len);
-        let sprite_meta = &mut sprite_meta;
+        let mut batches: Vec<(Entity, (SpriteBatch, GpuArrayBufferIndex<GpuQuad>))> =
+            Vec::with_capacity(*previous_len);
 
-        // Clear the vertex buffers
-        sprite_meta.vertices.clear();
-        sprite_meta.colored_vertices.clear();
+        // Clear the GpuArrayBuffer
+        sprites.clear();
 
         sprite_meta.view_bind_group = Some(render_device.create_bind_group(&BindGroupDescriptor {
             entries: &[BindGroupEntry {
@@ -622,17 +612,18 @@ pub fn prepare_sprites(
             layout: &sprite_pipeline.view_layout,
         }));
 
-        // Vertex buffer indices
+        // Index buffer indices
         let mut index = 0;
-        let mut colored_index = 0;
 
         let image_bind_groups = &mut *image_bind_groups;
 
+        let mut total_sprites = 0;
         for mut transparent_phase in &mut phases {
+            total_sprites += transparent_phase.items.len();
             let mut batch_item_index = 0;
             let mut batch_image_size = Vec2::ZERO;
             let mut batch_image_handle = HandleId::Id(Uuid::nil(), u64::MAX);
-            let mut batch_colored = false;
+            let mut batch_dynamic_offset = None;
 
             // Iterate through the phase items and detect when successive sprites that can be batched.
             // Spawn an entity with a `SpriteBatch` component for each possible batch.
@@ -640,29 +631,14 @@ pub fn prepare_sprites(
             for item_index in 0..transparent_phase.items.len() {
                 let item = &transparent_phase.items[item_index];
                 let Some(extracted_sprite) = extracted_sprites.sprites.get(item.entity) else { continue };
-                if batch_image_handle != extracted_sprite.image_handle_id
-                    || batch_colored != (extracted_sprite.color != Color::WHITE)
-                {
-                    let Some(gpu_image) =
-                            gpu_images.get(&Handle::weak(extracted_sprite.image_handle_id)) else { continue };
 
-                    batch_item_index = item_index;
+                let batch_image_changed = batch_image_handle != extracted_sprite.image_handle_id;
+                if batch_image_changed {
+                    let Some(gpu_image) =
+                    gpu_images.get(&Handle::weak(extracted_sprite.image_handle_id)) else { continue };
+
                     batch_image_size = Vec2::new(gpu_image.size.x, gpu_image.size.y);
                     batch_image_handle = extracted_sprite.image_handle_id;
-                    batch_colored = extracted_sprite.color != Color::WHITE;
-
-                    let new_batch = SpriteBatch {
-                        image_handle_id: batch_image_handle,
-                        range: if batch_colored {
-                            colored_index..colored_index
-                        } else {
-                            index..index
-                        },
-                        color: batch_colored,
-                    };
-
-                    batches.push((item.entity, new_batch.clone()));
-
                     image_bind_groups
                         .values
                         .entry(Handle::weak(batch_image_handle))
@@ -686,72 +662,107 @@ pub fn prepare_sprites(
                         });
                 }
 
-                // Calculate vertex data for this item
-                let mut uvs = QUAD_UVS;
-                if extracted_sprite.flip_x {
-                    uvs = [uvs[1], uvs[0], uvs[3], uvs[2]];
-                }
-                if extracted_sprite.flip_y {
-                    uvs = [uvs[3], uvs[2], uvs[1], uvs[0]];
-                }
-
                 // By default, the size of the quad is the size of the texture
                 let mut quad_size = batch_image_size;
+
+                // Calculate vertex data for this item
+                let mut uv_offset_scale: Vec4;
 
                 // If a rect is specified, adjust UVs and the size of the quad
                 if let Some(rect) = extracted_sprite.rect {
                     let rect_size = rect.size();
-                    for uv in &mut uvs {
-                        *uv = (rect.min + *uv * rect_size) / batch_image_size;
-                    }
+                    uv_offset_scale = Vec4::new(
+                        rect.min.x / batch_image_size.x,
+                        rect.max.y / batch_image_size.y,
+                        rect_size.x / batch_image_size.x,
+                        -rect_size.y / batch_image_size.y,
+                    );
                     quad_size = rect_size;
+                } else {
+                    uv_offset_scale = Vec4::new(0.0, 1.0, 1.0, -1.0);
                 }
 
-                // // Override the size if a custom one is specified
+                if extracted_sprite.flip_x {
+                    uv_offset_scale.x += uv_offset_scale.z;
+                    uv_offset_scale.z *= -1.0;
+                }
+                if extracted_sprite.flip_y {
+                    uv_offset_scale.y += uv_offset_scale.w;
+                    uv_offset_scale.w *= -1.0;
+                }
+
+                // Override the size if a custom one is specified
                 if let Some(custom_size) = extracted_sprite.custom_size {
                     quad_size = custom_size;
                 }
 
-                // Apply size and global transform
-                let positions = QUAD_VERTEX_POSITIONS.map(|quad_pos| {
-                    extracted_sprite
-                        .transform
-                        .transform_point(
-                            ((quad_pos - extracted_sprite.anchor) * quad_size).extend(0.),
-                        )
-                        .into()
-                });
+                let transform = extracted_sprite.transform.affine()
+                    * Affine3A::from_scale_rotation_translation(
+                        quad_size.extend(1.0),
+                        Quat::IDENTITY,
+                        (quad_size * (-extracted_sprite.anchor - Vec2::splat(0.5))).extend(0.0),
+                    );
 
                 // Store the vertex data and add the item to the render phase
-                if batch_colored {
-                    let vertex_color = extracted_sprite.color.as_linear_rgba_f32();
-                    for i in QUAD_INDICES {
-                        sprite_meta.colored_vertices.push(ColoredSpriteVertex {
-                            position: positions[i],
-                            uv: uvs[i].into(),
-                            color: vertex_color,
-                        });
-                    }
-                    colored_index += QUAD_INDICES.len() as u32;
-                } else {
-                    for i in QUAD_INDICES {
-                        sprite_meta.vertices.push(SpriteVertex {
-                            position: positions[i],
-                            uv: uvs[i].into(),
-                        });
-                    }
-                    index += QUAD_INDICES.len() as u32;
+                let sprite_index = sprites.push(GpuQuad {
+                    col0_tx: transform.matrix3.x_axis.extend(transform.translation.x),
+                    col1_ty: transform.matrix3.y_axis.extend(transform.translation.y),
+                    col2_tz: transform.matrix3.z_axis.extend(transform.translation.z),
+                    color: extracted_sprite.color.as_linear_rgba_f32(),
+                    uv_offset_scale,
+                });
+
+                if batch_image_changed || batch_dynamic_offset != sprite_index.dynamic_offset {
+                    batch_item_index = item_index;
+                    batch_dynamic_offset = sprite_index.dynamic_offset;
+
+                    let new_batch = SpriteBatch {
+                        image_handle_id: batch_image_handle,
+                        range: index..index,
+                    };
+
+                    batches.push((item.entity, (new_batch.clone(), sprite_index)));
                 }
+
                 transparent_phase.items[batch_item_index].batch_size += 1;
-                batches.last_mut().unwrap().1.range.end += QUAD_INDICES.len() as u32;
+                batches.last_mut().unwrap().1 .0.range.end += 6;
+                index += 6;
             }
         }
-        sprite_meta
-            .vertices
-            .write_buffer(&render_device, &render_queue);
-        sprite_meta
-            .colored_vertices
-            .write_buffer(&render_device, &render_queue);
+        sprites.write_buffer(&render_device, &render_queue);
+        if let Some(resource) = sprites.binding() {
+            sprite_meta.sprite_bind_group =
+                Some(render_device.create_bind_group(&BindGroupDescriptor {
+                    entries: &[BindGroupEntry {
+                        binding: 0,
+                        resource,
+                    }],
+                    label: Some("sprite_material_bind_group"),
+                    layout: &sprite_pipeline.sprite_layout,
+                }));
+        }
+
+        let total_indices = total_sprites * 6;
+        let current_indices = sprite_meta.sprite_index_buffer.len();
+        if total_indices > current_indices {
+            sprite_meta
+                .sprite_index_buffer
+                .values
+                .reserve(total_indices - current_indices);
+            for i in (current_indices / 6)..total_sprites {
+                let base = (i * 4) as u32;
+                sprite_meta.sprite_index_buffer.push(base + 2);
+                sprite_meta.sprite_index_buffer.push(base);
+                sprite_meta.sprite_index_buffer.push(base + 1);
+                sprite_meta.sprite_index_buffer.push(base + 1);
+                sprite_meta.sprite_index_buffer.push(base + 3);
+                sprite_meta.sprite_index_buffer.push(base + 2);
+            }
+            sprite_meta
+                .sprite_index_buffer
+                .write_buffer(&render_device, &render_queue);
+        }
+
         *previous_len = batches.len();
         commands.insert_or_spawn_batch(batches);
     }
@@ -761,6 +772,7 @@ pub type DrawSprite = (
     SetItemPipeline,
     SetSpriteViewBindGroup<0>,
     SetSpriteTextureBindGroup<1>,
+    SetSpriteInstanceBindGroup<2>,
     DrawSpriteBatch,
 );
 
@@ -785,6 +797,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteViewBindGroup<I
         RenderCommandResult::Success
     }
 }
+
 pub struct SetSpriteTextureBindGroup<const I: usize>;
 impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteTextureBindGroup<I> {
     type Param = SRes<ImageBindGroups>;
@@ -794,7 +807,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteTextureBindGrou
     fn render<'w>(
         _item: &P,
         _view: (),
-        sprite: &'_ SpriteBatch,
+        sprite_batch: &'_ SpriteBatch,
         image_bind_groups: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -804,9 +817,37 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteTextureBindGrou
             I,
             image_bind_groups
                 .values
-                .get(&Handle::weak(sprite.image_handle_id))
+                .get(&Handle::weak(sprite_batch.image_handle_id))
                 .unwrap(),
             &[],
+        );
+        RenderCommandResult::Success
+    }
+}
+
+pub struct SetSpriteInstanceBindGroup<const I: usize>;
+impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteInstanceBindGroup<I> {
+    type Param = SRes<SpriteMeta>;
+    type ViewWorldQuery = ();
+    type ItemWorldQuery = Read<GpuArrayBufferIndex<GpuQuad>>;
+
+    fn render<'w>(
+        _item: &P,
+        _view: (),
+        gpu_array_buffer_index: &'_ GpuArrayBufferIndex<GpuQuad>,
+        sprite_meta: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let mut dynamic_offsets: [u32; 1] = Default::default();
+        let mut dynamic_offset_count = 0;
+        if let Some(dynamic_offset) = gpu_array_buffer_index.dynamic_offset {
+            dynamic_offsets[dynamic_offset_count] = dynamic_offset;
+            dynamic_offset_count += 1;
+        }
+        pass.set_bind_group(
+            I,
+            sprite_meta.into_inner().sprite_bind_group.as_ref().unwrap(),
+            &dynamic_offsets[0..dynamic_offset_count],
         );
         RenderCommandResult::Success
     }
@@ -826,12 +867,12 @@ impl<P: PhaseItem> RenderCommand<P> for DrawSpriteBatch {
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let sprite_meta = sprite_meta.into_inner();
-        if sprite_batch.color {
-            pass.set_vertex_buffer(0, sprite_meta.colored_vertices.buffer().unwrap().slice(..));
-        } else {
-            pass.set_vertex_buffer(0, sprite_meta.vertices.buffer().unwrap().slice(..));
-        }
-        pass.draw(sprite_batch.range.clone(), 0..1);
+        pass.set_index_buffer(
+            sprite_meta.sprite_index_buffer.buffer().unwrap().slice(..),
+            0,
+            IndexFormat::Uint32,
+        );
+        pass.draw_indexed(sprite_batch.range.clone(), 0, 0..1);
         RenderCommandResult::Success
     }
 }

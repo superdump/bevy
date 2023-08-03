@@ -29,7 +29,7 @@ use wgpu::BufferUsages;
 /// * [`BufferVec`](crate::render_resource::BufferVec)
 /// * [`Texture`](crate::render_resource::Texture)
 pub struct BufferVec<T: Pod> {
-    values: Vec<T>,
+    pub values: Vec<T>,
     buffer: Option<Buffer>,
     capacity: usize,
     item_size: usize,

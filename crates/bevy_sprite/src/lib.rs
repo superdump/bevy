@@ -37,7 +37,8 @@ use bevy_render::{
     mesh::Mesh,
     primitives::Aabb,
     render_phase::AddRenderCommand,
-    render_resource::{Shader, SpecializedRenderPipelines},
+    render_resource::{GpuArrayBuffer, Shader, ShaderDefVal, SpecializedRenderPipelines},
+    renderer::RenderDevice,
     texture::Image,
     view::{NoFrustumCulling, VisibilitySystems},
     ExtractSchedule, Render, RenderApp, RenderSet,
@@ -56,12 +57,6 @@ pub enum SpriteSystem {
 
 impl Plugin for SpritePlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            SPRITE_SHADER_HANDLE,
-            "render/sprite.wgsl",
-            Shader::from_wgsl
-        );
         app.add_asset::<TextureAtlas>()
             .register_asset_reflect::<TextureAtlas>()
             .register_type::<Sprite>()
@@ -102,9 +97,34 @@ impl Plugin for SpritePlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        let mut sprites_shader_defs = Vec::with_capacity(1);
+
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<SpritePipeline>();
+            if let Some(per_object_buffer_batch_size) =
+                GpuArrayBuffer::<GpuQuad>::batch_size(render_app.world.resource::<RenderDevice>())
+            {
+                sprites_shader_defs.push(ShaderDefVal::UInt(
+                    "PER_OBJECT_BUFFER_BATCH_SIZE".into(),
+                    per_object_buffer_batch_size,
+                ));
+            }
+
+            render_app
+                .insert_resource(GpuArrayBuffer::<GpuQuad>::new(
+                    render_app.world.resource::<RenderDevice>(),
+                ))
+                .init_resource::<SpritePipeline>();
         }
+
+        // Load the mesh_bindings shader module here as it depends on runtime information about
+        // whether storage buffers are supported, or the maximum uniform buffer binding size.
+        load_internal_asset!(
+            app,
+            SPRITE_SHADER_HANDLE,
+            "render/sprite.wgsl",
+            Shader::from_wgsl_with_defs,
+            sprites_shader_defs
+        );
     }
 }
 
