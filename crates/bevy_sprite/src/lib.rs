@@ -71,7 +71,11 @@ impl Plugin for SpritePlugin {
             .add_plugins((Mesh2dRenderPlugin, ColorMaterialPlugin))
             .add_systems(
                 PostUpdate,
-                calculate_bounds_2d.in_set(VisibilitySystems::CalculateBounds),
+                (
+                    calculate_bounds_2d.in_set(VisibilitySystems::CalculateBounds),
+                    update_core_2d_camera_phases.in_set(VisibilitySystems::CalculateBounds),
+                    sort_visible_entities_via_phases.after(VisibilitySystems::CalculateBoundsFlush),
+                ),
             );
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
@@ -79,13 +83,15 @@ impl Plugin for SpritePlugin {
                 .init_resource::<ImageBindGroups>()
                 .init_resource::<SpecializedRenderPipelines<SpritePipeline>>()
                 .init_resource::<SpriteMeta>()
-                .init_resource::<ExtractedSprites>()
+                // .init_resource::<ExtractedSprites>()
+                .init_resource::<ExtractedSpritesV2>()
                 .init_resource::<SpriteAssetEvents>()
                 .add_render_command::<Transparent2d, DrawSprite>()
                 .add_systems(
                     ExtractSchedule,
                     (
-                        extract_sprites.in_set(SpriteSystem::ExtractSprites),
+                        // extract_sprites.in_set(SpriteSystem::ExtractSprites),
+                        extract_sprites_v2.in_set(SpriteSystem::ExtractSprites),
                         extract_sprite_events,
                     ),
                 )

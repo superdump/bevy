@@ -134,6 +134,35 @@ impl BatchedPhaseItem for Transparent2d {
     }
 }
 
+pub struct Transparent2dv2 {
+    pub sort_key: FloatOrd,
+    pub entity: Entity,
+}
+
+impl PhaseItem for Transparent2dv2 {
+    type SortKey = FloatOrd;
+
+    #[inline]
+    fn entity(&self) -> Entity {
+        self.entity
+    }
+
+    #[inline]
+    fn sort_key(&self) -> Self::SortKey {
+        self.sort_key
+    }
+
+    #[inline]
+    fn draw_function(&self) -> DrawFunctionId {
+        DrawFunctionId(0)
+    }
+
+    #[inline]
+    fn sort(items: &mut [Self]) {
+        items.sort_by_key(|item| item.sort_key());
+    }
+}
+
 pub fn extract_core_2d_camera_phases(
     mut commands: Commands,
     cameras_2d: Extract<Query<(Entity, &Camera), With<Camera2d>>>,

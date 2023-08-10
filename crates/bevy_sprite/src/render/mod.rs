@@ -2,11 +2,12 @@ use std::cmp::Ordering;
 
 use crate::{
     texture_atlas::{TextureAtlas, TextureAtlasSprite},
-    Sprite, SPRITE_SHADER_HANDLE,
+    Mesh2dHandle, Sprite, SPRITE_SHADER_HANDLE,
 };
 use bevy_asset::{AssetEvent, Assets, Handle, HandleId};
 use bevy_core_pipeline::{
-    core_2d::Transparent2d,
+    core_2d::{Transparent2d, Transparent2dv2},
+    prelude::Camera2d,
     tonemapping::{DebandDither, Tonemapping},
 };
 use bevy_ecs::{
@@ -17,6 +18,7 @@ use bevy_math::{Rect, Vec2};
 use bevy_reflect::Uuid;
 use bevy_render::{
     color::Color,
+    prelude::Camera,
     render_asset::RenderAssets,
     render_phase::{
         BatchedPhaseItem, DrawFunctions, PhaseItem, RenderCommand, RenderCommandResult,
@@ -38,6 +40,134 @@ use bevy_utils::FloatOrd;
 use bevy_utils::HashMap;
 use bytemuck::{Pod, Zeroable};
 use fixedbitset::FixedBitSet;
+
+pub fn update_core_2d_camera_phases(
+    mut commands: Commands,
+    cameras_2d: Query<(Entity, &Camera), With<Camera2d>>,
+) {
+    for (entity, camera) in &cameras_2d {
+        if camera.is_active {
+            commands
+                .get_or_spawn(entity)
+                .insert(RenderPhase::<Transparent2dv2>::default());
+        }
+    }
+}
+
+#[derive(Default, Clone, Component)]
+pub struct ExtractIndex {
+    pub index: usize,
+}
+
+pub fn sort_visible_entities_via_phases(
+    // mut commands: Commands,
+    mut cameras_2d: Query<(&VisibleEntities, &mut RenderPhase<Transparent2dv2>)>,
+    mut transforms: Query<
+        (Entity, &GlobalTransform, &mut ExtractIndex),
+        Or<(With<Sprite>, With<Mesh2dHandle>)>,
+    >,
+) {
+    // let mut extract_indices = Vec::new();
+    for (visible_entities, mut transparent_phase) in &mut cameras_2d {
+        transparent_phase.items.clear();
+        let capacity = transparent_phase.items.capacity();
+        if visible_entities.entities.len() > capacity {
+            transparent_phase
+                .items
+                .reserve(visible_entities.entities.len() - capacity);
+        }
+        // extract_indices.reserve(visible_entities.len());
+
+        let visible_entities = visible_entities
+            .iter()
+            .map(|e| e.index() as usize)
+            .collect::<FixedBitSet>();
+        for (entity, transform, _) in transforms
+            .iter()
+            .filter(|(entity, _, _)| visible_entities.contains(entity.index() as usize))
+        {
+            transparent_phase.items.push(Transparent2dv2 {
+                sort_key: FloatOrd(transform.translation_vec3a().z),
+                entity,
+            });
+        }
+
+        if transparent_phase.items.is_empty() {
+            continue;
+        }
+        transparent_phase.sort();
+        let mut temp = transparent_phase
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.entity, ExtractIndex { index }))
+            .collect::<Vec<_>>();
+        temp.sort_unstable_by_key(|a| a.0);
+        let mut temp_i = 0;
+        let mut v = &temp[temp_i];
+        for (entity, _, mut extract_index) in &mut transforms {
+            if entity == v.0 {
+                *extract_index = v.1.clone();
+                temp_i += 1;
+                if temp_i >= temp.len() {
+                    break;
+                }
+                v = &temp[temp_i];
+            } else {
+                *extract_index = ExtractIndex { index: usize::MAX };
+            }
+        }
+        // commands.insert_or_spawn_batch(extract_indices);
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct ExtractedSpritesV2 {
+    pub sprites: Vec<ExtractedSprite>,
+}
+
+pub fn extract_sprites_v2(
+    mut extracted_sprites: ResMut<ExtractedSpritesV2>,
+    sprite_query: Extract<
+        Query<(
+            Entity,
+            &Sprite,
+            &GlobalTransform,
+            &Handle<Image>,
+            &ExtractIndex,
+        )>,
+    >,
+) {
+    extracted_sprites.sprites.resize(
+        sprite_query.iter().len(),
+        ExtractedSprite {
+            entity: Entity::from_bits(u64::MAX),
+            transform: Default::default(),
+            color: Default::default(),
+            rect: Default::default(),
+            custom_size: Default::default(),
+            image_handle_id: HandleId::Id(Uuid::nil(), u64::MAX),
+            flip_x: Default::default(),
+            flip_y: Default::default(),
+            anchor: Default::default(),
+        },
+    );
+    for (entity, sprite, transform, handle, extract_index) in sprite_query.iter() {
+        // PERF: we don't check in this function that the `Image` asset is ready, since it should be in most cases and hashing the handle is expensive
+        extracted_sprites.sprites[extract_index.index] = ExtractedSprite {
+            entity,
+            color: sprite.color,
+            transform: *transform,
+            rect: sprite.rect,
+            // Pass the custom size
+            custom_size: sprite.custom_size,
+            flip_x: sprite.flip_x,
+            flip_y: sprite.flip_y,
+            image_handle_id: handle.id(),
+            anchor: sprite.anchor.as_vec(),
+        };
+    }
+}
 
 #[derive(Resource)]
 pub struct SpritePipeline {
@@ -495,10 +625,10 @@ pub fn queue_sprites(
     mut image_bind_groups: ResMut<ImageBindGroups>,
     gpu_images: Res<RenderAssets<Image>>,
     msaa: Res<Msaa>,
-    mut extracted_sprites: ResMut<ExtractedSprites>,
+    mut extracted_sprites: ResMut<ExtractedSpritesV2>,
     mut views: Query<(
         &mut RenderPhase<Transparent2d>,
-        &VisibleEntities,
+        // &VisibleEntities,
         &ExtractedView,
         Option<&Tonemapping>,
         Option<&DebandDither>,
@@ -544,20 +674,20 @@ pub fn queue_sprites(
         let extracted_sprites = &mut extracted_sprites.sprites;
         // Sort sprites by z for correct transparency and then by handle to improve batching
         // NOTE: This can be done independent of views by reasonably assuming that all 2D views look along the negative-z axis in world space
-        extracted_sprites.sort_unstable_by(|a, b| {
-            match a
-                .transform
-                .translation()
-                .z
-                .partial_cmp(&b.transform.translation().z)
-            {
-                Some(Ordering::Equal) | None => a.image_handle_id.cmp(&b.image_handle_id),
-                Some(other) => other,
-            }
-        });
+        // extracted_sprites.sort_unstable_by(|a, b| {
+        //     match a
+        //         .transform
+        //         .translation()
+        //         .z
+        //         .partial_cmp(&b.transform.translation().z)
+        //     {
+        //         Some(Ordering::Equal) | None => a.image_handle_id.cmp(&b.image_handle_id),
+        //         Some(other) => other,
+        //     }
+        // });
         let image_bind_groups = &mut *image_bind_groups;
 
-        for (mut transparent_phase, visible_entities, view, tonemapping, dither) in &mut views {
+        for (mut transparent_phase, view, tonemapping, dither) in &mut views {
             let mut view_key = SpritePipelineKey::from_hdr(view.hdr) | msaa_key;
 
             if !view.hdr {
@@ -598,8 +728,8 @@ pub fn queue_sprites(
                 view_key | SpritePipelineKey::from_colored(true),
             );
 
-            view_entities.clear();
-            view_entities.extend(visible_entities.entities.iter().map(|e| e.index() as usize));
+            // view_entities.clear();
+            // view_entities.extend(visible_entities.entities.iter().map(|e| e.index() as usize));
             transparent_phase.items.reserve(extracted_sprites.len());
 
             // Impossible starting values that will be replaced on the first iteration
@@ -615,9 +745,9 @@ pub fn queue_sprites(
             // Batches are merged later (in `batch_phase_system()`), so that they can be interrupted
             // by any other phase item (and they can interrupt other items from batching).
             for extracted_sprite in extracted_sprites.iter() {
-                if !view_entities.contains(extracted_sprite.entity.index() as usize) {
-                    continue;
-                }
+                // if !view_entities.contains(extracted_sprite.entity.index() as usize) {
+                //     continue;
+                // }
                 let new_batch = SpriteBatch {
                     image_handle_id: extracted_sprite.image_handle_id,
                     colored: extracted_sprite.color != Color::WHITE,

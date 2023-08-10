@@ -99,12 +99,12 @@ impl Plugin for TextPlugin {
                     .ambiguous_with(CameraUpdateSystem),
             );
 
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_systems(
-                ExtractSchedule,
-                extract_text2d_sprite.after(SpriteSystem::ExtractSprites),
-            );
-        }
+        // if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+        //     render_app.add_systems(
+        //         ExtractSchedule,
+        //         extract_text2d_sprite.after(SpriteSystem::ExtractSprites),
+        //     );
+        // }
 
         #[cfg(feature = "default_font")]
         load_internal_binary_asset!(

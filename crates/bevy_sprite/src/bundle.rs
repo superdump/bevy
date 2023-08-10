@@ -1,6 +1,6 @@
 use crate::{
     texture_atlas::{TextureAtlas, TextureAtlasSprite},
-    Sprite,
+    ExtractIndex, Sprite,
 };
 use bevy_asset::Handle;
 use bevy_ecs::bundle::Bundle;
@@ -20,6 +20,7 @@ pub struct SpriteBundle {
     pub visibility: Visibility,
     /// Algorithmically-computed indication of whether an entity is visible and should be extracted for rendering
     pub computed_visibility: ComputedVisibility,
+    pub extract_index: ExtractIndex,
 }
 
 impl Default for SpriteBundle {
@@ -31,6 +32,7 @@ impl Default for SpriteBundle {
             texture: DEFAULT_IMAGE_HANDLE.typed(),
             visibility: Default::default(),
             computed_visibility: Default::default(),
+            extract_index: Default::default(),
         }
     }
 }
