@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use bevy_app::Plugin;
 use bevy_asset::{load_internal_asset, AssetId, Handle};
 
@@ -18,9 +20,9 @@ use bevy_render::{
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{GpuBufferInfo, MegaMesh, Mesh, MeshVertexBufferLayout},
     render_asset::RenderAssets,
-    render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
+    render_phase::{PhaseItem, RenderCommand, RenderCommandResult, RenderPhase, TrackedRenderPass},
     render_resource::*,
-    renderer::{RenderDevice, RenderQueue},
+    renderer::{render_system, RenderDevice, RenderQueue},
     texture::{
         BevyDefault, DefaultImageSampler, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
     },
@@ -31,6 +33,7 @@ use bevy_render::{
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::{nonmax::NonMaxU32, PassHashMap};
+use bytemuck::{Pod, Zeroable};
 
 use crate::Material2dBindGroupMeta;
 
@@ -96,6 +99,7 @@ impl Plugin for Mesh2dRenderPlugin {
             render_app
                 .init_resource::<RenderMesh2dInstances>()
                 .init_resource::<SpecializedMeshPipelines<Mesh2dPipeline>>()
+                .init_resource::<IndirectBuffer<Transparent2d>>()
                 .add_systems(ExtractSchedule, extract_mesh2d)
                 .add_systems(
                     Render,
@@ -106,6 +110,9 @@ impl Plugin for Mesh2dRenderPlugin {
                             .in_set(RenderSet::PrepareResourcesFlush),
                         prepare_mesh2d_bind_group.in_set(RenderSet::PrepareBindGroups),
                         prepare_mesh2d_view_bind_groups.in_set(RenderSet::PrepareBindGroups),
+                        indirect_draw_hacks_2d::<Transparent2d>
+                            .in_set(RenderSet::Render)
+                            .before(render_system),
                     ),
                 );
         }
@@ -191,6 +198,7 @@ pub struct RenderMesh2dInstance {
     pub mesh_asset_id: AssetId<Mesh>,
     pub material_bind_group_meta: Material2dBindGroupMeta,
     pub automatic_batching: bool,
+    pub indirect_offset: Option<u64>,
 }
 
 #[derive(Default, Resource, Deref, DerefMut)]
@@ -233,6 +241,7 @@ pub fn extract_mesh2d(
                 mesh_asset_id: handle.0.id(),
                 material_bind_group_meta: Material2dBindGroupMeta::default(),
                 automatic_batching: !no_automatic_batching,
+                indirect_offset: None,
             },
         );
     }
@@ -648,6 +657,80 @@ pub fn prepare_mesh2d_view_bind_groups(
     }
 }
 
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+pub struct BevyDrawIndexedIndirect {
+    /// The number of vertices to draw.
+    pub vertex_count: u32,
+    /// The number of instances to draw.
+    pub instance_count: u32,
+    /// The base index within the index buffer.
+    pub base_index: u32,
+    /// The value added to the vertex index before indexing into the vertex buffer.
+    pub vertex_offset: i32,
+    /// The instance ID of the first instance to draw.
+    /// Has to be 0, unless [`Features::INDIRECT_FIRST_INSTANCE`](crate::Features::INDIRECT_FIRST_INSTANCE) is enabled.
+    pub base_instance: u32,
+}
+
+#[derive(Resource)]
+pub struct IndirectBuffer<I: PhaseItem> {
+    buffer: BufferVec<BevyDrawIndexedIndirect>,
+    phantom: PhantomData<I>,
+}
+
+impl<I: PhaseItem> Default for IndirectBuffer<I> {
+    fn default() -> Self {
+        Self {
+            buffer: BufferVec::<BevyDrawIndexedIndirect>::new(BufferUsages::INDIRECT),
+            phantom: Default::default(),
+        }
+    }
+}
+
+fn indirect_draw_hacks_2d<I: PhaseItem>(
+    mut indirect_buffer: ResMut<IndirectBuffer<I>>,
+    mut render_mesh_instances: ResMut<RenderMesh2dInstances>,
+    mega_mesh: Res<MegaMesh>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    views: Query<&RenderPhase<I>>,
+) {
+    indirect_buffer.buffer.clear();
+
+    for phase in &views {
+        let mut index = 0;
+        while index < phase.items.len() {
+            let item = &phase.items[index];
+            let batch_range = item.batch_range();
+            if batch_range.is_empty() {
+                index += 1;
+            } else {
+                let Some(mesh_instance) = render_mesh_instances.get_mut(&item.entity()) else {
+                    continue;
+                };
+                let Some(mesh_indices) = mega_mesh.indices.get(&mesh_instance.mesh_asset_id) else {
+                    continue;
+                };
+                let indirect_index = indirect_buffer.buffer.push(BevyDrawIndexedIndirect {
+                    vertex_count: mesh_indices.range.len() as u32,
+                    instance_count: batch_range.len() as u32,
+                    base_index: mesh_indices.range.start,
+                    vertex_offset: 0,
+                    base_instance: batch_range.start,
+                });
+                mesh_instance.indirect_offset =
+                    Some((indirect_index * std::mem::size_of::<BevyDrawIndexedIndirect>()) as u64);
+                index += batch_range.len();
+            }
+        }
+    }
+
+    indirect_buffer
+        .buffer
+        .write_buffer(&render_device, &render_queue)
+}
+
 pub struct SetMesh2dViewBindGroup<const I: usize>;
 impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMesh2dViewBindGroup<I> {
     type Param = ();
@@ -699,30 +782,37 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMesh2dBindGroup<I> {
 
 pub struct DrawMesh2d;
 impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
-    type Param = (SRes<MegaMesh>, SRes<RenderMesh2dInstances>);
+    type Param = (
+        SRes<MegaMesh>,
+        SRes<RenderMesh2dInstances>,
+        SRes<IndirectBuffer<P>>,
+        SRes<RenderDevice>,
+    );
     type ViewWorldQuery = ();
     type ItemWorldQuery = ();
-
     #[inline]
     fn render<'w>(
         item: &P,
         _view: (),
         _item_query: (),
-        (mega_mesh, render_mesh2d_instances): SystemParamItem<'w, '_, Self::Param>,
+        (mega_mesh, mesh_instances, indirect_buffer, render_device): SystemParamItem<
+            'w,
+            '_,
+            Self::Param,
+        >,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let mega_mesh = mega_mesh.into_inner();
-        let render_mesh2d_instances = render_mesh2d_instances.into_inner();
+        let mesh_instances = mesh_instances.into_inner();
+        let indirect_buffer = indirect_buffer.into_inner();
 
-        let Some(RenderMesh2dInstance { mesh_asset_id, .. }) =
-            render_mesh2d_instances.get(&item.entity())
-        else {
+        let Some(mesh_instance) = mesh_instances.get(&item.entity()) else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(mesh_indices) = mega_mesh.indices.get(&mesh_instance.mesh_asset_id) else {
             return RenderCommandResult::Failure;
         };
         let Some(gpu_mesh) = mega_mesh.gpu_mesh.as_ref() else {
-            return RenderCommandResult::Failure;
-        };
-        let Some(mesh_indices) = mega_mesh.indices.get(mesh_asset_id) else {
             return RenderCommandResult::Failure;
         };
 
@@ -742,7 +832,15 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
                 ..
             } => {
                 pass.set_index_buffer(buffer.slice(..), 0, *index_format);
-                pass.draw_indexed(mesh_indices.range.clone(), 0, batch_range.clone());
+                if let Some(indirect_offset) = mesh_instance.indirect_offset {
+                    // FIXME: Figure out how to use multi-draw indirect
+                    pass.draw_indexed_indirect(
+                        indirect_buffer.buffer.buffer().unwrap(),
+                        indirect_offset,
+                    );
+                } else {
+                    pass.draw_indexed(mesh_indices.range.clone(), 0, batch_range.clone());
+                }
             }
             GpuBufferInfo::NonIndexed => {
                 pass.draw(0..gpu_mesh.vertex_count, batch_range.clone());
