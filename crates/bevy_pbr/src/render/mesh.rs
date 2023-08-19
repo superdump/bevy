@@ -1,3 +1,5 @@
+use std::mem::size_of;
+
 use crate::{
     environment_map, prepass, EnvironmentMapLight, FogMeta, GlobalLightMeta, GpuFog, GpuLights,
     GpuPointLights, LightMeta, NotShadowCaster, NotShadowReceiver, PreviousGlobalTransform,
@@ -8,6 +10,7 @@ use crate::{
 use bevy_app::Plugin;
 use bevy_asset::{load_internal_asset, Assets, Handle, HandleId, HandleUntyped};
 use bevy_core_pipeline::{
+    core_3d::Opaque3d,
     prepass::ViewPrepassTextures,
     tonemapping::{
         get_lut_bind_group_layout_entries, get_lut_bindings, Tonemapping, TonemappingLuts,
@@ -31,9 +34,9 @@ use bevy_render::{
     },
     prelude::Msaa,
     render_asset::RenderAssets,
-    render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
+    render_phase::{PhaseItem, RenderCommand, RenderCommandResult, RenderPhase, TrackedRenderPass},
     render_resource::*,
-    renderer::{RenderDevice, RenderQueue},
+    renderer::{render_system, RenderDevice, RenderQueue},
     texture::{
         BevyDefault, DefaultImageSampler, FallbackImageCubemap, FallbackImagesDepth,
         FallbackImagesMsaa, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
@@ -43,6 +46,7 @@ use bevy_render::{
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::{tracing::error, HashMap, Hashed};
+use bytemuck::{Pod, Zeroable};
 
 use crate::render::{
     morph::{extract_morphs, prepare_morphs, MorphUniform},
@@ -126,6 +130,7 @@ impl Plugin for MeshRenderPlugin {
                 .init_resource::<SkinnedMeshUniform>()
                 .init_resource::<MeshBindGroups>()
                 .init_resource::<MorphUniform>()
+                .init_resource::<IndirectBuffer>()
                 .add_systems(
                     ExtractSchedule,
                     (extract_meshes, extract_skinned_meshes, extract_morphs),
@@ -138,6 +143,9 @@ impl Plugin for MeshRenderPlugin {
                         prepare_morphs.in_set(RenderSet::Prepare),
                         queue_mesh_bind_group.in_set(RenderSet::Queue),
                         queue_mesh_view_bind_groups.in_set(RenderSet::Queue),
+                        indirect_draw_hacks
+                            .in_set(RenderSet::Render)
+                            .before(render_system),
                     ),
                 );
         }
@@ -263,6 +271,7 @@ pub struct RenderMeshInstance {
     pub transforms: MeshTransforms,
     pub shadow_caster: bool,
     pub indices: GpuArrayBufferIndex<MeshUniform>,
+    pub indirect_offset: Option<u64>,
 }
 
 #[derive(Default, Resource, Deref, DerefMut)]
@@ -317,6 +326,7 @@ pub fn extract_meshes(
                 transforms,
                 shadow_caster: not_caster.is_none(),
                 indices: GpuArrayBufferIndex::<MeshUniform>::INVALID,
+                indirect_offset: None,
             },
         );
     }
@@ -1310,6 +1320,86 @@ pub fn queue_mesh_view_bind_groups(
     }
 }
 
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+pub struct BevyDrawIndexedIndirect {
+    /// The number of vertices to draw.
+    pub vertex_count: u32,
+    /// The number of instances to draw.
+    pub instance_count: u32,
+    /// The base index within the index buffer.
+    pub base_index: u32,
+    /// The value added to the vertex index before indexing into the vertex buffer.
+    pub vertex_offset: i32,
+    /// The instance ID of the first instance to draw.
+    /// Has to be 0, unless [`Features::INDIRECT_FIRST_INSTANCE`](crate::Features::INDIRECT_FIRST_INSTANCE) is enabled.
+    pub base_instance: u32,
+}
+
+#[derive(Resource)]
+pub struct IndirectBuffer {
+    buffer: BufferVec<BevyDrawIndexedIndirect>,
+}
+
+impl Default for IndirectBuffer {
+    fn default() -> Self {
+        Self {
+            buffer: BufferVec::<BevyDrawIndexedIndirect>::new(BufferUsages::INDIRECT),
+        }
+    }
+}
+
+fn indirect_draw_hacks(
+    mut indirect_buffer: ResMut<IndirectBuffer>,
+    mut render_mesh_instances: ResMut<RenderMeshInstances>,
+    render_meshes: Res<RenderAssets<Mesh>>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    views: Query<&RenderPhase<Opaque3d>>,
+) {
+    indirect_buffer.buffer.clear();
+
+    for view in &views {
+        for item in &view.items {
+            // GpuBufferInfo::Indexed {
+            //     buffer,
+            //     index_format,
+            //     count,
+            // } => {
+            //     pass.set_index_buffer(buffer.slice(..), 0, *index_format);
+            //     pass.draw_indexed(
+            //         0..*count,
+            //         0,
+            //         mesh_instance.indices.index..mesh_instance.indices.index + 1,
+            //     );
+            // }
+
+            let Some(mesh_instance) = render_mesh_instances.get_mut(item.entity()) else { continue };
+            let Some(gpu_mesh) = render_meshes.get(&mesh_instance.handle) else { continue };
+            if let GpuBufferInfo::Indexed {
+                buffer: _buffer,
+                count,
+                index_format: _index_format,
+            } = &gpu_mesh.buffer_info
+            {
+                let index = indirect_buffer.buffer.push(BevyDrawIndexedIndirect {
+                    vertex_count: *count,
+                    instance_count: 1,
+                    base_index: 0,
+                    vertex_offset: 0,
+                    base_instance: mesh_instance.indices.index,
+                });
+                mesh_instance.indirect_offset =
+                    Some((index * size_of::<BevyDrawIndexedIndirect>()) as u64);
+            }
+        }
+    }
+
+    indirect_buffer
+        .buffer
+        .write_buffer(&render_device, &render_queue)
+}
+
 pub struct SetMeshViewBindGroup<const I: usize>;
 impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshViewBindGroup<I> {
     type Param = ();
@@ -1409,7 +1499,11 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
 
 pub struct DrawMesh;
 impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
-    type Param = (SRes<RenderAssets<Mesh>>, SRes<RenderMeshInstances>);
+    type Param = (
+        SRes<RenderAssets<Mesh>>,
+        SRes<RenderMeshInstances>,
+        SRes<IndirectBuffer>,
+    );
     type ViewWorldQuery = ();
     type ItemWorldQuery = ();
     #[inline]
@@ -1417,11 +1511,12 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
         item: &P,
         _view: (),
         _item_query: (),
-        (meshes, mesh_instances): SystemParamItem<'w, '_, Self::Param>,
+        (meshes, mesh_instances, indirect_buffer): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let meshes = meshes.into_inner();
         let mesh_instances = mesh_instances.into_inner();
+        let indirect_buffer = indirect_buffer.into_inner();
 
         let Some(mesh_instance) = mesh_instances.get(item.entity()) else { return RenderCommandResult::Success };
         let Some(gpu_mesh) = meshes.get(&mesh_instance.handle) else { return RenderCommandResult::Failure };
@@ -1440,11 +1535,18 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
                 count,
             } => {
                 pass.set_index_buffer(buffer.slice(..), 0, *index_format);
-                pass.draw_indexed(
-                    0..*count,
-                    0,
-                    mesh_instance.indices.index..mesh_instance.indices.index + 1,
-                );
+                if let Some(indirect_offset) = mesh_instance.indirect_offset {
+                    pass.draw_indexed_indirect(
+                        indirect_buffer.buffer.buffer().unwrap(),
+                        indirect_offset,
+                    );
+                } else {
+                    pass.draw_indexed(
+                        0..*count,
+                        0,
+                        mesh_instance.indices.index..mesh_instance.indices.index + 1,
+                    );
+                }
             }
             GpuBufferInfo::NonIndexed => {
                 pass.draw(
