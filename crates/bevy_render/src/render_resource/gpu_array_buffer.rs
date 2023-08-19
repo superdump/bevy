@@ -127,3 +127,11 @@ pub struct GpuArrayBufferIndex<T: GpuArrayBufferable> {
     pub dynamic_offset: Option<u32>,
     pub element_type: PhantomData<T>,
 }
+
+impl<T: GpuArrayBufferable> GpuArrayBufferIndex<T> {
+    pub const INVALID: Self = GpuArrayBufferIndex::<T> {
+        index: u32::MAX,
+        dynamic_offset: None,
+        element_type: PhantomData,
+    };
+}

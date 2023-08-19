@@ -1,6 +1,7 @@
 use std::{iter, mem};
 
-use bevy_ecs::prelude::*;
+use bevy_derive::{Deref, DerefMut};
+use bevy_ecs::{prelude::*, storage::SparseSet};
 use bevy_render::{
     mesh::morph::{MeshMorphWeights, MAX_MORPH_WEIGHTS},
     render_resource::{BufferUsages, BufferVec},
@@ -68,15 +69,17 @@ fn add_to_alignment<T: Pod + Default>(buffer: &mut BufferVec<T>) {
     buffer.extend(iter::repeat_with(T::default).take(ts_to_add));
 }
 
+#[derive(Default, Resource, Deref, DerefMut)]
+pub struct MorphInstances(SparseSet<Entity, MorphIndex>);
+
 pub fn extract_morphs(
-    mut commands: Commands,
-    mut previous_len: Local<usize>,
+    mut morph_instances: ResMut<MorphInstances>,
     mut uniform: ResMut<MorphUniform>,
     query: Extract<Query<(Entity, &ComputedVisibility, &MeshMorphWeights)>>,
 ) {
+    morph_instances.clear();
+    morph_instances.reserve_capacity(query.iter().len());
     uniform.buffer.clear();
-
-    let mut values = Vec::with_capacity(*previous_len);
 
     for (entity, computed_visibility, morph_weights) in &query {
         if !computed_visibility.is_visible() {
@@ -89,8 +92,6 @@ pub fn extract_morphs(
         add_to_alignment::<f32>(&mut uniform.buffer);
 
         let index = (start * mem::size_of::<f32>()) as u32;
-        values.push((entity, MorphIndex { index }));
+        morph_instances.insert(entity, MorphIndex { index });
     }
-    *previous_len = values.len();
-    commands.insert_or_spawn_batch(values);
 }

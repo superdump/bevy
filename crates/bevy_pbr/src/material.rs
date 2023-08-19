@@ -1,6 +1,6 @@
 use crate::{
     render, AlphaMode, DrawMesh, DrawPrepass, EnvironmentMapLight, MeshPipeline, MeshPipelineKey,
-    MeshTransforms, MeshUniform, PrepassPipelinePlugin, PrepassPlugin, RenderLightSystems,
+    PrepassPipelinePlugin, PrepassPlugin, RenderLightSystems, RenderMeshInstances,
     ScreenSpaceAmbientOcclusionSettings, SetMeshBindGroup, SetMeshViewBindGroup, Shadow,
 };
 use bevy_app::{App, Plugin};
@@ -14,14 +14,11 @@ use bevy_core_pipeline::{
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::*,
-    system::{
-        lifetimeless::{Read, SRes},
-        SystemParamItem,
-    },
+    storage::SparseSet,
+    system::{lifetimeless::SRes, SystemParamItem},
 };
 use bevy_reflect::{TypePath, TypeUuid};
 use bevy_render::{
-    extract_component::ExtractComponentPlugin,
     mesh::{Mesh, MeshVertexBufferLayout},
     prelude::Image,
     render_asset::{PrepareAssetSet, RenderAssets},
@@ -30,13 +27,13 @@ use bevy_render::{
         RenderPhase, SetItemPipeline, TrackedRenderPass,
     },
     render_resource::{
-        AsBindGroup, AsBindGroupError, BindGroup, BindGroupLayout, GpuArrayBufferIndex,
-        OwnedBindingResource, PipelineCache, RenderPipelineDescriptor, Shader, ShaderRef,
-        SpecializedMeshPipeline, SpecializedMeshPipelineError, SpecializedMeshPipelines,
+        AsBindGroup, AsBindGroupError, BindGroup, BindGroupLayout, OwnedBindingResource,
+        PipelineCache, RenderPipelineDescriptor, Shader, ShaderRef, SpecializedMeshPipeline,
+        SpecializedMeshPipelineError, SpecializedMeshPipelines,
     },
     renderer::RenderDevice,
     texture::FallbackImage,
-    view::{ExtractedView, Msaa, VisibleEntities},
+    view::{ComputedVisibility, ExtractedView, Msaa, VisibleEntities},
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_utils::{tracing::error, HashMap, HashSet};
@@ -187,8 +184,7 @@ where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     fn build(&self, app: &mut App) {
-        app.add_asset::<M>()
-            .add_plugins(ExtractComponentPlugin::<Handle<M>>::extract_visible());
+        app.add_asset::<M>();
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -198,9 +194,13 @@ where
                 .add_render_command::<Opaque3d, DrawMaterial<M>>()
                 .add_render_command::<AlphaMask3d, DrawMaterial<M>>()
                 .init_resource::<ExtractedMaterials<M>>()
+                .init_resource::<RenderMaterialInstances<M>>()
                 .init_resource::<RenderMaterials<M>>()
                 .init_resource::<SpecializedMeshPipelines<MaterialPipeline<M>>>()
-                .add_systems(ExtractSchedule, extract_materials::<M>)
+                .add_systems(
+                    ExtractSchedule,
+                    (extract_materials::<M>, extract_material_meshes::<M>),
+                )
                 .add_systems(
                     Render,
                     (
@@ -350,21 +350,50 @@ type DrawMaterial<M> = (
 /// Sets the bind group for a given [`Material`] at the configured `I` index.
 pub struct SetMaterialBindGroup<M: Material, const I: usize>(PhantomData<M>);
 impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterialBindGroup<M, I> {
-    type Param = SRes<RenderMaterials<M>>;
+    type Param = (SRes<RenderMaterials<M>>, SRes<RenderMaterialInstances<M>>);
     type ViewWorldQuery = ();
-    type ItemWorldQuery = Read<Handle<M>>;
+    type ItemWorldQuery = ();
 
     #[inline]
     fn render<'w>(
-        _item: &P,
+        item: &P,
         _view: (),
-        material_handle: &'_ Handle<M>,
-        materials: SystemParamItem<'w, '_, Self::Param>,
+        _item_query: (),
+        (materials, material_instances): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let material = materials.into_inner().get(material_handle).unwrap();
+        let materials = materials.into_inner();
+        let material_instances = material_instances.into_inner();
+        let Some(material_instance) = material_instances.get(item.entity()) else {
+            return RenderCommandResult::Failure
+        };
+        let Some(material) = materials.get(material_instance) else {
+            return RenderCommandResult::Failure
+        };
         pass.set_bind_group(I, &material.bind_group, &[]);
         RenderCommandResult::Success
+    }
+}
+
+#[derive(Resource, Deref, DerefMut)]
+pub struct RenderMaterialInstances<M: Material>(SparseSet<Entity, Handle<M>>);
+
+impl<M: Material> Default for RenderMaterialInstances<M> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+fn extract_material_meshes<M: Material>(
+    mut material_instances: ResMut<RenderMaterialInstances<M>>,
+    query: Extract<Query<(Entity, &ComputedVisibility, &Handle<M>)>>,
+) {
+    material_instances.clear();
+    material_instances.reserve_capacity(query.iter().len());
+    for (entity, computed_visibility, handle) in &query {
+        if computed_visibility.is_visible() {
+            material_instances.insert(entity, handle.clone_weak());
+        }
     }
 }
 
@@ -379,12 +408,8 @@ pub fn queue_material_meshes<M: Material>(
     msaa: Res<Msaa>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderMaterials<M>>,
-    material_meshes: Query<(
-        &Handle<M>,
-        &Handle<Mesh>,
-        &MeshTransforms,
-        &GpuArrayBufferIndex<MeshUniform>,
-    )>,
+    render_mesh_instances: Res<RenderMeshInstances>,
+    render_material_instances: Res<RenderMaterialInstances<M>>,
     images: Res<RenderAssets<Image>>,
     mut views: Query<(
         &ExtractedView,
@@ -468,11 +493,12 @@ pub fn queue_material_meshes<M: Material>(
 
         let rangefinder = view.rangefinder3d();
         for visible_entity in &visible_entities.entities {
-            if let Ok((material_handle, mesh_handle, mesh_transforms, batch_indices)) =
-                material_meshes.get(*visible_entity)
-            {
+            if let (Some(material_handle), Some(mesh_instance)) = (
+                render_material_instances.get(*visible_entity),
+                render_mesh_instances.get(*visible_entity),
+            ) {
                 if let (Some(mesh), Some(material)) = (
-                    render_meshes.get(mesh_handle),
+                    render_meshes.get(&mesh_instance.handle),
                     render_materials.get(material_handle),
                 ) {
                     let mut mesh_key =
@@ -517,7 +543,7 @@ pub fn queue_material_meshes<M: Material>(
                     };
 
                     let distance = rangefinder
-                        .distance_translation(&mesh_transforms.transform.translation)
+                        .distance_translation(&mesh_instance.transforms.transform.translation)
                         + material.properties.depth_bias;
                     match material.properties.alpha_mode {
                         AlphaMode::Opaque => {
@@ -526,7 +552,8 @@ pub fn queue_material_meshes<M: Material>(
                                 draw_function: draw_opaque_pbr,
                                 pipeline: pipeline_id,
                                 distance,
-                                per_object_binding_dynamic_offset: batch_indices
+                                per_object_binding_dynamic_offset: mesh_instance
+                                    .indices
                                     .dynamic_offset
                                     .unwrap_or_default(),
                             });
@@ -537,7 +564,8 @@ pub fn queue_material_meshes<M: Material>(
                                 draw_function: draw_alpha_mask_pbr,
                                 pipeline: pipeline_id,
                                 distance,
-                                per_object_binding_dynamic_offset: batch_indices
+                                per_object_binding_dynamic_offset: mesh_instance
+                                    .indices
                                     .dynamic_offset
                                     .unwrap_or_default(),
                             });
