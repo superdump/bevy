@@ -167,6 +167,11 @@ impl PhaseItem for Opaque3d {
     fn batch_size(&self) -> usize {
         self.batch_size
     }
+
+    #[inline]
+    fn batch_size_mut(&mut self) -> &mut usize {
+        &mut self.batch_size
+    }
 }
 
 impl CachedRenderPipelinePhaseItem for Opaque3d {
@@ -213,6 +218,11 @@ impl PhaseItem for AlphaMask3d {
     fn batch_size(&self) -> usize {
         self.batch_size
     }
+
+    #[inline]
+    fn batch_size_mut(&mut self) -> &mut usize {
+        &mut self.batch_size
+    }
 }
 
 impl CachedRenderPipelinePhaseItem for AlphaMask3d {
@@ -257,6 +267,11 @@ impl PhaseItem for Transparent3d {
     #[inline]
     fn batch_size(&self) -> usize {
         self.batch_size
+    }
+
+    #[inline]
+    fn batch_size_mut(&mut self) -> &mut usize {
+        &mut self.batch_size
     }
 }
 

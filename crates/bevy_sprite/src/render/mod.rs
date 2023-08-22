@@ -562,7 +562,7 @@ pub fn queue_sprites(
                     entity: *entity,
                     sort_key,
                     // batch_size will be calculated in prepare_sprites
-                    batch_size: 0,
+                    batch_size: 1,
                 });
             } else {
                 transparent_phase.add(Transparent2d {
@@ -571,7 +571,7 @@ pub fn queue_sprites(
                     entity: *entity,
                     sort_key,
                     // batch_size will be calculated in prepare_sprites
-                    batch_size: 0,
+                    batch_size: 1,
                 });
             }
         }

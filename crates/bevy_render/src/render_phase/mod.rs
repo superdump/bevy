@@ -188,6 +188,8 @@ pub trait PhaseItem: Sized + Send + Sync + 'static {
     fn batch_size(&self) -> usize {
         1
     }
+
+    fn batch_size_mut(&mut self) -> &mut usize;
 }
 
 /// A [`PhaseItem`] item, that automatically sets the appropriate render pipeline,

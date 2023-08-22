@@ -292,6 +292,7 @@ pub enum AsBindGroupError {
 pub struct PreparedBindGroup<T> {
     pub bindings: Vec<OwnedBindingResource>,
     pub bind_group: BindGroup,
+    pub dynamic_offsets: Vec<u32>,
     pub data: T,
 }
 

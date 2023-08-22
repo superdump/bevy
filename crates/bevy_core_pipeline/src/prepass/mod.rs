@@ -83,6 +83,7 @@ pub struct Opaque3dPrepass {
     pub entity: Entity,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub batch_size: usize,
 }
 
 impl PhaseItem for Opaque3dPrepass {
@@ -109,6 +110,11 @@ impl PhaseItem for Opaque3dPrepass {
         // Key negated to match reversed SortKey ordering
         radsort::sort_by_key(items, |item| -item.distance);
     }
+
+    #[inline]
+    fn batch_size_mut(&mut self) -> &mut usize {
+        &mut self.batch_size
+    }
 }
 
 impl CachedRenderPipelinePhaseItem for Opaque3dPrepass {
@@ -128,6 +134,7 @@ pub struct AlphaMask3dPrepass {
     pub entity: Entity,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub batch_size: usize,
 }
 
 impl PhaseItem for AlphaMask3dPrepass {
@@ -153,6 +160,11 @@ impl PhaseItem for AlphaMask3dPrepass {
     fn sort(items: &mut [Self]) {
         // Key negated to match reversed SortKey ordering
         radsort::sort_by_key(items, |item| -item.distance);
+    }
+
+    #[inline]
+    fn batch_size_mut(&mut self) -> &mut usize {
+        &mut self.batch_size
     }
 }
 

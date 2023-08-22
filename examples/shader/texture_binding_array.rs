@@ -140,6 +140,7 @@ impl AsBindGroup for BindlessMaterial {
 
         Ok(PreparedBindGroup {
             bindings: vec![],
+            dynamic_offsets: vec![],
             bind_group,
             data: (),
         })

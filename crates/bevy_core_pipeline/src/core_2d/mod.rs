@@ -113,6 +113,11 @@ impl PhaseItem for Transparent2d {
     fn batch_size(&self) -> usize {
         self.batch_size
     }
+
+    #[inline]
+    fn batch_size_mut(&mut self) -> &mut usize {
+        &mut self.batch_size
+    }
 }
 
 impl CachedRenderPipelinePhaseItem for Transparent2d {

@@ -670,7 +670,7 @@ pub fn queue_uinodes(
                 entity: *entity,
                 sort_key: FloatOrd(extracted_uinode.stack_index as f32),
                 // batch_size will be calculated in prepare_uinodes
-                batch_size: 0,
+                batch_size: 1,
             });
         }
     }

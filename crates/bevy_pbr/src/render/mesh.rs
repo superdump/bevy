@@ -1,8 +1,8 @@
 use crate::{
     environment_map, prepass, EnvironmentMapLight, FogMeta, GlobalLightMeta, GpuFog, GpuLights,
-    GpuPointLights, LightMeta, NotShadowCaster, NotShadowReceiver, PreviousGlobalTransform,
-    ScreenSpaceAmbientOcclusionTextures, Shadow, ShadowSamplers, ViewClusterBindings,
-    ViewFogUniformOffset, ViewLightsUniformOffset, ViewShadowBindings,
+    GpuPointLights, LightMeta, MaterialBindingMeta, NotShadowCaster, NotShadowReceiver,
+    PreviousGlobalTransform, ScreenSpaceAmbientOcclusionTextures, Shadow, ShadowSamplers,
+    ViewClusterBindings, ViewFogUniformOffset, ViewLightsUniformOffset, ViewShadowBindings,
     CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT, MAX_CASCADES_PER_LIGHT, MAX_DIRECTIONAL_LIGHTS,
 };
 use bevy_app::Plugin;
@@ -30,7 +30,10 @@ use bevy_render::{
     },
     prelude::Msaa,
     render_asset::RenderAssets,
-    render_phase::{PhaseItem, RenderCommand, RenderCommandResult, RenderPhase, TrackedRenderPass},
+    render_phase::{
+        CachedRenderPipelinePhaseItem, DrawFunctionId, PhaseItem, RenderCommand,
+        RenderCommandResult, RenderPhase, TrackedRenderPass,
+    },
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
     texture::{
@@ -382,6 +385,118 @@ pub fn extract_skinned_meshes(
     commands.insert_or_spawn_batch(values);
 }
 
+/// Data necessary to be equal for two draw commands to be mergeable
+///
+/// This is based on the following assumptions:
+/// - Only entities with prepared assets (pipelines, materials, meshes) are
+///   queued to phases
+/// - View bindings are constant across a phase for a given draw function as
+///   phases are per-view
+/// - `prepare_mesh_uniforms` is the only system that performs this batching
+///   and has sole responsibility for preparing the per-object data. As such
+///   the mesh binding and dynamic offsets are assumed to only be variable as a
+///   result of the `prepare_mesh_uniforms` system, e.g. due to having to split
+///   data across separate uniform bindings within the same buffer due to the
+///   maximum uniform buffer binding size.
+#[derive(Default, PartialEq, Eq)]
+struct BatchMeta<'mat, 'mesh> {
+    /// The pipeline id encompasses all pipeline configuration including vertex
+    /// buffers and layouts, shaders and their specializations, bind group
+    /// layouts, etc.
+    pipeline_id: Option<CachedRenderPipelineId>,
+    /// The draw function id defines the RenderCommands that are called to
+    /// set the pipeline and bindings, and make the draw command
+    draw_function_id: Option<DrawFunctionId>,
+    /// The material binding meta includes the material bind group id and
+    /// dynamic offsets.
+    material_binding_meta: Option<&'mat MaterialBindingMeta>,
+    mesh_handle: Option<&'mesh Handle<Mesh>>,
+    dynamic_offset: u32,
+}
+
+impl<'mat, 'mesh> BatchMeta<'mat, 'mesh> {
+    fn matches(&self, other: &BatchMeta<'mat, 'mesh>, consider_material: bool) -> bool {
+        self.pipeline_id == other.pipeline_id
+            && self.draw_function_id == other.draw_function_id
+            && self.mesh_handle == other.mesh_handle
+            && self.dynamic_offset == other.dynamic_offset
+            && (!consider_material || self.material_binding_meta == other.material_binding_meta)
+    }
+}
+
+#[derive(Default)]
+struct BatchState<'mat, 'mesh> {
+    meta: BatchMeta<'mat, 'mesh>,
+    /// The base index in the object data binding's array
+    gpu_array_buffer_index: GpuArrayBufferIndex<MeshUniform>,
+    /// The number of entities in the batch
+    count: u32,
+    item_index: usize,
+}
+
+fn update_batch_data<I: PhaseItem>(
+    item: &mut I,
+    indices: &mut Vec<(Entity, GpuArrayBufferIndex<MeshUniform>)>,
+    batch: &BatchState,
+) {
+    let BatchState {
+        count,
+        gpu_array_buffer_index,
+        ..
+    } = batch;
+    // *item.batch_dynamic_offset_mut() = Some(dynamic_offset);
+    indices.push((item.entity(), gpu_array_buffer_index.clone()));
+    *item.batch_size_mut() = *count as usize;
+}
+
+fn process_phase<I: CachedRenderPipelinePhaseItem>(
+    object_data_buffer: &mut GpuArrayBuffer<MeshUniform>,
+    indices: &mut Vec<(Entity, GpuArrayBufferIndex<MeshUniform>)>,
+    object_query: &ObjectQuery,
+    phase: &mut RenderPhase<I>,
+    consider_material: bool,
+) {
+    let mut batch = BatchState::default();
+    let mut i = 0;
+    while i < phase.items.len() {
+        let item = &mut phase.items[i];
+        let Ok((material_binding_meta, mesh_handle, mesh_transforms)) = object_query.get(item.entity()) else { continue };
+        let gpu_array_buffer_index = object_data_buffer.push(MeshUniform::from(mesh_transforms));
+        let batch_meta = BatchMeta {
+            pipeline_id: Some(item.cached_pipeline()),
+            draw_function_id: Some(item.draw_function()),
+            material_binding_meta,
+            mesh_handle: Some(&mesh_handle),
+            dynamic_offset: gpu_array_buffer_index.dynamic_offset.unwrap_or(u32::MAX),
+        };
+        if !batch_meta.matches(&batch.meta, consider_material) {
+            if batch.count > 0 {
+                update_batch_data(&mut phase.items[batch.item_index], indices, &batch);
+            }
+
+            batch.meta = batch_meta;
+            batch.gpu_array_buffer_index = gpu_array_buffer_index;
+            batch.count = 0;
+            batch.item_index = i;
+        }
+        batch.count += 1;
+        i += 1;
+        if i > 0 && i == phase.items.len() {
+            update_batch_data(&mut phase.items[batch.item_index], indices, &batch);
+        }
+    }
+}
+
+type ObjectQuery<'w, 's, 'mat, 'mesh, 'data> = Query<
+    'w,
+    's,
+    (
+        Option<&'mat MaterialBindingMeta>,
+        &'mesh Handle<Mesh>,
+        &'data MeshTransforms,
+    ),
+>;
+
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_mesh_uniforms(
     mut seen: Local<FixedBitSet>,
@@ -389,48 +504,65 @@ pub fn prepare_mesh_uniforms(
     mut previous_len: Local<usize>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    mut gpu_array_buffer: ResMut<GpuArrayBuffer<MeshUniform>>,
-    views: Query<(
-        &RenderPhase<Opaque3d>,
-        &RenderPhase<Transparent3d>,
-        &RenderPhase<AlphaMask3d>,
+    gpu_array_buffer: ResMut<GpuArrayBuffer<MeshUniform>>,
+    mut views: Query<(
+        &mut RenderPhase<Opaque3d>,
+        &mut RenderPhase<AlphaMask3d>,
+        &mut RenderPhase<Transparent3d>,
     )>,
-    shadow_views: Query<&RenderPhase<Shadow>>,
-    meshes: Query<(Entity, &MeshTransforms)>,
+    mut shadow_views: Query<&mut RenderPhase<Shadow>>,
+    // meshes: Query<(Entity, Option<&MaterialBindingMeta>, &Handle<Mesh>, &MeshTransforms)>,
+    meshes: ObjectQuery,
 ) {
+    let gpu_array_buffer = gpu_array_buffer.into_inner();
+
     gpu_array_buffer.clear();
     seen.clear();
 
     let mut indices = Vec::with_capacity(*previous_len);
-    let mut push_indices = |(mesh, mesh_uniform): (Entity, &MeshTransforms)| {
-        let index = mesh.index() as usize;
-        if !seen.contains(index) {
-            if index >= seen.len() {
-                seen.grow(index + 1);
-            }
-            seen.insert(index);
-            indices.push((mesh, gpu_array_buffer.push(mesh_uniform.into())));
-        }
-    };
+    // let mut push_indices = |(mesh, mesh_uniform): (Entity, &MeshTransforms)| {
+    //     let index = mesh.index() as usize;
+    //     if !seen.contains(index) {
+    //         if index >= seen.len() {
+    //             seen.grow(index + 1);
+    //         }
+    //         seen.insert(index);
+    //         indices.push((mesh, gpu_array_buffer.push(mesh_uniform.into())));
+    //     }
+    // };
 
-    for (opaque_phase, transparent_phase, alpha_phase) in &views {
-        meshes
-            .iter_many(opaque_phase.iter_entities())
-            .for_each(&mut push_indices);
-
-        meshes
-            .iter_many(transparent_phase.iter_entities())
-            .for_each(&mut push_indices);
-
-        meshes
-            .iter_many(alpha_phase.iter_entities())
-            .for_each(&mut push_indices);
+    for (opaque_phase, alpha_mask_phase, transparent_phase) in &mut views {
+        process_phase(
+            gpu_array_buffer,
+            &mut indices,
+            &meshes,
+            opaque_phase.into_inner(),
+            true,
+        );
+        process_phase(
+            gpu_array_buffer,
+            &mut indices,
+            &meshes,
+            alpha_mask_phase.into_inner(),
+            true,
+        );
+        process_phase(
+            gpu_array_buffer,
+            &mut indices,
+            &meshes,
+            transparent_phase.into_inner(),
+            true,
+        );
     }
 
-    for shadow_phase in &shadow_views {
-        meshes
-            .iter_many(shadow_phase.iter_entities())
-            .for_each(&mut push_indices);
+    for shadow_phase in &mut shadow_views {
+        process_phase(
+            gpu_array_buffer,
+            &mut indices,
+            &meshes,
+            shadow_phase.into_inner(),
+            false,
+        );
     }
 
     *previous_len = indices.len();
@@ -1422,7 +1554,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
     type ItemWorldQuery = (Read<GpuArrayBufferIndex<MeshUniform>>, Read<Handle<Mesh>>);
     #[inline]
     fn render<'w>(
-        _item: &P,
+        item: &P,
         _view: (),
         (batch_indices, mesh_handle): ROQueryItem<'_, Self::ItemWorldQuery>,
         meshes: SystemParamItem<'w, '_, Self::Param>,
@@ -1443,12 +1575,16 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
                     count,
                 } => {
                     pass.set_index_buffer(buffer.slice(..), 0, *index_format);
-                    pass.draw_indexed(0..*count, 0, batch_indices.index..batch_indices.index + 1);
+                    pass.draw_indexed(
+                        0..*count,
+                        0,
+                        batch_indices.index..batch_indices.index + item.batch_size() as u32,
+                    );
                 }
                 GpuBufferInfo::NonIndexed => {
                     pass.draw(
                         0..gpu_mesh.vertex_count,
-                        batch_indices.index..batch_indices.index + 1,
+                        batch_indices.index..batch_indices.index + item.batch_size() as u32,
                     );
                 }
             }

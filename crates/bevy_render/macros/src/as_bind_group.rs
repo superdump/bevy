@@ -464,6 +464,7 @@ pub fn derive_as_bind_group(ast: syn::DeriveInput) -> Result<TokenStream> {
                 Ok(#render_path::render_resource::PreparedBindGroup {
                     bindings,
                     bind_group,
+                    dynamic_offsets: vec![],
                     data: #get_prepared_data,
                 })
             }

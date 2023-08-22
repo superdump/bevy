@@ -30,9 +30,9 @@ use bevy_render::{
         RenderPhase, SetItemPipeline, TrackedRenderPass,
     },
     render_resource::{
-        AsBindGroup, AsBindGroupError, BindGroup, BindGroupLayout, OwnedBindingResource,
-        PipelineCache, RenderPipelineDescriptor, Shader, ShaderRef, SpecializedMeshPipeline,
-        SpecializedMeshPipelineError, SpecializedMeshPipelines,
+        AsBindGroup, AsBindGroupError, BindGroup, BindGroupId, BindGroupLayout,
+        OwnedBindingResource, PipelineCache, RenderPipelineDescriptor, Shader, ShaderRef,
+        SpecializedMeshPipeline, SpecializedMeshPipelineError, SpecializedMeshPipelines,
     },
     renderer::RenderDevice,
     texture::FallbackImage,
@@ -374,6 +374,7 @@ impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterial
 
 #[allow(clippy::too_many_arguments)]
 pub fn queue_material_meshes<M: Material>(
+    mut commands: Commands,
     opaque_draw_functions: Res<DrawFunctions<Opaque3d>>,
     alpha_mask_draw_functions: Res<DrawFunctions<AlphaMask3d>>,
     transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
@@ -398,9 +399,12 @@ pub fn queue_material_meshes<M: Material>(
         &mut RenderPhase<AlphaMask3d>,
         &mut RenderPhase<Transparent3d>,
     )>,
+    mut previous_len: Local<usize>,
 ) where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
+    let mut to_insert = Vec::with_capacity(*previous_len);
+
     for (
         view,
         visible_entities,
@@ -515,6 +519,8 @@ pub fn queue_material_meshes<M: Material>(
                         }
                     };
 
+                    to_insert.push((*visible_entity, material.get_binding_meta()));
+
                     let distance = rangefinder
                         .distance_translation(&mesh_transforms.transform.translation)
                         + material.properties.depth_bias;
@@ -554,6 +560,9 @@ pub fn queue_material_meshes<M: Material>(
             }
         }
     }
+
+    *previous_len = to_insert.len();
+    commands.insert_or_spawn_batch(to_insert);
 }
 
 /// Common [`Material`] properties, calculated for a specific material instance.
@@ -570,8 +579,24 @@ pub struct MaterialProperties {
 pub struct PreparedMaterial<T: Material> {
     pub bindings: Vec<OwnedBindingResource>,
     pub bind_group: BindGroup,
+    pub dynamic_offsets: Vec<u32>,
     pub key: T::Data,
     pub properties: MaterialProperties,
+}
+
+#[derive(Component, Default, PartialEq, Eq)]
+pub struct MaterialBindingMeta {
+    bind_group_id: Option<BindGroupId>,
+    dynamic_offsets: Vec<u32>,
+}
+
+impl<T: Material> PreparedMaterial<T> {
+    pub fn get_binding_meta(&self) -> MaterialBindingMeta {
+        MaterialBindingMeta {
+            bind_group_id: Some(self.bind_group.id()),
+            dynamic_offsets: self.dynamic_offsets.clone(),
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -713,6 +738,7 @@ fn prepare_material<M: Material>(
     Ok(PreparedMaterial {
         bindings: prepared.bindings,
         bind_group: prepared.bind_group,
+        dynamic_offsets: prepared.dynamic_offsets,
         key: prepared.data,
         properties: MaterialProperties {
             alpha_mode: material.alpha_mode(),

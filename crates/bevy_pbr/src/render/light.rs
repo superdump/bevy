@@ -1639,6 +1639,7 @@ pub fn queue_shadows<M: Material>(
                             pipeline: pipeline_id,
                             entity,
                             distance: 0.0, // TODO: sort front-to-back
+                            batch_size: 1,
                         });
                     }
                 }
@@ -1652,6 +1653,7 @@ pub struct Shadow {
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub batch_size: usize,
 }
 
 impl PhaseItem for Shadow {
@@ -1678,6 +1680,11 @@ impl PhaseItem for Shadow {
         // Grouping all draw commands using the same pipeline together performs
         // better than rebinding everything at a high rate.
         radsort::sort_by_key(items, |item| item.sort_key());
+    }
+
+    #[inline]
+    fn batch_size_mut(&mut self) -> &mut usize {
+        &mut self.batch_size
     }
 }
 
