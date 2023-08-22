@@ -21,7 +21,6 @@ use bevy_ecs::{
 };
 use bevy_reflect::{TypePath, TypeUuid};
 use bevy_render::{
-    extract_component::ExtractComponentPlugin,
     mesh::{Mesh, MeshVertexBufferLayout},
     prelude::Image,
     render_asset::{prepare_assets, RenderAssets},
@@ -36,7 +35,7 @@ use bevy_render::{
     },
     renderer::RenderDevice,
     texture::FallbackImage,
-    view::{ExtractedView, Msaa, VisibleEntities},
+    view::{ComputedVisibility, ExtractedView, Msaa, VisibleEntities},
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_utils::{tracing::error, HashMap, HashSet};
@@ -187,8 +186,7 @@ where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     fn build(&self, app: &mut App) {
-        app.add_asset::<M>()
-            .add_plugins(ExtractComponentPlugin::<Handle<M>>::extract_visible());
+        app.add_asset::<M>();
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -200,7 +198,10 @@ where
                 .init_resource::<ExtractedMaterials<M>>()
                 .init_resource::<RenderMaterials<M>>()
                 .init_resource::<SpecializedMeshPipelines<MaterialPipeline<M>>>()
-                .add_systems(ExtractSchedule, extract_materials::<M>)
+                .add_systems(
+                    ExtractSchedule,
+                    (extract_materials::<M>, extract_material_meshes::<M>),
+                )
                 .add_systems(
                     Render,
                     (
@@ -230,6 +231,25 @@ where
             render_app.init_resource::<MaterialPipeline<M>>();
         }
     }
+}
+
+/// This system extracts all visible components of the corresponding [`ExtractComponent`] type.
+fn extract_material_meshes<M: Material>(
+    mut commands: Commands,
+    mut previous_len: Local<usize>,
+    query: Extract<Query<(Entity, &ComputedVisibility, &Handle<M>)>>,
+) {
+    let mut values = Vec::with_capacity(*previous_len);
+    for (entity, computed_visibility, material) in &query {
+        if computed_visibility.is_visible() {
+            values.push((
+                entity,
+                (material.clone_weak(), MaterialBindingMeta::default()),
+            ));
+        }
+    }
+    *previous_len = values.len();
+    commands.insert_or_spawn_batch(values);
 }
 
 /// A key uniquely identifying a specialized [`MaterialPipeline`].
@@ -374,7 +394,6 @@ impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterial
 
 #[allow(clippy::too_many_arguments)]
 pub fn queue_material_meshes<M: Material>(
-    mut commands: Commands,
     opaque_draw_functions: Res<DrawFunctions<Opaque3d>>,
     alpha_mask_draw_functions: Res<DrawFunctions<AlphaMask3d>>,
     transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
@@ -384,7 +403,12 @@ pub fn queue_material_meshes<M: Material>(
     msaa: Res<Msaa>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderMaterials<M>>,
-    material_meshes: Query<(&Handle<M>, &Handle<Mesh>, &MeshTransforms)>,
+    mut material_meshes: Query<(
+        &Handle<M>,
+        &mut MaterialBindingMeta,
+        &Handle<Mesh>,
+        &MeshTransforms,
+    )>,
     images: Res<RenderAssets<Image>>,
     mut views: Query<(
         &ExtractedView,
@@ -399,12 +423,9 @@ pub fn queue_material_meshes<M: Material>(
         &mut RenderPhase<AlphaMask3d>,
         &mut RenderPhase<Transparent3d>,
     )>,
-    mut previous_len: Local<usize>,
 ) where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
-    let mut to_insert = Vec::with_capacity(*previous_len);
-
     for (
         view,
         visible_entities,
@@ -471,8 +492,8 @@ pub fn queue_material_meshes<M: Material>(
 
         let rangefinder = view.rangefinder3d();
         for visible_entity in &visible_entities.entities {
-            if let Ok((material_handle, mesh_handle, mesh_transforms)) =
-                material_meshes.get(*visible_entity)
+            if let Ok((material_handle, mut material_binding_meta, mesh_handle, mesh_transforms)) =
+                material_meshes.get_mut(*visible_entity)
             {
                 if let (Some(mesh), Some(material)) = (
                     render_meshes.get(mesh_handle),
@@ -519,7 +540,7 @@ pub fn queue_material_meshes<M: Material>(
                         }
                     };
 
-                    to_insert.push((*visible_entity, material.get_binding_meta()));
+                    *material_binding_meta = material.get_binding_meta();
 
                     let distance = rangefinder
                         .distance_translation(&mesh_transforms.transform.translation)
@@ -560,9 +581,6 @@ pub fn queue_material_meshes<M: Material>(
             }
         }
     }
-
-    *previous_len = to_insert.len();
-    commands.insert_or_spawn_batch(to_insert);
 }
 
 /// Common [`Material`] properties, calculated for a specific material instance.
