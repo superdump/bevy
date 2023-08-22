@@ -24,7 +24,7 @@ pub mod graph {
 }
 pub const CORE_3D: &str = graph::NAME;
 
-use std::cmp::Reverse;
+use std::{cmp::Reverse, ops::Range};
 
 pub use camera_3d::*;
 pub use main_opaque_pass_3d_node::*;
@@ -135,7 +135,8 @@ pub struct Opaque3d {
     pub pipeline: CachedRenderPipelineId,
     pub entity: Entity,
     pub draw_function: DrawFunctionId,
-    pub batch_size: usize,
+    pub batch_range: Range<u32>,
+    pub dynamic_offset: u32,
 }
 
 impl PhaseItem for Opaque3d {
@@ -164,13 +165,23 @@ impl PhaseItem for Opaque3d {
     }
 
     #[inline]
-    fn batch_size(&self) -> usize {
-        self.batch_size
+    fn batch_range(&self) -> &std::ops::Range<u32> {
+        &self.batch_range
     }
 
     #[inline]
-    fn batch_size_mut(&mut self) -> &mut usize {
-        &mut self.batch_size
+    fn batch_range_mut(&mut self) -> &mut std::ops::Range<u32> {
+        &mut self.batch_range
+    }
+
+    #[inline]
+    fn dynamic_offset(&self) -> u32 {
+        self.dynamic_offset
+    }
+
+    #[inline]
+    fn dynamic_offset_mut(&mut self) -> &mut u32 {
+        &mut self.dynamic_offset
     }
 }
 
@@ -186,7 +197,8 @@ pub struct AlphaMask3d {
     pub pipeline: CachedRenderPipelineId,
     pub entity: Entity,
     pub draw_function: DrawFunctionId,
-    pub batch_size: usize,
+    pub batch_range: Range<u32>,
+    pub dynamic_offset: u32,
 }
 
 impl PhaseItem for AlphaMask3d {
@@ -215,13 +227,23 @@ impl PhaseItem for AlphaMask3d {
     }
 
     #[inline]
-    fn batch_size(&self) -> usize {
-        self.batch_size
+    fn batch_range(&self) -> &std::ops::Range<u32> {
+        &self.batch_range
     }
 
     #[inline]
-    fn batch_size_mut(&mut self) -> &mut usize {
-        &mut self.batch_size
+    fn batch_range_mut(&mut self) -> &mut std::ops::Range<u32> {
+        &mut self.batch_range
+    }
+
+    #[inline]
+    fn dynamic_offset(&self) -> u32 {
+        self.dynamic_offset
+    }
+
+    #[inline]
+    fn dynamic_offset_mut(&mut self) -> &mut u32 {
+        &mut self.dynamic_offset
     }
 }
 
@@ -237,7 +259,8 @@ pub struct Transparent3d {
     pub pipeline: CachedRenderPipelineId,
     pub entity: Entity,
     pub draw_function: DrawFunctionId,
-    pub batch_size: usize,
+    pub batch_range: Range<u32>,
+    pub dynamic_offset: u32,
 }
 
 impl PhaseItem for Transparent3d {
@@ -265,13 +288,23 @@ impl PhaseItem for Transparent3d {
     }
 
     #[inline]
-    fn batch_size(&self) -> usize {
-        self.batch_size
+    fn batch_range(&self) -> &std::ops::Range<u32> {
+        &self.batch_range
     }
 
     #[inline]
-    fn batch_size_mut(&mut self) -> &mut usize {
-        &mut self.batch_size
+    fn batch_range_mut(&mut self) -> &mut std::ops::Range<u32> {
+        &mut self.batch_range
+    }
+
+    #[inline]
+    fn dynamic_offset(&self) -> u32 {
+        self.dynamic_offset
+    }
+
+    #[inline]
+    fn dynamic_offset_mut(&mut self) -> &mut u32 {
+        &mut self.dynamic_offset
     }
 }
 

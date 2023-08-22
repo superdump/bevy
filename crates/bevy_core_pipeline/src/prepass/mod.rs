@@ -27,7 +27,7 @@
 
 pub mod node;
 
-use std::cmp::Reverse;
+use std::{cmp::Reverse, ops::Range};
 
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
@@ -83,7 +83,8 @@ pub struct Opaque3dPrepass {
     pub entity: Entity,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
-    pub batch_size: usize,
+    pub batch_range: Range<u32>,
+    pub dynamic_offset: u32,
 }
 
 impl PhaseItem for Opaque3dPrepass {
@@ -112,8 +113,23 @@ impl PhaseItem for Opaque3dPrepass {
     }
 
     #[inline]
-    fn batch_size_mut(&mut self) -> &mut usize {
-        &mut self.batch_size
+    fn batch_range(&self) -> &std::ops::Range<u32> {
+        &self.batch_range
+    }
+
+    #[inline]
+    fn batch_range_mut(&mut self) -> &mut std::ops::Range<u32> {
+        &mut self.batch_range
+    }
+
+    #[inline]
+    fn dynamic_offset(&self) -> u32 {
+        self.dynamic_offset
+    }
+
+    #[inline]
+    fn dynamic_offset_mut(&mut self) -> &mut u32 {
+        &mut self.dynamic_offset
     }
 }
 
@@ -134,7 +150,8 @@ pub struct AlphaMask3dPrepass {
     pub entity: Entity,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
-    pub batch_size: usize,
+    pub batch_range: Range<u32>,
+    pub dynamic_offset: u32,
 }
 
 impl PhaseItem for AlphaMask3dPrepass {
@@ -163,8 +180,23 @@ impl PhaseItem for AlphaMask3dPrepass {
     }
 
     #[inline]
-    fn batch_size_mut(&mut self) -> &mut usize {
-        &mut self.batch_size
+    fn batch_range(&self) -> &std::ops::Range<u32> {
+        &self.batch_range
+    }
+
+    #[inline]
+    fn batch_range_mut(&mut self) -> &mut std::ops::Range<u32> {
+        &mut self.batch_range
+    }
+
+    #[inline]
+    fn dynamic_offset(&self) -> u32 {
+        self.dynamic_offset
+    }
+
+    #[inline]
+    fn dynamic_offset_mut(&mut self) -> &mut u32 {
+        &mut self.dynamic_offset
     }
 }
 

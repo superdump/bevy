@@ -552,7 +552,8 @@ pub fn queue_material_meshes<M: Material>(
                                 draw_function: draw_opaque_pbr,
                                 pipeline: pipeline_id,
                                 distance,
-                                batch_size: 1,
+                                batch_range: 0..1,
+                                dynamic_offset: u32::MAX,
                             });
                         }
                         AlphaMode::Mask(_) => {
@@ -561,7 +562,8 @@ pub fn queue_material_meshes<M: Material>(
                                 draw_function: draw_alpha_mask_pbr,
                                 pipeline: pipeline_id,
                                 distance,
-                                batch_size: 1,
+                                batch_range: 0..1,
+                                dynamic_offset: u32::MAX,
                             });
                         }
                         AlphaMode::Blend
@@ -573,7 +575,8 @@ pub fn queue_material_meshes<M: Material>(
                                 draw_function: draw_transparent_pbr,
                                 pipeline: pipeline_id,
                                 distance,
-                                batch_size: 1,
+                                batch_range: 0..1,
+                                dynamic_offset: u32::MAX,
                             });
                         }
                     }

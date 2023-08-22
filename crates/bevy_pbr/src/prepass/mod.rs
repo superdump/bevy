@@ -850,7 +850,8 @@ pub fn queue_prepass_material_meshes<M: Material>(
                         draw_function: opaque_draw_prepass,
                         pipeline_id,
                         distance,
-                        batch_size: 1,
+                        batch_range: 0..1,
+                        dynamic_offset: u32::MAX,
                     });
                 }
                 AlphaMode::Mask(_) => {
@@ -859,7 +860,8 @@ pub fn queue_prepass_material_meshes<M: Material>(
                         draw_function: alpha_mask_draw_prepass,
                         pipeline_id,
                         distance,
-                        batch_size: 1,
+                        batch_range: 0..1,
+                        dynamic_offset: u32::MAX,
                     });
                 }
                 AlphaMode::Blend

@@ -561,8 +561,9 @@ pub fn queue_sprites(
                     pipeline: colored_pipeline,
                     entity: *entity,
                     sort_key,
-                    // batch_size will be calculated in prepare_sprites
-                    batch_size: 1,
+                    // batch_range and dynamic_offset will be calculated in prepare_sprites
+                    batch_range: 0..1,
+                    dynamic_offset: u32::MAX,
                 });
             } else {
                 transparent_phase.add(Transparent2d {
@@ -570,8 +571,9 @@ pub fn queue_sprites(
                     pipeline,
                     entity: *entity,
                     sort_key,
-                    // batch_size will be calculated in prepare_sprites
-                    batch_size: 1,
+                    // batch_range and dynamic_offset will be calculated in prepare_sprites
+                    batch_range: 0..1,
+                    dynamic_offset: u32::MAX,
                 });
             }
         }
@@ -752,7 +754,9 @@ pub fn prepare_sprites(
                         index += QUAD_INDICES.len() as u32;
                         existing_batch.unwrap().1.range.end = index;
                     }
-                    transparent_phase.items[batch_item_index].batch_size += 1;
+                    transparent_phase.items[batch_item_index]
+                        .batch_range_mut()
+                        .end += 1;
                 } else {
                     batch_image_handle = HandleId::Id(Uuid::nil(), u64::MAX);
                 }

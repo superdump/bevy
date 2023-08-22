@@ -30,7 +30,7 @@ use bevy_utils::{
     tracing::{error, warn},
     HashMap,
 };
-use std::{hash::Hash, num::NonZeroU64};
+use std::{hash::Hash, num::NonZeroU64, ops::Range};
 
 #[derive(Component)]
 pub struct ExtractedPointLight {
@@ -1639,7 +1639,8 @@ pub fn queue_shadows<M: Material>(
                             pipeline: pipeline_id,
                             entity,
                             distance: 0.0, // TODO: sort front-to-back
-                            batch_size: 1,
+                            batch_range: 0..1,
+                            dynamic_offset: u32::MAX,
                         });
                     }
                 }
@@ -1653,7 +1654,8 @@ pub struct Shadow {
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
-    pub batch_size: usize,
+    pub batch_range: Range<u32>,
+    pub dynamic_offset: u32,
 }
 
 impl PhaseItem for Shadow {
@@ -1683,8 +1685,23 @@ impl PhaseItem for Shadow {
     }
 
     #[inline]
-    fn batch_size_mut(&mut self) -> &mut usize {
-        &mut self.batch_size
+    fn batch_range(&self) -> &std::ops::Range<u32> {
+        &self.batch_range
+    }
+
+    #[inline]
+    fn batch_range_mut(&mut self) -> &mut std::ops::Range<u32> {
+        &mut self.batch_range
+    }
+
+    #[inline]
+    fn dynamic_offset(&self) -> u32 {
+        self.dynamic_offset
+    }
+
+    #[inline]
+    fn dynamic_offset_mut(&mut self) -> &mut u32 {
+        &mut self.dynamic_offset
     }
 }
 

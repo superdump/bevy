@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use super::{UiBatch, UiImageBindGroups, UiMeta};
 use crate::{prelude::UiCameraConfig, DefaultCameraView};
 use bevy_asset::Handle;
@@ -91,7 +93,8 @@ pub struct TransparentUi {
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
-    pub batch_size: usize,
+    pub batch_range: Range<u32>,
+    pub dynamic_offset: u32,
 }
 
 impl PhaseItem for TransparentUi {
@@ -113,13 +116,23 @@ impl PhaseItem for TransparentUi {
     }
 
     #[inline]
-    fn batch_size(&self) -> usize {
-        self.batch_size
+    fn batch_range(&self) -> &std::ops::Range<u32> {
+        &self.batch_range
     }
 
     #[inline]
-    fn batch_size_mut(&mut self) -> &mut usize {
-        &mut self.batch_size
+    fn batch_range_mut(&mut self) -> &mut std::ops::Range<u32> {
+        &mut self.batch_range
+    }
+
+    #[inline]
+    fn dynamic_offset(&self) -> u32 {
+        self.dynamic_offset
+    }
+
+    #[inline]
+    fn dynamic_offset_mut(&mut self) -> &mut u32 {
+        &mut self.dynamic_offset
     }
 }
 

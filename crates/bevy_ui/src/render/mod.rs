@@ -4,6 +4,7 @@ mod render_pass;
 use bevy_core_pipeline::{core_2d::Camera2d, core_3d::Camera3d};
 use bevy_ecs::storage::SparseSet;
 use bevy_hierarchy::Parent;
+use bevy_render::render_phase::PhaseItem;
 use bevy_render::{ExtractSchedule, Render};
 use bevy_window::{PrimaryWindow, Window};
 pub use pipeline::*;
@@ -669,8 +670,9 @@ pub fn queue_uinodes(
                 pipeline,
                 entity: *entity,
                 sort_key: FloatOrd(extracted_uinode.stack_index as f32),
-                // batch_size will be calculated in prepare_uinodes
-                batch_size: 1,
+                // batch_range will be calculated in prepare_uinodes
+                batch_range: 0..1,
+                dynamic_offset: u32::MAX,
             });
         }
     }
@@ -894,7 +896,7 @@ pub fn prepare_uinodes(
                     }
                     index += QUAD_INDICES.len() as u32;
                     existing_batch.unwrap().1.range.end = index;
-                    ui_phase.items[batch_item_index].batch_size += 1;
+                    ui_phase.items[batch_item_index].batch_range_mut().end += 1;
                 } else {
                     batch_image_handle = HandleId::Id(Uuid::nil(), u64::MAX);
                 }

@@ -417,7 +417,8 @@ pub fn queue_material2d_meshes<M: Material2d>(
                             // camera. As such we can just use mesh_z as the distance
                             sort_key: FloatOrd(mesh_z),
                             // This material is not batched
-                            batch_size: 1,
+                            batch_range: 0..1,
+                            dynamic_offset: u32::MAX,
                         });
                     }
                 }
