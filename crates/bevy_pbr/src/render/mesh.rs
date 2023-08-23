@@ -50,7 +50,7 @@ use bevy_transform::components::GlobalTransform;
 use bevy_utils::{tracing::error, HashMap, Hashed};
 
 use crate::render::{
-    morph::{extract_morphs, prepare_morphs, MorphIndex, MorphUniform},
+    morph::{extract_morphs, prepare_morphs, MorphUniform},
     MeshLayouts,
 };
 
@@ -504,15 +504,6 @@ fn process_phase<I: CachedRenderPipelinePhaseItem>(
     }
 }
 
-type ObjectQuery<'w, 's, 'mat, 'mesh, 'data> = Query<
-    'w,
-    's,
-    (
-        Option<&'mat MaterialBindingMeta>,
-        &'mesh Handle<Mesh>,
-        &'data MeshTransforms,
-    ),
->;
 
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_mesh_uniforms(
