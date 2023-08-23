@@ -523,6 +523,16 @@ impl<I: SparseSetIndex, V> SparseSet<I, V> {
         self.sparse.clear();
     }
 
+    /// Ensure there is capacity in the sparse set
+    pub fn reserve_capacity(&mut self, capacity: usize) {
+        if self.dense.capacity() < capacity {
+            self.dense.reserve(capacity - self.dense.capacity());
+        }
+        if self.indices.capacity() < capacity {
+            self.indices.reserve(capacity - self.indices.capacity());
+        }
+    }
+
     /// Converts the sparse set into its immutable variant.
     pub(crate) fn into_immutable(self) -> ImmutableSparseSet<I, V> {
         ImmutableSparseSet {

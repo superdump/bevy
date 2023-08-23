@@ -24,6 +24,7 @@ trace_tracy = ["bevy_render?/tracing-tracy", "bevy_log/tracing-tracy" ]
 trace_tracy_memory = ["bevy_log/trace_tracy_memory"]
 wgpu_trace = ["bevy_render/wgpu_trace"]
 detailed_trace = ["bevy_utils/detailed_trace"]
+render_sparseset = ["bevy_pbr/render_sparseset", "bevy_sprite/render_sparseset"]
 
 # Image format support for texture loading (PNG and HDR are enabled by default)
 exr = ["bevy_render/exr"]

@@ -244,6 +244,8 @@ webgl2 = ["bevy_internal/webgl"]
 # Enables watching the filesystem for Bevy Asset hot-reloading
 filesystem_watcher = ["bevy_internal/filesystem_watcher"]
 
+render_sparseset = ["bevy_internal/render_sparseset"]
+
 [dependencies]
 bevy_dylib = { path = "crates/bevy_dylib", version = "0.12.0-dev", default-features = false, optional = true }
 bevy_internal = { path = "crates/bevy_internal", version = "0.12.0-dev", default-features = false }
