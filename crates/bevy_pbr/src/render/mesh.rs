@@ -1,3 +1,5 @@
+use std::mem::size_of;
+
 use crate::{
     environment_map, prepass, render::morph::MorphInstances, EnvironmentMapLight, FogMeta,
     GlobalLightMeta, GpuFog, GpuLights, GpuPointLights, LightMeta, MaterialBindingMeta,
@@ -48,6 +50,7 @@ use bevy_render::{
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::{tracing::error, HashMap, Hashed};
+use bytemuck::{cast_slice, Pod, Zeroable};
 
 use crate::render::{
     morph::{extract_morphs, prepare_morphs, MorphUniform},
@@ -129,6 +132,7 @@ impl Plugin for MeshRenderPlugin {
                 .init_resource::<SkinnedMeshUniform>()
                 .init_resource::<MeshBindGroups>()
                 .init_resource::<MorphUniform>()
+                .init_resource::<MeshUniformBuffer>()
                 .add_systems(
                     ExtractSchedule,
                     (extract_meshes, extract_skinned_meshes, extract_morphs),
@@ -185,7 +189,8 @@ pub struct MeshTransforms {
     pub flags: u32,
 }
 
-#[derive(ShaderType, Clone)]
+#[derive(ShaderType, Clone, Pod, Zeroable, Copy)]
+#[repr(C)]
 pub struct MeshUniform {
     // Affine 4x3 matrices transposed to 3x4
     pub transform: [Vec4; 3],
@@ -197,6 +202,8 @@ pub struct MeshUniform {
     pub inverse_transpose_model_a: [Vec4; 2],
     pub inverse_transpose_model_b: f32,
     pub flags: u32,
+    pub _padding0: f32,
+    pub _padding1: f32,
 }
 
 impl From<&MeshTransforms> for MeshUniform {
@@ -244,6 +251,8 @@ impl From<&MeshTransforms> for MeshUniform {
             ],
             inverse_transpose_model_b: inverse_transpose_model_3x3.z_axis.z,
             flags: mesh_transforms.flags,
+            _padding0: 0.0,
+            _padding1: 0.0,
         }
     }
 }
@@ -467,7 +476,7 @@ fn update_batch_data<I: PhaseItem>(item: &mut I, batch: &BatchState) {
 }
 
 fn process_phase<I: CachedRenderPipelinePhaseItem>(
-    object_data_buffer: &mut GpuArrayBuffer<MeshUniform>,
+    object_data_buffer: &mut MeshUniformBuffer,
     render_mesh_instances: &RenderMeshInstances,
     material_binding_meta_instances: &MaterialBindingMetaInstances,
     phase: &mut RenderPhase<I>,
@@ -478,13 +487,17 @@ fn process_phase<I: CachedRenderPipelinePhaseItem>(
     while i < phase.items.len() {
         let item = &mut phase.items[i];
         let Some(RenderMeshInstance { handle, transforms, shadow_caster }) = render_mesh_instances.get(item.entity()) else { continue };
-        let gpu_array_buffer_index = object_data_buffer.push(MeshUniform::from(transforms));
+        object_data_buffer
+            .values
+            .extend_from_slice(cast_slice(&[MeshUniform::from(transforms)]));
+        let gpu_array_buffer_index =
+            (object_data_buffer.len() / size_of::<MeshUniform>()) as u32 - 1;
         let batch_meta = BatchMeta {
             pipeline_id: Some(item.cached_pipeline()),
             draw_function_id: Some(item.draw_function()),
             material_binding_meta: material_binding_meta_instances.get(item.entity()),
             mesh_handle: Some(handle),
-            dynamic_offset: gpu_array_buffer_index.dynamic_offset.unwrap_or(u32::MAX),
+            dynamic_offset: u32::MAX,
         };
         if !batch_meta.matches(&batch.meta, consider_material) {
             if batch.count > 0 {
@@ -492,7 +505,8 @@ fn process_phase<I: CachedRenderPipelinePhaseItem>(
             }
 
             batch.meta = batch_meta;
-            batch.gpu_array_buffer_index = gpu_array_buffer_index;
+            batch.gpu_array_buffer_index =
+                GpuArrayBufferIndex::<MeshUniform>::new(gpu_array_buffer_index, None);
             batch.count = 0;
             batch.item_index = i;
         }
@@ -504,12 +518,20 @@ fn process_phase<I: CachedRenderPipelinePhaseItem>(
     }
 }
 
+#[derive(Resource, Deref, DerefMut)]
+pub struct MeshUniformBuffer(BufferVec<u8>);
+
+impl Default for MeshUniformBuffer {
+    fn default() -> Self {
+        Self(BufferVec::<u8>::new(BufferUsages::STORAGE))
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_mesh_uniforms(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    gpu_array_buffer: ResMut<GpuArrayBuffer<MeshUniform>>,
+    buffer: ResMut<MeshUniformBuffer>,
     mut views: Query<(
         &mut RenderPhase<Opaque3d>,
         &mut RenderPhase<AlphaMask3d>,
@@ -519,29 +541,29 @@ pub fn prepare_mesh_uniforms(
     render_mesh_instances: Res<RenderMeshInstances>,
     material_binding_meta_instances: Res<MaterialBindingMetaInstances>,
 ) {
-    let gpu_array_buffer = gpu_array_buffer.into_inner();
+    let buffer = buffer.into_inner();
     let render_mesh_instances = render_mesh_instances.into_inner();
     let material_binding_meta_instances = material_binding_meta_instances.into_inner();
 
-    gpu_array_buffer.clear();
+    buffer.clear();
 
     for (opaque_phase, alpha_mask_phase, transparent_phase) in &mut views {
         process_phase(
-            gpu_array_buffer,
+            buffer,
             render_mesh_instances,
             material_binding_meta_instances,
             opaque_phase.into_inner(),
             true,
         );
         process_phase(
-            gpu_array_buffer,
+            buffer,
             render_mesh_instances,
             material_binding_meta_instances,
             alpha_mask_phase.into_inner(),
             true,
         );
         process_phase(
-            gpu_array_buffer,
+            buffer,
             render_mesh_instances,
             material_binding_meta_instances,
             transparent_phase.into_inner(),
@@ -551,7 +573,7 @@ pub fn prepare_mesh_uniforms(
 
     for shadow_phase in &mut shadow_views {
         process_phase(
-            gpu_array_buffer,
+            buffer,
             render_mesh_instances,
             material_binding_meta_instances,
             shadow_phase.into_inner(),
@@ -559,7 +581,7 @@ pub fn prepare_mesh_uniforms(
         );
     }
 
-    gpu_array_buffer.write_buffer(&render_device, &render_queue);
+    buffer.write_buffer(&render_device, &render_queue);
 }
 
 #[derive(Resource, Clone)]
@@ -1226,15 +1248,16 @@ pub fn prepare_mesh_bind_group(
     mut groups: ResMut<MeshBindGroups>,
     mesh_pipeline: Res<MeshPipeline>,
     render_device: Res<RenderDevice>,
-    mesh_uniforms: Res<GpuArrayBuffer<MeshUniform>>,
+    mesh_uniforms: Res<MeshUniformBuffer>,
     skinned_mesh_uniform: Res<SkinnedMeshUniform>,
     weights_uniform: Res<MorphUniform>,
 ) {
     groups.reset();
     let layouts = &mesh_pipeline.mesh_layouts;
-    let Some(model) = mesh_uniforms.binding() else {
+    let Some(buffer) = mesh_uniforms.buffer() else {
         return;
     };
+    let model = buffer.as_entire_binding();
     groups.model_only = Some(layouts.model_only(&render_device, &model));
 
     let skin = skinned_mesh_uniform.buffer.buffer();

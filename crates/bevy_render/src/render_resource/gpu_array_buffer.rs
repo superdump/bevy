@@ -137,3 +137,13 @@ impl<T: GpuArrayBufferable> Default for GpuArrayBufferIndex<T> {
         }
     }
 }
+
+impl<T: GpuArrayBufferable> GpuArrayBufferIndex<T> {
+    pub fn new(index: u32, dynamic_offset: Option<u32>) -> Self {
+        Self {
+            index,
+            dynamic_offset,
+            element_type: PhantomData,
+        }
+    }
+}
