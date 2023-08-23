@@ -1546,7 +1546,8 @@ pub fn prepare_clusters(
 pub fn queue_shadows<M: Material>(
     shadow_draw_functions: Res<DrawFunctions<Shadow>>,
     prepass_pipeline: Res<PrepassPipeline<M>>,
-    casting_meshes: Query<(&Handle<Mesh>, &Handle<M>), Without<NotShadowCaster>>,
+    render_mesh_instances: Res<RenderMeshInstances>,
+    render_material_instances: Res<RenderMaterialInstances<M>>,
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderMaterials<M>>,
     mut pipelines: ResMut<SpecializedMeshPipelines<PrepassPipeline<M>>>,
@@ -1591,58 +1592,59 @@ pub fn queue_shadows<M: Material>(
             // NOTE: Lights with shadow mapping disabled will have no visible entities
             // so no meshes will be queued
             for entity in visible_entities.iter().copied() {
-                if let Ok((mesh_handle, material_handle)) = casting_meshes.get(entity) {
-                    if let (Some(mesh), Some(material)) = (
-                        render_meshes.get(mesh_handle),
-                        render_materials.get(material_handle),
-                    ) {
-                        let mut mesh_key =
-                            MeshPipelineKey::from_primitive_topology(mesh.primitive_topology)
-                                | MeshPipelineKey::DEPTH_PREPASS;
-                        if mesh.morph_targets.is_some() {
-                            mesh_key |= MeshPipelineKey::MORPH_TARGETS;
-                        }
-                        if is_directional_light {
-                            mesh_key |= MeshPipelineKey::DEPTH_CLAMP_ORTHO;
-                        }
-                        let alpha_mode = material.properties.alpha_mode;
-                        match alpha_mode {
-                            AlphaMode::Mask(_)
-                            | AlphaMode::Blend
-                            | AlphaMode::Premultiplied
-                            | AlphaMode::Add => {
-                                mesh_key |= MeshPipelineKey::MAY_DISCARD;
-                            }
-                            _ => {}
-                        }
-                        let pipeline_id = pipelines.specialize(
-                            &pipeline_cache,
-                            &prepass_pipeline,
-                            MaterialPipelineKey {
-                                mesh_key,
-                                bind_group_data: material.key.clone(),
-                            },
-                            &mesh.layout,
-                        );
-
-                        let pipeline_id = match pipeline_id {
-                            Ok(id) => id,
-                            Err(err) => {
-                                error!("{}", err);
-                                continue;
-                            }
-                        };
-
-                        shadow_phase.add(Shadow {
-                            draw_function: draw_shadow_mesh,
-                            pipeline: pipeline_id,
-                            entity,
-                            distance: 0.0, // TODO: sort front-to-back
-                            batch_range: 0..1,
-                            dynamic_offset: u32::MAX,
-                        });
-                    }
+                let (Some(mesh_instance), Some(material_handle)) = (render_mesh_instances.get(entity), render_material_instances.get(entity)) else { continue };
+                if !mesh_instance.shadow_caster {
+                    continue;
                 }
+                let (Some(mesh), Some(material)) = (
+                        render_meshes.get(&mesh_instance.handle),
+                        render_materials.get(material_handle),
+                    ) else { continue };
+                let mut mesh_key =
+                    MeshPipelineKey::from_primitive_topology(mesh.primitive_topology)
+                        | MeshPipelineKey::DEPTH_PREPASS;
+                if mesh.morph_targets.is_some() {
+                    mesh_key |= MeshPipelineKey::MORPH_TARGETS;
+                }
+                if is_directional_light {
+                    mesh_key |= MeshPipelineKey::DEPTH_CLAMP_ORTHO;
+                }
+                let alpha_mode = material.properties.alpha_mode;
+                match alpha_mode {
+                    AlphaMode::Mask(_)
+                    | AlphaMode::Blend
+                    | AlphaMode::Premultiplied
+                    | AlphaMode::Add => {
+                        mesh_key |= MeshPipelineKey::MAY_DISCARD;
+                    }
+                    _ => {}
+                }
+                let pipeline_id = pipelines.specialize(
+                    &pipeline_cache,
+                    &prepass_pipeline,
+                    MaterialPipelineKey {
+                        mesh_key,
+                        bind_group_data: material.key.clone(),
+                    },
+                    &mesh.layout,
+                );
+
+                let pipeline_id = match pipeline_id {
+                    Ok(id) => id,
+                    Err(err) => {
+                        error!("{}", err);
+                        continue;
+                    }
+                };
+
+                shadow_phase.add(Shadow {
+                    draw_function: draw_shadow_mesh,
+                    pipeline: pipeline_id,
+                    entity,
+                    distance: 0.0, // TODO: sort front-to-back
+                    batch_range: 0..1,
+                    dynamic_offset: u32::MAX,
+                });
             }
         }
     }
