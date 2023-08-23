@@ -486,7 +486,7 @@ fn process_phase<I: CachedRenderPipelinePhaseItem>(
     let mut i = 0;
     while i < phase.items.len() {
         let item = &mut phase.items[i];
-        let Some(RenderMeshInstance { handle, transforms, shadow_caster }) = render_mesh_instances.get(item.entity()) else { continue };
+        let Some(RenderMeshInstance { handle, transforms, .. }) = render_mesh_instances.get(item.entity()) else { continue };
         object_data_buffer
             .values
             .extend_from_slice(cast_slice(&[MeshUniform::from(transforms)]));
