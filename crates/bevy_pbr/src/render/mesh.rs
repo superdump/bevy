@@ -41,6 +41,7 @@ use bevy_render::{
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::{tracing::error, HashMap, Hashed};
+use bytemuck::{Pod, Zeroable};
 
 use crate::render::{
     morph::{extract_morphs, prepare_morphs, MorphIndex, MorphUniform},
@@ -144,7 +145,7 @@ impl Plugin for MeshRenderPlugin {
                 render_app.world.resource::<RenderDevice>(),
             ) {
                 mesh_bindings_shader_defs.push(ShaderDefVal::UInt(
-                    "PER_OBJECT_BUFFER_BATCH_SIZE".into(),
+                    "DATA_TEXTURE_MESH_UNIFORM".into(),
                     per_object_buffer_batch_size,
                 ));
             }
@@ -175,7 +176,8 @@ pub struct MeshTransforms {
     pub flags: u32,
 }
 
-#[derive(ShaderType, Clone)]
+#[derive(ShaderType, Clone, Copy, Default, Pod, Zeroable)]
+#[repr(C)]
 pub struct MeshUniform {
     // Affine 4x3 matrices transposed to 3x4
     pub transform: [Vec4; 3],
@@ -187,6 +189,8 @@ pub struct MeshUniform {
     pub inverse_transpose_model_a: [Vec4; 2],
     pub inverse_transpose_model_b: f32,
     pub flags: u32,
+    pub _padding0: u32,
+    pub _padding1: u32,
 }
 
 impl From<&MeshTransforms> for MeshUniform {
@@ -234,6 +238,8 @@ impl From<&MeshTransforms> for MeshUniform {
             ],
             inverse_transpose_model_b: inverse_transpose_model_3x3.z_axis.z,
             flags: mesh_transforms.flags,
+            _padding0: 0,
+            _padding1: 0,
         }
     }
 }
@@ -416,13 +422,13 @@ pub struct MeshPipeline {
     /// of this many `MeshUniform`s, stored at dynamic offsets within the uniform buffer.
     /// Use code like this in custom shaders:
     /// ```wgsl
-    /// ##ifdef PER_OBJECT_BUFFER_BATCH_SIZE
+    /// ##ifdef DATA_TEXTURE_MESH_UNIFORM
     /// @group(2) @binding(0)
-    /// var<uniform> mesh: array<Mesh, #{PER_OBJECT_BUFFER_BATCH_SIZE}u>;
+    /// var<uniform> mesh: array<Mesh, #{DATA_TEXTURE_MESH_UNIFORM}u>;
     /// ##else
     /// @group(2) @binding(0)
     /// var<storage> mesh: array<Mesh>;
-    /// ##endif // PER_OBJECT_BUFFER_BATCH_SIZE
+    /// ##endif // DATA_TEXTURE_MESH_UNIFORM
     /// ```
     pub per_object_buffer_batch_size: Option<u32>,
 }
@@ -972,7 +978,7 @@ impl SpecializedMeshPipeline for MeshPipeline {
         // in their own shaders.
         if let Some(per_object_buffer_batch_size) = self.per_object_buffer_batch_size {
             shader_defs.push(ShaderDefVal::UInt(
-                "PER_OBJECT_BUFFER_BATCH_SIZE".into(),
+                "DATA_TEXTURE_MESH_UNIFORM".into(),
                 per_object_buffer_batch_size,
             ));
         }

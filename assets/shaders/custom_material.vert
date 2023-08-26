@@ -22,13 +22,13 @@ struct Mesh {
     uint flags;
 };
 
-#ifdef PER_OBJECT_BUFFER_BATCH_SIZE
-layout(set = 2, binding = 0) uniform Mesh Meshes[#{PER_OBJECT_BUFFER_BATCH_SIZE}];
+#ifdef DATA_TEXTURE_MESH_UNIFORM
+layout(set = 2, binding = 0) uniform Mesh Meshes[#{DATA_TEXTURE_MESH_UNIFORM}];
 #else
 layout(set = 2, binding = 0) readonly buffer _Meshes {
     Mesh Meshes[];
 };
-#endif // PER_OBJECT_BUFFER_BATCH_SIZE
+#endif // DATA_TEXTURE_MESH_UNIFORM
 
 mat4 affine_to_square(mat3x4 affine) {
     return transpose(mat4(

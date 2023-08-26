@@ -4,22 +4,24 @@
 
 #ifdef MESH_BINDGROUP_1
 
-#ifdef PER_OBJECT_BUFFER_BATCH_SIZE
+#ifdef DATA_TEXTURE_MESH_UNIFORM
 @group(1) @binding(0)
-var<uniform> mesh: array<Mesh, #{PER_OBJECT_BUFFER_BATCH_SIZE}u>;
+var mesh_data_texture: texture_2d_array<f32>;
+var<private> mesh: Mesh;
 #else
 @group(1) @binding(0)
 var<storage> mesh: array<Mesh>;
-#endif // PER_OBJECT_BUFFER_BATCH_SIZE
+#endif // DATA_TEXTURE_MESH_UNIFORM
 
 #else // MESH_BINDGROUP_1
 
-#ifdef PER_OBJECT_BUFFER_BATCH_SIZE
+#ifdef DATA_TEXTURE_MESH_UNIFORM
 @group(2) @binding(0)
-var<uniform> mesh: array<Mesh, #{PER_OBJECT_BUFFER_BATCH_SIZE}u>;
+var mesh_data_texture: texture_2d_array<f32>;
+var<private> mesh: Mesh;
 #else
 @group(2) @binding(0)
 var<storage> mesh: array<Mesh>;
-#endif // PER_OBJECT_BUFFER_BATCH_SIZE
+#endif // DATA_TEXTURE_MESH_UNIFORM
 
 #endif // MESH_BINDGROUP_1

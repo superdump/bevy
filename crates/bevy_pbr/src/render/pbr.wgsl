@@ -9,6 +9,7 @@
 #import bevy_pbr::mesh_bindings            mesh
 #import bevy_pbr::mesh_view_bindings       view, fog, screen_space_ambient_occlusion_texture
 #import bevy_pbr::mesh_view_types          FOG_MODE_OFF
+#import bevy_pbr::mesh_functions           get_flags
 #import bevy_core_pipeline::tonemapping    screen_space_dither, powsafe, tone_mapping
 #import bevy_pbr::parallax_mapping         parallaxed_uv
 
@@ -138,7 +139,7 @@ fn fragment(
         pbr_input.V = V;
         pbr_input.occlusion = occlusion;
 
-        pbr_input.flags = mesh[in.instance_index].flags;
+        pbr_input.flags = get_flags(in.instance_index);
 
         output_color = pbr_functions::pbr(pbr_input);
     } else {
