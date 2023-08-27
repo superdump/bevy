@@ -78,12 +78,11 @@ pub struct Text2dBundle {
 
 pub fn extract_text2d_sprite(
     mut commands: Commands,
-    mut previous_len: Local<usize>,
+    mut extracted_sprites: ResMut<ExtractedSprites>,
     texture_atlases: Extract<Res<Assets<TextureAtlas>>>,
     windows: Extract<Query<&Window, With<PrimaryWindow>>>,
     text2d_query: Extract<
         Query<(
-            Entity,
             &ComputedVisibility,
             &Text,
             &TextLayoutInfo,
@@ -91,6 +90,7 @@ pub fn extract_text2d_sprite(
             &GlobalTransform,
         )>,
     >,
+    mut previous_len: Local<usize>,
 ) {
     let mut extracted_sprites: Vec<(Entity, ExtractedSprite)> = Vec::with_capacity(*previous_len);
     // TODO: Support window-independent scaling: https://github.com/bevyengine/bevy/issues/5621
@@ -100,7 +100,7 @@ pub fn extract_text2d_sprite(
         .unwrap_or(1.0);
     let scaling = GlobalTransform::from_scale(Vec3::splat(scale_factor.recip()));
 
-    for (entity, computed_visibility, text, text_layout_info, anchor, global_transform) in
+    for (computed_visibility, text, text_layout_info, anchor, global_transform) in
         text2d_query.iter()
     {
         if !computed_visibility.is_visible() {
@@ -127,8 +127,8 @@ pub fn extract_text2d_sprite(
             }
             let atlas = texture_atlases.get(&atlas_info.texture_atlas).unwrap();
 
-            extracted_sprites.push((
-                entity,
+            extracted_sprites.sprites.insert(
+                commands.spawn_empty().id(),
                 ExtractedSprite {
                     transform: transform * GlobalTransform::from_translation(position.extend(0.)),
                     color,
@@ -139,7 +139,7 @@ pub fn extract_text2d_sprite(
                     flip_y: false,
                     anchor: Anchor::Center.as_vec(),
                 },
-            ));
+            );
         }
     }
     *previous_len = extracted_sprites.len();

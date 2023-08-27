@@ -30,7 +30,7 @@ impl Plugin for GlobalsPlugin {
                 .add_systems(ExtractSchedule, (extract_frame_count, extract_time))
                 .add_systems(
                     Render,
-                    prepare_globals_buffer.in_set(ViewSet::PrepareUniforms),
+                    prepare_globals_buffer.in_set(RenderSet::PrepareResources),
                 );
         }
     }

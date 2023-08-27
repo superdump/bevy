@@ -73,6 +73,12 @@ impl<I: PhaseItem> RenderPhase<I> {
         I::sort(&mut self.items);
     }
 
+    /// An [`Iterator`] through the associated [`Entity`] for each [`PhaseItem`] in order.
+    #[inline]
+    pub fn iter_entities(&'_ self) -> impl Iterator<Item = Entity> + '_ {
+        self.items.iter().map(|item| item.entity())
+    }
+
     /// Renders all of its [`PhaseItem`]s using their corresponding draw functions.
     pub fn render<'w>(
         &self,
@@ -90,6 +96,14 @@ impl<I: PhaseItem> RenderPhase<I> {
             let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
             draw_function.draw(world, render_pass, view, item);
             index += item.batch_size();
+            let batch_size = item.batch_size();
+            if batch_size > 0 {
+                let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
+                draw_function.draw(world, render_pass, view, item);
+                index += batch_size;
+            } else {
+                index += 1;
+            }
         }
     }
 
@@ -109,12 +123,18 @@ impl<I: PhaseItem> RenderPhase<I> {
             .items
             .get(range)
             .expect("`Range` provided to `render_range()` is out of bounds");
+
         let mut index = 0;
         while index < items.len() {
             let item = &items[index];
-            let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
-            draw_function.draw(world, render_pass, view, item);
-            index += item.batch_size();
+            let batch_size = item.batch_size();
+            if batch_size > 0 {
+                let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
+                draw_function.draw(world, render_pass, view, item);
+                index += batch_size;
+            } else {
+                index += 1;
+            }
         }
     }
 }
@@ -148,8 +168,8 @@ pub trait PhaseItem: Sized + Send + Sync + 'static {
     /// Specifies the [`Draw`] function used to render the item.
     fn draw_function(&self) -> DrawFunctionId;
 
-    /// Sorts a slice of phase items into render order. Generally if you are intending
-    /// to batch the implementing type this should use a stable sort like [`slice::sort_by_key`].
+    /// Sorts a slice of phase items into render order. Generally if the same type
+    /// is batched this should use a stable sort like [`slice::sort_by_key`].
     /// In almost all other cases, this should not be altered from the default,
     /// which uses a unstable sort, as this provides the best balance of CPU and GPU
     /// performance.
@@ -165,6 +185,9 @@ pub trait PhaseItem: Sized + Send + Sync + 'static {
         items.sort_unstable_by_key(|item| item.sort_key());
     }
 
+    /// The number of items to skip after rendering this [`PhaseItem`].
+    ///
+    /// Items with a `batch_size` of 0 will not be rendered.
     fn batch_size(&self) -> usize {
         1
     }

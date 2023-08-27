@@ -107,12 +107,8 @@ impl Plugin for Mesh2dRenderPlugin {
                 .add_systems(
                     Render,
                     (
-                        prepare_mesh2d_bind_group
-                            .in_set(RenderSet::Prepare)
-                            .after(ViewSet::PrepareUniforms),
-                        prepare_mesh2d_view_bind_groups
-                            .in_set(RenderSet::Prepare)
-                            .after(ViewSet::PrepareUniforms),
+                        prepare_mesh2d_bind_group.in_set(RenderSet::PrepareBindGroups),
+                        prepare_mesh2d_view_bind_groups.in_set(RenderSet::PrepareBindGroups),
                     ),
                 );
         }

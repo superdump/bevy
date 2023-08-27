@@ -314,7 +314,6 @@ impl SpecializedRenderPipeline for SpritePipeline {
     }
 }
 
-#[derive(Component, Clone, Copy)]
 pub struct ExtractedSprite {
     pub transform: GlobalTransform,
     pub color: Color,
@@ -385,7 +384,6 @@ pub fn extract_sprites(
         )>,
     >,
 ) {
-    extracted_sprites.sprites.clear();
     for (entity, visibility, sprite, transform, handle) in sprite_query.iter() {
         if !visibility.is_visible() {
             continue;
@@ -471,6 +469,7 @@ impl Default for SpriteMeta {
 
 #[derive(Component, Eq, PartialEq, Clone)]
 pub struct SpriteBatch {
+    range: Range<u32>,
     image_handle_id: HandleId,
     range: Range<u32>,
 }
@@ -560,7 +559,7 @@ pub fn queue_sprites(
                     pipeline: colored_pipeline,
                     entity: *entity,
                     sort_key,
-                    // batch size will be calculated in prepare_sprites
+                    // batch_size will be calculated in prepare_sprites
                     batch_size: 0,
                 });
             } else {
@@ -569,7 +568,7 @@ pub fn queue_sprites(
                     pipeline,
                     entity: *entity,
                     sort_key,
-                    // batch size will be calculated in prepare_sprites
+                    // batch_size will be calculated in prepare_sprites
                     batch_size: 0,
                 });
             }
@@ -757,6 +756,16 @@ pub fn prepare_sprites(
                 .reserve(total_indices - current_indices);
             for i in (current_indices / 6)..total_sprites {
                 let base = (i * 4) as u32;
+                // NOTE: This code is generating sets of 6 indices pointing to 4 vertices.
+                // The vertices form the corners of a quad based on their two least significant bits.
+                // 01   11
+                //
+                // 00   01
+                // The sprite shader can then use the two least significant bits as the vertex index,
+                // and the remaining upper bits as the instance index. The rest of the properties to
+                // transform the vertex positions and UVs (which are implicit) are baked into the
+                // instance transform, and UV offset and scale. See bevy_sprite/src/render/sprite.wgsl
+                // for the details.
                 sprite_meta.sprite_index_buffer.push(base + 2);
                 sprite_meta.sprite_index_buffer.push(base);
                 sprite_meta.sprite_index_buffer.push(base + 1);
@@ -772,6 +781,7 @@ pub fn prepare_sprites(
         *previous_len = batches.len();
         commands.insert_or_spawn_batch(batches);
     }
+    extracted_sprites.sprites.clear();
 }
 
 pub type DrawSprite = (
@@ -812,7 +822,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteTextureBindGrou
     fn render<'w>(
         _item: &P,
         _view: (),
-        sprite_batch: &'_ SpriteBatch,
+        batch: &'_ SpriteBatch,
         image_bind_groups: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -822,7 +832,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteTextureBindGrou
             I,
             image_bind_groups
                 .values
-                .get(&Handle::weak(sprite_batch.image_handle_id))
+                .get(&Handle::weak(batch.image_handle_id))
                 .unwrap(),
             &[],
         );
@@ -839,7 +849,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawSpriteBatch {
     fn render<'w>(
         _item: &P,
         _view: (),
-        sprite_batch: &'_ SpriteBatch,
+        batch: &'_ SpriteBatch,
         sprite_meta: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {

@@ -1,5 +1,6 @@
 use super::{UiBatch, UiImageBindGroups, UiMeta};
 use crate::{prelude::UiCameraConfig, DefaultCameraView};
+use bevy_asset::Handle;
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::*, SystemParamItem},
@@ -49,10 +50,10 @@ impl Node for UiPassNode {
         let input_view_entity = graph.view_entity();
 
         let Ok((transparent_phase, target, camera_ui)) =
-                self.ui_view_query.get_manual(world, input_view_entity)
-             else {
-                return Ok(());
-            };
+            self.ui_view_query.get_manual(world, input_view_entity)
+        else {
+            return Ok(());
+        };
         if transparent_phase.items.is_empty() {
             return Ok(());
         }
@@ -72,7 +73,7 @@ impl Node for UiPassNode {
         };
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
             label: Some("ui_pass"),
-            color_attachments: &[Some(target.get_color_attachment(Operations {
+            color_attachments: &[Some(target.get_unsampled_color_attachment(Operations {
                 load: LoadOp::Load,
                 store: true,
             }))],
@@ -90,6 +91,7 @@ pub struct TransparentUi {
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub batch_size: usize,
 }
 
 impl PhaseItem for TransparentUi {
@@ -108,6 +110,11 @@ impl PhaseItem for TransparentUi {
     #[inline]
     fn draw_function(&self) -> DrawFunctionId {
         self.draw_function
+    }
+
+    #[inline]
+    fn batch_size(&self) -> usize {
+        self.batch_size
     }
 }
 
@@ -161,7 +168,14 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetUiTextureBindGroup<I>
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let image_bind_groups = image_bind_groups.into_inner();
-        pass.set_bind_group(I, image_bind_groups.values.get(&batch.image).unwrap(), &[]);
+        pass.set_bind_group(
+            I,
+            image_bind_groups
+                .values
+                .get(&Handle::weak(batch.image_handle_id))
+                .unwrap(),
+            &[],
+        );
         RenderCommandResult::Success
     }
 }

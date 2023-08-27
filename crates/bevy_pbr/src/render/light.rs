@@ -32,15 +32,6 @@ use bevy_utils::{
 };
 use std::{hash::Hash, num::NonZeroU64};
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
-pub enum RenderLightSystems {
-    ExtractClusters,
-    ExtractLights,
-    PrepareClusters,
-    PrepareLights,
-    QueueShadows,
-}
-
 #[derive(Component)]
 pub struct ExtractedPointLight {
     color: Color,
@@ -1647,7 +1638,7 @@ pub fn queue_shadows<M: Material>(
                             draw_function: draw_shadow_mesh,
                             pipeline: pipeline_id,
                             entity,
-                            distance: 0.0, // TODO: sort back-to-front
+                            distance: 0.0, // TODO: sort front-to-back
                         });
                     }
                 }
@@ -1686,7 +1677,7 @@ impl PhaseItem for Shadow {
         // The shadow phase is sorted by pipeline id for performance reasons.
         // Grouping all draw commands using the same pipeline together performs
         // better than rebinding everything at a high rate.
-        radsort::sort_by_key(items, |item| item.pipeline.id());
+        radsort::sort_by_key(items, |item| item.sort_key());
     }
 }
 
