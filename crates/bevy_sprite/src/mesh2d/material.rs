@@ -19,17 +19,19 @@ use bevy_render::{
         RenderPhase, SetItemPipeline, TrackedRenderPass,
     },
     render_resource::{
-        AsBindGroup, AsBindGroupError, BindGroup, BindGroupId, BindGroupLayout,
-        OwnedBindingResource, PipelineCache, RenderPipelineDescriptor, Shader, ShaderRef,
-        SpecializedMeshPipeline, SpecializedMeshPipelineError, SpecializedMeshPipelines,
+        AsBindGroup, AsBindGroupError, AsBindGroupShaderType, BindGroup, BindGroupDescriptor,
+        BindGroupEntry, BindGroupId, BindGroupLayout, GpuArrayBuffer, GpuArrayBufferIndex,
+        OwnedBindingResource, OwnedBindingResourceId, PipelineCache, RenderPipelineDescriptor,
+        Shader, ShaderRef, SpecializedMeshPipeline, SpecializedMeshPipelineError,
+        SpecializedMeshPipelines,
     },
-    renderer::RenderDevice,
+    renderer::{RenderDevice, RenderQueue},
     texture::FallbackImage,
     view::{ExtractedView, InheritedVisibility, Msaa, ViewVisibility, Visibility, VisibleEntities},
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_transform::components::{GlobalTransform, Transform};
-use bevy_utils::{FloatOrd, HashMap, HashSet, PassHashMap};
+use bevy_utils::{nonmax::NonMaxU32, FloatOrd, HashMap, HashSet, PassHashMap};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
@@ -99,7 +101,13 @@ use crate::{
 /// @group(1) @binding(1) var color_texture: texture_2d<f32>;
 /// @group(1) @binding(2) var color_sampler: sampler;
 /// ```
-pub trait Material2d: AsBindGroup + Asset + Clone + Sized {
+pub trait Material2d:
+    Asset
+    + AsBindGroup
+    + AsBindGroupShaderType<<Self as AsBindGroup>::ConvertedShaderType>
+    + Clone
+    + Sized
+{
     /// Returns this material's vertex shader. If [`ShaderRef::Default`] is returned, the default mesh vertex shader
     /// will be used.
     fn vertex_shader() -> ShaderRef {
@@ -145,7 +153,6 @@ where
             render_app
                 .add_render_command::<Transparent2d, DrawMaterial2d<M>>()
                 .init_resource::<ExtractedMaterials2d<M>>()
-                .init_resource::<RenderMaterials2d<M>>()
                 .init_resource::<RenderMaterial2dInstances<M>>()
                 .init_resource::<SpecializedMeshPipelines<Material2dPipeline<M>>>()
                 .add_systems(
@@ -168,7 +175,11 @@ where
 
     fn finish(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<Material2dPipeline<M>>();
+            render_app
+                .insert_resource(RenderMaterials2d::<M>::new(
+                    render_app.world.resource::<RenderDevice>(),
+                ))
+                .init_resource::<Material2dPipeline<M>>();
         }
     }
 }
@@ -340,10 +351,18 @@ impl<P: PhaseItem, M: Material2d, const I: usize> RenderCommand<P>
         let Some(material_instance) = material_instances.get(&item.entity()) else {
             return RenderCommandResult::Failure;
         };
-        let Some(material2d) = materials.get(material_instance) else {
+        let Some(material2d) = materials.prepared.get(material_instance) else {
             return RenderCommandResult::Failure;
         };
-        pass.set_bind_group(I, &material2d.bind_group, &[]);
+        // FIXME: dynamic offset
+        pass.set_bind_group(
+            I,
+            material2d
+                .bind_group
+                .as_ref()
+                .expect("No material bind group"),
+            &[],
+        );
         RenderCommandResult::Success
     }
 }
@@ -410,7 +429,7 @@ pub fn queue_material2d_meshes<M: Material2d>(
             let Some(mesh_instance) = render_mesh_instances.get_mut(visible_entity) else {
                 continue;
             };
-            let Some(material2d) = render_materials.get(material_asset_id) else {
+            let Some(material2d) = render_materials.prepared.get(material_asset_id) else {
                 continue;
             };
             let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
@@ -437,7 +456,7 @@ pub fn queue_material2d_meshes<M: Material2d>(
                 }
             };
 
-            mesh_instance.material_bind_group_id = material2d.get_bind_group_id();
+            mesh_instance.material_bind_group_meta = material2d.get_bind_group_meta();
 
             let mesh_z = mesh_instance.transforms.transform.translation.z;
             transparent_phase.add(Transparent2d {
@@ -457,20 +476,29 @@ pub fn queue_material2d_meshes<M: Material2d>(
     }
 }
 
-#[derive(Component, Clone, Copy, Default, PartialEq, Eq, Deref, DerefMut)]
-pub struct Material2dBindGroupId(Option<BindGroupId>);
+#[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Material2dBindGroupMeta {
+    pub bind_group_id: Option<BindGroupId>,
+    pub index: NonMaxU32,
+    pub dynamic_offset: Option<NonMaxU32>,
+}
+
+impl<T: Material2d> PreparedMaterial2d<T> {
+    pub fn get_bind_group_meta(&self) -> Material2dBindGroupMeta {
+        Material2dBindGroupMeta {
+            bind_group_id: Some(self.bind_group.as_ref().unwrap().id()),
+            index: self.indices.index,
+            dynamic_offset: self.indices.dynamic_offset,
+        }
+    }
+}
 
 /// Data prepared for a [`Material2d`] instance.
 pub struct PreparedMaterial2d<T: Material2d> {
     pub bindings: Vec<OwnedBindingResource>,
-    pub bind_group: BindGroup,
+    pub bind_group: Option<BindGroup>,
+    pub indices: GpuArrayBufferIndex<<T as AsBindGroup>::ConvertedShaderType>,
     pub key: T::Data,
-}
-
-impl<T: Material2d> PreparedMaterial2d<T> {
-    pub fn get_bind_group_id(&self) -> Material2dBindGroupId {
-        Material2dBindGroupId(Some(self.bind_group.id()))
-    }
 }
 
 #[derive(Resource)]
@@ -489,12 +517,20 @@ impl<M: Material2d> Default for ExtractedMaterials2d<M> {
 }
 
 /// Stores all prepared representations of [`Material2d`] assets for as long as they exist.
-#[derive(Resource, Deref, DerefMut)]
-pub struct RenderMaterials2d<T: Material2d>(HashMap<AssetId<T>, PreparedMaterial2d<T>>);
+#[derive(Resource)]
+pub struct RenderMaterials2d<T: Material2d> {
+    pub prepared: HashMap<AssetId<T>, PreparedMaterial2d<T>>,
+    pub buffer: GpuArrayBuffer<<T as AsBindGroup>::ConvertedShaderType>,
+    pub bind_group_cache: HashMap<Vec<OwnedBindingResourceId>, BindGroup>,
+}
 
-impl<T: Material2d> Default for RenderMaterials2d<T> {
-    fn default() -> Self {
-        Self(Default::default())
+impl<T: Material2d> RenderMaterials2d<T> {
+    fn new(render_device: &RenderDevice) -> Self {
+        Self {
+            prepared: Default::default(),
+            buffer: GpuArrayBuffer::<<T as AsBindGroup>::ConvertedShaderType>::new(render_device),
+            bind_group_cache: Default::default(),
+        }
     }
 }
 
@@ -554,23 +590,63 @@ impl<M: Material2d> Default for PrepareNextFrameMaterials<M> {
 pub fn prepare_materials_2d<M: Material2d>(
     mut prepare_next_frame: Local<PrepareNextFrameMaterials<M>>,
     mut extracted_assets: ResMut<ExtractedMaterials2d<M>>,
-    mut render_materials: ResMut<RenderMaterials2d<M>>,
+    render_materials: ResMut<RenderMaterials2d<M>>,
     render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
     images: Res<RenderAssets<Image>>,
     fallback_image: Res<FallbackImage>,
     pipeline: Res<Material2dPipeline<M>>,
 ) {
+    let render_materials = render_materials.into_inner();
+
+    let mut asset_data_indices = HashMap::new();
+    for (id, material) in prepare_next_frame.assets.iter() {
+        asset_data_indices.insert(
+            *id,
+            render_materials
+                .buffer
+                .push(material.as_bind_group_shader_type(&images)),
+        );
+    }
+
+    // for removed in std::mem::take(&mut extracted_assets.removed) {
+    //     updated.remove(&removed);
+    //     render_materials.prepared.remove(&removed);
+    // }
+
+    for (id, material) in &extracted_assets.extracted {
+        asset_data_indices.insert(
+            *id,
+            render_materials
+                .buffer
+                .push(material.as_bind_group_shader_type(&images)),
+        );
+    }
+
+    let new_buffer = render_materials
+        .buffer
+        .write_buffer(&render_device, &render_queue);
+
+    let mut updated = HashSet::with_capacity(
+        prepare_next_frame.assets.len() - extracted_assets.removed.len()
+            + extracted_assets.extracted.len(),
+    );
+
     let queued_assets = std::mem::take(&mut prepare_next_frame.assets);
-    for (id, material) in queued_assets {
+    for (id, material) in queued_assets.into_iter() {
+        let indices = asset_data_indices.get(&id).cloned().expect("No indices");
         match prepare_material2d(
+            render_materials,
             &material,
+            indices,
             &render_device,
             &images,
             &fallback_image,
             &pipeline,
         ) {
             Ok(prepared_asset) => {
-                render_materials.insert(id, prepared_asset);
+                updated.insert(id);
+                render_materials.prepared.insert(id, prepared_asset);
             }
             Err(AsBindGroupError::RetryNextUpdate) => {
                 prepare_next_frame.assets.push((id, material));
@@ -579,35 +655,112 @@ pub fn prepare_materials_2d<M: Material2d>(
     }
 
     for removed in std::mem::take(&mut extracted_assets.removed) {
-        render_materials.remove(&removed);
+        updated.remove(&removed);
+        render_materials.prepared.remove(&removed);
     }
 
     for (asset_id, material) in std::mem::take(&mut extracted_assets.extracted) {
+        let indices = asset_data_indices
+            .get(&asset_id)
+            .cloned()
+            .expect("No indices");
         match prepare_material2d(
+            render_materials,
             &material,
+            indices,
             &render_device,
             &images,
             &fallback_image,
             &pipeline,
         ) {
             Ok(prepared_asset) => {
-                render_materials.insert(asset_id, prepared_asset);
+                updated.insert(asset_id);
+                render_materials.prepared.insert(asset_id, prepared_asset);
             }
             Err(AsBindGroupError::RetryNextUpdate) => {
                 prepare_next_frame.assets.push((asset_id, material));
             }
         }
     }
+
+    if new_buffer {
+        for (_id, prepared_asset) in render_materials.prepared.iter_mut() {
+            let binding_ids = prepared_asset
+                .bindings
+                .iter()
+                .map(OwnedBindingResourceId::from)
+                .collect::<Vec<_>>();
+            prepared_asset.bind_group = Some(
+                render_materials
+                    .bind_group_cache
+                    .entry(binding_ids)
+                    .or_insert_with(|| {
+                        let bind_group_entries = prepared_asset
+                            .bindings
+                            .iter()
+                            .enumerate()
+                            .map(|(binding, resource)| BindGroupEntry {
+                                binding: binding as u32,
+                                resource: resource.get_binding(),
+                            })
+                            .collect::<Vec<_>>();
+                        let descriptor = BindGroupDescriptor {
+                            entries: &bind_group_entries,
+                            label: None,
+                            layout: &pipeline.material2d_layout,
+                        };
+                        render_device.create_bind_group(&descriptor)
+                    })
+                    .clone(),
+            );
+        }
+    } else {
+        for id in updated.into_iter() {
+            if let Some(prepared_asset) = render_materials.prepared.get_mut(&id) {
+                let binding_ids = prepared_asset
+                    .bindings
+                    .iter()
+                    .map(OwnedBindingResourceId::from)
+                    .collect::<Vec<_>>();
+                prepared_asset.bind_group = Some(
+                    render_materials
+                        .bind_group_cache
+                        .entry(binding_ids)
+                        .or_insert_with(|| {
+                            let bind_group_entries = prepared_asset
+                                .bindings
+                                .iter()
+                                .enumerate()
+                                .map(|(binding, resource)| BindGroupEntry {
+                                    binding: binding as u32,
+                                    resource: resource.get_binding(),
+                                })
+                                .collect::<Vec<_>>();
+                            let descriptor = BindGroupDescriptor {
+                                entries: &bind_group_entries,
+                                label: None,
+                                layout: &pipeline.material2d_layout,
+                            };
+                            render_device.create_bind_group(&descriptor)
+                        })
+                        .clone(),
+                );
+            }
+        }
+    }
 }
 
 fn prepare_material2d<M: Material2d>(
+    render_materials: &mut RenderMaterials2d<M>,
     material: &M,
+    indices: GpuArrayBufferIndex<<M as AsBindGroup>::ConvertedShaderType>,
     render_device: &RenderDevice,
     images: &RenderAssets<Image>,
     fallback_image: &FallbackImage,
     pipeline: &Material2dPipeline<M>,
 ) -> Result<PreparedMaterial2d<M>, AsBindGroupError> {
     let prepared = material.as_bind_group(
+        &render_materials.buffer,
         &pipeline.material2d_layout,
         render_device,
         images,
@@ -616,6 +769,7 @@ fn prepare_material2d<M: Material2d>(
     Ok(PreparedMaterial2d {
         bindings: prepared.bindings,
         bind_group: prepared.bind_group,
+        indices,
         key: prepared.data,
     })
 }

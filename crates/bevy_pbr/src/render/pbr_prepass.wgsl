@@ -40,7 +40,9 @@ fn prepass_alpha_discard(in: FragmentInput) {
 
 #ifdef VERTEX_UVS
     if (bevy_pbr::pbr_bindings::material.flags & bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u {
-        output_color = output_color * textureSampleBias(bevy_pbr::pbr_bindings::base_color_texture, bevy_pbr::pbr_bindings::base_color_sampler, in.uv, bevy_pbr::prepass_bindings::view.mip_bias);
+        let duvdx = dpdx(in.uv) * bevy_pbr::prepass_bindings::view.pow_2_mip_bias;
+        let duvdy = dpdy(in.uv) * bevy_pbr::prepass_bindings::view.pow_2_mip_bias;
+        output_color = output_color * textureSampleGrad(bevy_pbr::pbr_bindings::base_color_texture, bevy_pbr::pbr_bindings::base_color_sampler, in.uv, duvdx, duvdy);
     }
 #endif // VERTEX_UVS
 

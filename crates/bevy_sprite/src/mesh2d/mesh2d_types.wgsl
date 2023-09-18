@@ -13,4 +13,5 @@ struct Mesh2d {
     inverse_transpose_model_b: f32,
     // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
     flags: u32,
+    material_index: u32,
 };

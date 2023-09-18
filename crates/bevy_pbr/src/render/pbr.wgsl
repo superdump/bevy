@@ -23,23 +23,26 @@ fn fragment(
     in: MeshVertexOutput,
     @builtin(front_facing) is_front: bool,
 ) -> @location(0) vec4<f32> {
-    var output_color: vec4<f32> = pbr_bindings::material.base_color;
+    let material_index = mesh[in.instance_index].material_index;
+    let material = pbr_bindings::materials[material_index];
+
+    var output_color: vec4<f32> = material.base_color;
 
     let is_orthographic = view.projection[3].w == 1.0;
     let V = pbr_functions::calculate_view(in.world_position, is_orthographic);
 #ifdef VERTEX_UVS
     var uv = in.uv;
 #ifdef VERTEX_TANGENTS
-    if ((pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_DEPTH_MAP_BIT) != 0u) {
+    if ((material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_DEPTH_MAP_BIT) != 0u) {
         let N = in.world_normal;
         let T = in.world_tangent.xyz;
         let B = in.world_tangent.w * cross(N, T);
         // Transform V from fragment to camera in world space to tangent space.
         let Vt = vec3(dot(V, T), dot(V, B), dot(V, N));
         uv = parallaxed_uv(
-            pbr_bindings::material.parallax_depth_scale,
-            pbr_bindings::material.max_parallax_layer_count,
-            pbr_bindings::material.max_relief_mapping_search_steps,
+            material.parallax_depth_scale,
+            material.max_parallax_layer_count,
+            material.max_relief_mapping_search_steps,
             uv,
             // Flip the direction of Vt to go toward the surface to make the
             // parallax mapping algorithm easier to understand and reason
@@ -48,42 +51,45 @@ fn fragment(
         );
     }
 #endif
+    // NOTE: Calculating gradients here after the UV have been parallaxed
+    let duvdx = dpdx(uv) * view.pow_2_mip_bias;
+    let duvdy = dpdy(uv) * view.pow_2_mip_bias;
 #endif
 
 #ifdef VERTEX_COLORS
     output_color = output_color * in.color;
 #endif
 #ifdef VERTEX_UVS
-    if ((pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
-        output_color = output_color * textureSampleBias(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, uv, view.mip_bias);
+    if ((material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u) {
+        output_color = output_color * textureSampleGrad(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, uv, duvdx, duvdy);
     }
 #endif
 
     // NOTE: Unlit bit not set means == 0 is true, so the true case is if lit
-    if ((pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u) {
+    if ((material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u) {
         // Prepare a 'processed' StandardMaterial by sampling all textures to resolve
         // the material members
         var pbr_input: pbr_functions::PbrInput;
 
         pbr_input.material.base_color = output_color;
-        pbr_input.material.reflectance = pbr_bindings::material.reflectance;
-        pbr_input.material.flags = pbr_bindings::material.flags;
-        pbr_input.material.alpha_cutoff = pbr_bindings::material.alpha_cutoff;
+        pbr_input.material.reflectance = material.reflectance;
+        pbr_input.material.flags = material.flags;
+        pbr_input.material.alpha_cutoff = material.alpha_cutoff;
 
         // TODO use .a for exposure compensation in HDR
-        var emissive: vec4<f32> = pbr_bindings::material.emissive;
+        var emissive: vec4<f32> = material.emissive;
 #ifdef VERTEX_UVS
-        if ((pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_EMISSIVE_TEXTURE_BIT) != 0u) {
-            emissive = vec4<f32>(emissive.rgb * textureSampleBias(pbr_bindings::emissive_texture, pbr_bindings::emissive_sampler, uv, view.mip_bias).rgb, 1.0);
+        if ((material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_EMISSIVE_TEXTURE_BIT) != 0u) {
+            emissive = vec4<f32>(emissive.rgb * textureSampleGrad(pbr_bindings::emissive_texture, pbr_bindings::emissive_sampler, uv, duvdx, duvdy).rgb, 1.0);
         }
 #endif
         pbr_input.material.emissive = emissive;
 
-        var metallic: f32 = pbr_bindings::material.metallic;
-        var perceptual_roughness: f32 = pbr_bindings::material.perceptual_roughness;
+        var metallic: f32 = material.metallic;
+        var perceptual_roughness: f32 = material.perceptual_roughness;
 #ifdef VERTEX_UVS
-        if ((pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT) != 0u) {
-            let metallic_roughness = textureSampleBias(pbr_bindings::metallic_roughness_texture, pbr_bindings::metallic_roughness_sampler, uv, view.mip_bias);
+        if ((material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT) != 0u) {
+            let metallic_roughness = textureSampleGrad(pbr_bindings::metallic_roughness_texture, pbr_bindings::metallic_roughness_sampler, uv, duvdx, duvdy);
             // Sampling from GLTF standard channels for now
             metallic = metallic * metallic_roughness.b;
             perceptual_roughness = perceptual_roughness * metallic_roughness.g;
@@ -95,8 +101,8 @@ fn fragment(
         // TODO: Split into diffuse/specular occlusion?
         var occlusion: vec3<f32> = vec3(1.0);
 #ifdef VERTEX_UVS
-        if ((pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_OCCLUSION_TEXTURE_BIT) != 0u) {
-            occlusion = vec3(textureSampleBias(pbr_bindings::occlusion_texture, pbr_bindings::occlusion_sampler, uv, view.mip_bias).r);
+        if ((material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_OCCLUSION_TEXTURE_BIT) != 0u) {
+            occlusion = vec3(textureSampleGrad(pbr_bindings::occlusion_texture, pbr_bindings::occlusion_sampler, uv, duvdx, duvdy).r);
         }
 #endif
 #ifdef SCREEN_SPACE_AMBIENT_OCCLUSION
@@ -111,7 +117,7 @@ fn fragment(
 
         pbr_input.world_normal = pbr_functions::prepare_world_normal(
             in.world_normal,
-            (pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT) != 0u,
+            (material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT) != 0u,
             is_front,
         );
 
@@ -121,7 +127,7 @@ fn fragment(
         pbr_input.N = bevy_pbr::prepass_utils::prepass_normal(in.position, 0u);
 #else
         pbr_input.N = pbr_functions::apply_normal_mapping(
-            pbr_bindings::material.flags,
+            material.flags,
             pbr_input.world_normal,
 #ifdef VERTEX_TANGENTS
 #ifdef STANDARDMATERIAL_NORMAL_MAP
@@ -131,7 +137,8 @@ fn fragment(
 #ifdef VERTEX_UVS
             uv,
 #endif
-            view.mip_bias,
+            duvdx,
+            duvdy,
         );
 #endif
 
@@ -142,11 +149,11 @@ fn fragment(
 
         output_color = pbr_functions::pbr(pbr_input);
     } else {
-        output_color = pbr_functions::alpha_discard(pbr_bindings::material, output_color);
+        output_color = pbr_functions::alpha_discard(material, output_color);
     }
 
     // fog
-    if (fog.mode != FOG_MODE_OFF && (pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT) != 0u) {
+    if (fog.mode != FOG_MODE_OFF && (material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT) != 0u) {
         output_color = pbr_functions::apply_fog(fog, output_color, in.world_position.xyz, view.world_position.xyz);
     }
 
@@ -163,7 +170,7 @@ fn fragment(
 #endif
 #endif
 #ifdef PREMULTIPLY_ALPHA
-    output_color = pbr_functions::premultiply_alpha(pbr_bindings::material.flags, output_color);
+    output_color = pbr_functions::premultiply_alpha(material.flags, output_color);
 #endif
     return output_color;
 }

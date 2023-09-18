@@ -1,4 +1,4 @@
-use super::{GpuArrayBufferIndex, GpuArrayBufferable};
+use super::{Buffer, GpuArrayBufferIndex, GpuArrayBufferable};
 use crate::{
     render_resource::DynamicUniformBuffer,
     renderer::{RenderDevice, RenderQueue},
@@ -97,11 +97,16 @@ impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
         self.temp.0.clear();
     }
 
-    pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
+    pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) -> bool {
         if !self.temp.0.is_empty() {
             self.flush();
         }
-        self.uniforms.write_buffer(device, queue);
+        self.uniforms.write_buffer(device, queue)
+    }
+
+    #[inline]
+    pub fn buffer(&self) -> Option<&Buffer> {
+        self.uniforms.buffer()
     }
 
     #[inline]

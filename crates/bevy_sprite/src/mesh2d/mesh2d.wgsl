@@ -2,6 +2,7 @@
 #import bevy_sprite::mesh2d_bindings       mesh
 #import bevy_sprite::mesh2d_vertex_output  MeshVertexOutput
 #import bevy_sprite::mesh2d_view_bindings  view
+#import bevy_render::instance_index        get_instance_index
 
 #ifdef TONEMAP_IN_SHADER
 #import bevy_core_pipeline::tonemapping
@@ -56,6 +57,9 @@ fn vertex(vertex: Vertex) -> MeshVertexOutput {
 #ifdef VERTEX_COLORS
     out.color = vertex.color;
 #endif
+
+    out.instance_index = get_instance_index(vertex.instance_index);
+
     return out;
 }
 

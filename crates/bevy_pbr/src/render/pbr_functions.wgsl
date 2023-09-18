@@ -70,7 +70,8 @@ fn apply_normal_mapping(
 #ifdef VERTEX_UVS
     uv: vec2<f32>,
 #endif
-    mip_bias: f32,
+    duvdx: vec2<f32>,
+    duvdy: vec2<f32>,
 ) -> vec3<f32> {
     // NOTE: The mikktspace method of normal mapping explicitly requires that the world normal NOT
     // be re-normalized in the fragment shader. This is primarily to match the way mikktspace
@@ -95,7 +96,7 @@ fn apply_normal_mapping(
 #ifdef VERTEX_UVS
 #ifdef STANDARDMATERIAL_NORMAL_MAP
     // Nt is the tangent-space normal.
-    var Nt = textureSampleBias(pbr_bindings::normal_map_texture, pbr_bindings::normal_map_sampler, uv, mip_bias).rgb;
+    var Nt = textureSampleGrad(pbr_bindings::normal_map_texture, pbr_bindings::normal_map_sampler, uv, duvdx, duvdy).rgb;
     if (standard_material_flags & pbr_types::STANDARD_MATERIAL_FLAGS_TWO_COMPONENT_NORMAL_MAP) != 0u {
         // Only use the xy components and derive z for 2-component normal maps.
         Nt = vec3<f32>(Nt.rg * 2.0 - 1.0, 0.0);

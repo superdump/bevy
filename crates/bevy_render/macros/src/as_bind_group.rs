@@ -47,6 +47,8 @@ pub fn derive_as_bind_group(ast: syn::DeriveInput) -> Result<TokenStream> {
     let mut binding_layouts = Vec::new();
     let mut attr_prepared_data_ident = None;
 
+    let mut converted_shader_type_ = None;
+
     // Read struct-level attributes
     for attr in &ast.attrs {
         if let Some(attr_ident) = attr.path().get_ident() {
@@ -58,32 +60,33 @@ pub fn derive_as_bind_group(ast: syn::DeriveInput) -> Result<TokenStream> {
                 }
             } else if attr_ident == UNIFORM_ATTRIBUTE_NAME {
                 let (binding_index, converted_shader_type) = get_uniform_binding_attr(attr)?;
-                binding_impls.push(quote! {{
-                    use #render_path::render_resource::AsBindGroupShaderType;
-                    let mut buffer = #render_path::render_resource::encase::UniformBuffer::new(Vec::new());
-                    let converted: #converted_shader_type = self.as_bind_group_shader_type(images);
-                    buffer.write(&converted).unwrap();
-                    #render_path::render_resource::OwnedBindingResource::Buffer(render_device.create_buffer_with_data(
-                        &#render_path::render_resource::BufferInitDescriptor {
-                            label: None,
-                            usage: #render_path::render_resource::BufferUsages::COPY_DST | #render_path::render_resource::BufferUsages::UNIFORM,
-                            contents: buffer.as_ref(),
-                        },
-                    ))
-                }});
+                converted_shader_type_ = Some(quote! { #converted_shader_type });
+                // binding_impls.push(quote! {{
+                //     use #render_path::render_resource::AsBindGroupShaderType;
+                //     let mut buffer = #render_path::render_resource::encase::UniformBuffer::new(Vec::new());
+                //     let converted: #converted_shader_type = self.as_bind_group_shader_type(images);
+                //     buffer.write(&converted).unwrap();
+                //     #render_path::render_resource::OwnedBindingResource::Buffer(render_device.create_buffer_with_data(
+                //         &#render_path::render_resource::BufferInitDescriptor {
+                //             label: None,
+                //             usage: #render_path::render_resource::BufferUsages::COPY_DST | #render_path::render_resource::BufferUsages::UNIFORM,
+                //             contents: buffer.as_ref(),
+                //         },
+                //     ))
+                // }});
 
-                binding_layouts.push(quote!{
-                    #render_path::render_resource::BindGroupLayoutEntry {
-                        binding: #binding_index,
-                        visibility: #render_path::render_resource::ShaderStages::all(),
-                        ty: #render_path::render_resource::BindingType::Buffer {
-                            ty: #render_path::render_resource::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(<#converted_shader_type as #render_path::render_resource::ShaderType>::min_size()),
-                        },
-                        count: None,
-                    }
-                });
+                // binding_layouts.push(quote!{
+                //     #render_path::render_resource::BindGroupLayoutEntry {
+                //         binding: #binding_index,
+                //         visibility: #render_path::render_resource::ShaderStages::all(),
+                //         ty: #render_path::render_resource::BindingType::Buffer {
+                //             ty: #render_path::render_resource::BufferBindingType::Uniform,
+                //             has_dynamic_offset: false,
+                //             min_binding_size: Some(<#converted_shader_type as #render_path::render_resource::ShaderType>::min_size()),
+                //         },
+                //         count: None,
+                //     }
+                // });
 
                 let binding_vec_index = bind_group_entries.len();
                 bind_group_entries.push(quote! {
@@ -351,79 +354,90 @@ pub fn derive_as_bind_group(ast: syn::DeriveInput) -> Result<TokenStream> {
                     resource: bindings[#binding_vec_index].get_binding(),
                 }
             });
-            // single field uniform bindings for a given index can use a straightforward binding
-            if uniform_fields.len() == 1 {
-                let field = &uniform_fields[0];
-                let field_name = field.ident.as_ref().unwrap();
-                let field_ty = &field.ty;
-                binding_impls.push(quote! {{
-                    let mut buffer = #render_path::render_resource::encase::UniformBuffer::new(Vec::new());
-                    buffer.write(&self.#field_name).unwrap();
-                    #render_path::render_resource::OwnedBindingResource::Buffer(render_device.create_buffer_with_data(
-                        &#render_path::render_resource::BufferInitDescriptor {
-                            label: None,
-                            usage: #render_path::render_resource::BufferUsages::COPY_DST | #render_path::render_resource::BufferUsages::UNIFORM,
-                            contents: buffer.as_ref(),
-                        },
-                    ))
-                }});
+            // // single field uniform bindings for a given index can use a straightforward binding
+            // if uniform_fields.len() == 1 {
+            //     let field = &uniform_fields[0];
+            //     let field_name = field.ident.as_ref().unwrap();
+            //     let field_ty = &field.ty;
+            //     binding_impls.push(quote! {{
+            //         let mut buffer = #render_path::render_resource::encase::UniformBuffer::new(Vec::new());
+            //         buffer.write(&self.#field_name).unwrap();
+            //         #render_path::render_resource::OwnedBindingResource::Buffer(render_device.create_buffer_with_data(
+            //             &#render_path::render_resource::BufferInitDescriptor {
+            //                 label: None,
+            //                 usage: #render_path::render_resource::BufferUsages::COPY_DST | #render_path::render_resource::BufferUsages::UNIFORM,
+            //                 contents: buffer.as_ref(),
+            //             },
+            //         ))
+            //     }});
 
-                binding_layouts.push(quote!{
-                    #render_path::render_resource::BindGroupLayoutEntry {
-                        binding: #binding_index,
-                        visibility: #render_path::render_resource::ShaderStages::all(),
-                        ty: #render_path::render_resource::BindingType::Buffer {
-                            ty: #render_path::render_resource::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(<#field_ty as #render_path::render_resource::ShaderType>::min_size()),
-                        },
-                        count: None,
-                    }
-                });
+            //     binding_layouts.push(quote!{
+            //         #render_path::render_resource::BindGroupLayoutEntry {
+            //             binding: #binding_index,
+            //             visibility: #render_path::render_resource::ShaderStages::all(),
+            //             ty: #render_path::render_resource::BindingType::Buffer {
+            //                 ty: #render_path::render_resource::BufferBindingType::Uniform,
+            //                 has_dynamic_offset: false,
+            //                 min_binding_size: Some(<#field_ty as #render_path::render_resource::ShaderType>::min_size()),
+            //             },
+            //             count: None,
+            //         }
+            //     });
             // multi-field uniform bindings for a given index require an intermediate struct to derive ShaderType
-            } else {
-                let uniform_struct_name = Ident::new(
-                    &format!("_{struct_name}AsBindGroupUniformStructBindGroup{binding_index}"),
-                    Span::call_site(),
-                );
+            // } else {
+            let uniform_struct_name = Ident::new(
+                &format!("_{struct_name}AsBindGroupUniformStructBindGroup{binding_index}"),
+                Span::call_site(),
+            );
 
-                let field_name = uniform_fields.iter().map(|f| f.ident.as_ref().unwrap());
-                let field_type = uniform_fields.iter().map(|f| &f.ty);
-                field_struct_impls.push(quote! {
-                    #[derive(#render_path::render_resource::ShaderType)]
-                    struct #uniform_struct_name<'a> {
-                        #(#field_name: &'a #field_type,)*
+            let field_name = uniform_fields.iter().map(|f| f.ident.as_ref().unwrap());
+            let field_type = uniform_fields.iter().map(|f| &f.ty);
+            field_struct_impls.push(quote! {
+                #[derive(Clone, #render_path::render_resource::ShaderType)]
+                pub struct #uniform_struct_name {
+                    #(#field_name: #field_type,)*
+                }
+            });
+
+            let field_name = uniform_fields.iter().map(|f| f.ident.as_ref().unwrap());
+            field_struct_impls.push(quote! {
+                    impl AsBindGroupShaderType<#uniform_struct_name> for #struct_name {
+                        fn as_bind_group_shader_type(&self, images: &RenderAssets<Image>) -> #uniform_struct_name {
+                            #uniform_struct_name {
+                                #(#field_name: self.#field_name.clone(),)*
+                            }
+                        }
                     }
                 });
 
-                let field_name = uniform_fields.iter().map(|f| f.ident.as_ref().unwrap());
-                binding_impls.push(quote! {{
-                    let mut buffer = #render_path::render_resource::encase::UniformBuffer::new(Vec::new());
-                    buffer.write(&#uniform_struct_name {
-                        #(#field_name: &self.#field_name,)*
-                    }).unwrap();
-                    #render_path::render_resource::OwnedBindingResource::Buffer(render_device.create_buffer_with_data(
-                        &#render_path::render_resource::BufferInitDescriptor {
-                            label: None,
-                            usage: #render_path::render_resource::BufferUsages::COPY_DST | #render_path::render_resource::BufferUsages::UNIFORM,
-                            contents: buffer.as_ref(),
-                        },
-                    ))
-                }});
+            converted_shader_type_ = Some(quote! { #uniform_struct_name });
+            // binding_impls.push(quote! {{
+            //     use #render_path::render_resource::AsBindGroupShaderType;
+            //     let mut buffer = #render_path::render_resource::encase::UniformBuffer::new(Vec::new());
+            //     let converted: #uniform_struct_name = self.as_bind_group_shader_type(images);
+            //     buffer.write(&converted).unwrap();
+            //     #render_path::render_resource::OwnedBindingResource::Buffer(render_device.create_buffer_with_data(
+            //         &#render_path::render_resource::BufferInitDescriptor {
+            //             label: None,
+            //             usage: #render_path::render_resource::BufferUsages::COPY_DST | #render_path::render_resource::BufferUsages::UNIFORM,
+            //             contents: buffer.as_ref(),
+            //         },
+            //     ))
+            // }});
 
-                binding_layouts.push(quote!{
-                    #render_path::render_resource::BindGroupLayoutEntry {
-                        binding: #binding_index,
-                        visibility: #render_path::render_resource::ShaderStages::all(),
-                        ty: #render_path::render_resource::BindingType::Buffer {
-                            ty: #render_path::render_resource::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(<#uniform_struct_name as #render_path::render_resource::ShaderType>::min_size()),
-                        },
-                        count: None,
-                    }
-                });
-            }
+            // binding_layouts.push(quote!{
+            //         #render_path::render_resource::BindGroupLayoutEntry {
+            //             binding: #binding_index,
+            //             visibility: #render_path::render_resource::ShaderStages::all(),
+            //             ty: #render_path::render_resource::BindingType::Buffer {
+            //                 ty: #render_path::render_resource::BufferBindingType::Uniform,
+            //                 has_dynamic_offset: false,
+            //                 min_binding_size: Some(<#uniform_struct_name as #render_path::render_resource::ShaderType>::min_size()),
+            //             },
+            //             count: None,
+            //         }
+            //     });
+            // }
         }
     }
 
@@ -438,39 +452,56 @@ pub fn derive_as_bind_group(ast: syn::DeriveInput) -> Result<TokenStream> {
         (prepared_data.clone(), prepared_data)
     };
 
+    let buffer_bind_group_layout_entry = if converted_shader_type_.is_some() {
+        quote! { #render_path::render_resource::GpuArrayBuffer::<<Self as AsBindGroup>::ConvertedShaderType>::binding_layout(0, #render_path::render_resource::ShaderStages::VERTEX_FRAGMENT, render_device), }
+    } else {
+        quote! {}
+    };
+    let converted_shader_type_ = converted_shader_type_.unwrap_or_else(|| quote! { () });
     Ok(TokenStream::from(quote! {
         #(#field_struct_impls)*
 
         impl #impl_generics #render_path::render_resource::AsBindGroup for #struct_name #ty_generics #where_clause {
             type Data = #prepared_data;
+            type ConvertedShaderType = #converted_shader_type_;
             fn as_bind_group(
                 &self,
+                buffer: &#render_path::render_resource::GpuArrayBuffer<<Self as AsBindGroup>::ConvertedShaderType>,
                 layout: &#render_path::render_resource::BindGroupLayout,
                 render_device: &#render_path::renderer::RenderDevice,
                 images: &#render_path::render_asset::RenderAssets<#render_path::texture::Image>,
                 fallback_image: &#render_path::texture::FallbackImage,
             ) -> Result<#render_path::render_resource::PreparedBindGroup<Self::Data>, #render_path::render_resource::AsBindGroupError> {
-                let bindings = vec![#(#binding_impls,)*];
+                use #render_path::render_resource::BindGroupEntry;
+                let bindings = vec![
+                    OwnedBindingResource::Buffer(buffer.buffer().expect("Buffer was None").clone()),
+                    #(#binding_impls,)*
+                ];
 
-                let bind_group = {
-                    let descriptor = #render_path::render_resource::BindGroupDescriptor {
-                        entries: &[#(#bind_group_entries,)*],
-                        label: None,
-                        layout: &layout,
-                    };
-                    render_device.create_bind_group(&descriptor)
-                };
+                // let bind_group_entries = vec![#(#bind_group_entries,)*];
+
+                // let bind_group = {
+                //     let descriptor = #render_path::render_resource::BindGroupDescriptor {
+                //         entries: &[#(#bind_group_entries,)*],
+                //         label: None,
+                //         layout: &layout,
+                //     };
+                //     render_device.create_bind_group(&descriptor)
+                // };
 
                 Ok(#render_path::render_resource::PreparedBindGroup {
                     bindings,
-                    bind_group,
+                    bind_group: None,
                     data: #get_prepared_data,
                 })
             }
 
             fn bind_group_layout(render_device: &#render_path::renderer::RenderDevice) -> #render_path::render_resource::BindGroupLayout {
                 render_device.create_bind_group_layout(&#render_path::render_resource::BindGroupLayoutDescriptor {
-                    entries: &[#(#binding_layouts,)*],
+                    entries: &[
+                        #buffer_bind_group_layout_entry
+                        #(#binding_layouts,)*
+                    ],
                     label: None,
                 })
             }

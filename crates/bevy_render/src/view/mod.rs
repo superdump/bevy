@@ -169,7 +169,8 @@ pub struct ViewUniform {
     // viewport(x_origin, y_origin, width, height)
     viewport: Vec4,
     color_grading: ColorGrading,
-    mip_bias: f32,
+    // 2^(mip bias)
+    pow_2_mip_bias: f32,
 }
 
 #[derive(Resource, Default)]
@@ -391,7 +392,7 @@ pub fn prepare_view_uniforms(
                 world_position: camera.transform.translation(),
                 viewport,
                 color_grading: camera.color_grading,
-                mip_bias: mip_bias.unwrap_or(&MipBias(0.0)).0,
+                pow_2_mip_bias: 2.0f32.powf(mip_bias.unwrap_or(&MipBias(0.0)).0),
             }),
         };
 

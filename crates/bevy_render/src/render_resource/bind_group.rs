@@ -11,6 +11,8 @@ use encase::ShaderType;
 use std::ops::Deref;
 use wgpu::BindingResource;
 
+use super::{BufferId, GpuArrayBuffer, GpuArrayBufferable, SamplerId, TextureViewId};
+
 define_atomic_id!(BindGroupId);
 render_resource_wrapper!(ErasedBindGroup, wgpu::BindGroup);
 
@@ -262,9 +264,12 @@ pub trait AsBindGroup {
     /// Data that will be stored alongside the "prepared" bind group.
     type Data: Send + Sync;
 
+    type ConvertedShaderType: GpuArrayBufferable + Send + Sync;
+
     /// Creates a bind group for `self` matching the layout defined in [`AsBindGroup::bind_group_layout`].
     fn as_bind_group(
         &self,
+        buffer: &GpuArrayBuffer<Self::ConvertedShaderType>,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
         images: &RenderAssets<Image>,
@@ -286,7 +291,8 @@ pub enum AsBindGroupError {
 /// A prepared bind group returned as a result of [`AsBindGroup::as_bind_group`].
 pub struct PreparedBindGroup<T> {
     pub bindings: Vec<OwnedBindingResource>,
-    pub bind_group: BindGroup,
+    // pub bind_group_entries: Vec<BindGroupEntry<'a>>,
+    pub bind_group: Option<BindGroup>,
     pub data: T,
 }
 
@@ -305,6 +311,26 @@ impl OwnedBindingResource {
             OwnedBindingResource::Buffer(buffer) => buffer.as_entire_binding(),
             OwnedBindingResource::TextureView(view) => BindingResource::TextureView(view),
             OwnedBindingResource::Sampler(sampler) => BindingResource::Sampler(sampler),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Hash)]
+pub enum OwnedBindingResourceId {
+    Buffer(BufferId),
+    TextureView(TextureViewId),
+    Sampler(SamplerId),
+}
+
+impl From<&OwnedBindingResource> for OwnedBindingResourceId {
+    #[inline]
+    fn from(resource: &OwnedBindingResource) -> Self {
+        match resource {
+            OwnedBindingResource::Buffer(buffer) => OwnedBindingResourceId::Buffer(buffer.id()),
+            OwnedBindingResource::TextureView(texture_view) => {
+                OwnedBindingResourceId::TextureView(texture_view.id())
+            }
+            OwnedBindingResource::Sampler(sampler) => OwnedBindingResourceId::Sampler(sampler.id()),
         }
     }
 }
@@ -340,6 +366,8 @@ mod test {
     fn texture_visibility() {
         #[derive(AsBindGroup)]
         pub struct TextureVisibilityTest {
+            #[uniform(9)]
+            pub test: u32,
             #[texture(0, visibility(all))]
             pub all: Handle<Image>,
             #[texture(1, visibility(none))]

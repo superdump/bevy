@@ -128,8 +128,12 @@ impl GpuPointLights {
 
     fn write_buffer(&mut self, render_device: &RenderDevice, render_queue: &RenderQueue) {
         match self {
-            GpuPointLights::Uniform(buffer) => buffer.write_buffer(render_device, render_queue),
-            GpuPointLights::Storage(buffer) => buffer.write_buffer(render_device, render_queue),
+            GpuPointLights::Uniform(buffer) => {
+                buffer.write_buffer(render_device, render_queue);
+            }
+            GpuPointLights::Storage(buffer) => {
+                buffer.write_buffer(render_device, render_queue);
+            }
         }
     }
 
@@ -1603,7 +1607,7 @@ pub fn queue_shadows<M: Material>(
                 let Some(material_asset_id) = render_material_instances.get(&entity) else {
                     continue;
                 };
-                let Some(material) = render_materials.get(material_asset_id) else {
+                let Some(material) = render_materials.prepared.get(material_asset_id) else {
                     continue;
                 };
                 let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {

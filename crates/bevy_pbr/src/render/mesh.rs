@@ -1,6 +1,6 @@
 use crate::{
     environment_map, prepass, render::morph::MorphInstances, EnvironmentMapLight, FogMeta,
-    GlobalLightMeta, GpuFog, GpuLights, GpuPointLights, LightMeta, MaterialBindGroupId,
+    GlobalLightMeta, GpuFog, GpuLights, GpuPointLights, LightMeta, MaterialBindGroupMeta,
     NotShadowCaster, NotShadowReceiver, PreviousGlobalTransform,
     ScreenSpaceAmbientOcclusionTextures, Shadow, ShadowSamplers, ViewClusterBindings,
     ViewFogUniformOffset, ViewLightsUniformOffset, ViewShadowBindings,
@@ -46,7 +46,7 @@ use bevy_render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::{tracing::error, HashMap, Hashed, PassHashMap};
+use bevy_utils::{nonmax::NonMaxU32, tracing::error, HashMap, Hashed, PassHashMap};
 
 use crate::render::{
     morph::{extract_morphs, prepare_morphs, MorphUniform},
@@ -196,10 +196,11 @@ pub struct MeshUniform {
     pub inverse_transpose_model_a: [Vec4; 2],
     pub inverse_transpose_model_b: f32,
     pub flags: u32,
+    pub material_index: u32,
 }
 
-impl From<&MeshTransforms> for MeshUniform {
-    fn from(mesh_transforms: &MeshTransforms) -> Self {
+impl MeshUniform {
+    pub fn new(mesh_transforms: &MeshTransforms, material_index: u32) -> Self {
         let (inverse_transpose_model_a, inverse_transpose_model_b) =
             mesh_transforms.transform.inverse_transpose_3x3();
         Self {
@@ -208,6 +209,7 @@ impl From<&MeshTransforms> for MeshUniform {
             inverse_transpose_model_a,
             inverse_transpose_model_b,
             flags: mesh_transforms.flags,
+            material_index,
         }
     }
 }
@@ -228,7 +230,7 @@ bitflags::bitflags! {
 pub struct RenderMeshInstance {
     pub transforms: MeshTransforms,
     pub mesh_asset_id: AssetId<Mesh>,
-    pub material_bind_group_id: MaterialBindGroupId,
+    pub material_bind_group_meta: MaterialBindGroupMeta,
     pub shadow_caster: bool,
     pub automatic_batching: bool,
 }
@@ -296,7 +298,7 @@ pub fn extract_meshes(
                 mesh_asset_id: handle.id(),
                 transforms,
                 shadow_caster: not_caster.is_none(),
-                material_bind_group_id: MaterialBindGroupId::default(),
+                material_bind_group_meta: MaterialBindGroupMeta::default(),
                 automatic_batching: !no_automatic_batching,
             },
         );
@@ -670,7 +672,7 @@ impl GetBatchData for MeshPipeline {
     type Param = SRes<RenderMeshInstances>;
     type Query = Entity;
     type QueryFilter = With<Mesh3d>;
-    type CompareData = (MaterialBindGroupId, AssetId<Mesh>);
+    type CompareData = (Option<BindGroupId>, Option<NonMaxU32>, AssetId<Mesh>);
     type BufferData = MeshUniform;
 
     fn get_batch_data(
@@ -681,11 +683,17 @@ impl GetBatchData for MeshPipeline {
             .get(entity)
             .expect("Failed to find render mesh instance");
         (
-            (&mesh_instance.transforms).into(),
-            mesh_instance.automatic_batching.then_some((
-                mesh_instance.material_bind_group_id,
-                mesh_instance.mesh_asset_id,
-            )),
+            MeshUniform::new(
+                &mesh_instance.transforms,
+                mesh_instance.material_bind_group_meta.index.get(),
+            ),
+            mesh_instance.automatic_batching.then(|| {
+                (
+                    mesh_instance.material_bind_group_meta.bind_group_id,
+                    mesh_instance.material_bind_group_meta.dynamic_offset,
+                    mesh_instance.mesh_asset_id,
+                )
+            }),
         )
     }
 }
@@ -826,8 +834,6 @@ impl SpecializedMeshPipeline for MeshPipeline {
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
         let mut shader_defs = Vec::new();
         let mut vertex_attributes = Vec::new();
-
-        shader_defs.push("VERTEX_OUTPUT_INSTANCE_INDEX".into());
 
         if layout.contains(Mesh::ATTRIBUTE_POSITION) {
             shader_defs.push("VERTEX_POSITIONS".into());
