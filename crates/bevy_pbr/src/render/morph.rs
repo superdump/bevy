@@ -73,7 +73,7 @@ fn add_to_alignment<T: Pod + Default>(buffer: &mut BufferVec<T>) {
 #[derive(Default, Resource, Deref, DerefMut)]
 pub struct MorphInstances(
     #[cfg(feature = "render_sparseset")] SparseSet<Entity, MorphIndex>,
-    #[cfg(not(feature = "render_sparseset"))] PassHashMap<u32, MorphIndex>,
+    #[cfg(not(feature = "render_sparseset"))] PassHashMap<Entity, MorphIndex>,
 );
 
 pub fn extract_morphs(
@@ -101,7 +101,7 @@ pub fn extract_morphs(
             #[cfg(feature = "render_sparseset")]
             entity,
             #[cfg(not(feature = "render_sparseset"))]
-            entity.index(),
+            entity,
             MorphIndex { index },
         );
     }

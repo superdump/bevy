@@ -33,7 +33,7 @@ use bevy_render::{
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::PassHashMap;
 
-use crate::{Material2dBindGroupId, Material2dBindGroupIds};
+use crate::Material2dBindGroupId;
 
 /// Component for rendering with meshes in the 2d pipeline, usually with a [2d material](crate::Material2d) such as [`ColorMaterial`](crate::ColorMaterial).
 ///
@@ -186,15 +186,16 @@ bitflags::bitflags! {
 }
 
 pub struct RenderMesh2dInstance {
-    pub handle: Handle<Mesh>,
     pub transforms: Mesh2dTransforms,
+    pub mesh_asset_id: AssetId<Mesh>,
+    pub material_bind_group_id: Material2dBindGroupId,
     pub automatic_batching: bool,
 }
 
 #[derive(Default, Resource, Deref, DerefMut)]
 pub struct RenderMesh2dInstances(
     #[cfg(feature = "render_sparseset")] SparseSet<Entity, RenderMesh2dInstance>,
-    #[cfg(not(feature = "render_sparseset"))] PassHashMap<u32, RenderMesh2dInstance>,
+    #[cfg(not(feature = "render_sparseset"))] PassHashMap<Entity, RenderMesh2dInstance>,
 );
 
 #[derive(Component)]
@@ -202,7 +203,6 @@ pub struct Mesh2d;
 
 pub fn extract_mesh2d(
     mut commands: Commands,
-    mut material_bind_group_ids: ResMut<Material2dBindGroupIds>,
     mut render_mesh_instances: ResMut<RenderMesh2dInstances>,
     query: Extract<
         Query<(
@@ -215,10 +215,6 @@ pub fn extract_mesh2d(
     >,
 ) {
     let capacity = query.iter().len();
-    // Clearing and reserving the right amount of space here, though it could be done later.
-    material_bind_group_ids.clear();
-    #[cfg(feature = "render_sparseset")]
-    material_bind_group_ids.reserve_capacity(capacity);
     render_mesh_instances.clear();
     #[cfg(feature = "render_sparseset")]
     render_mesh_instances.reserve_capacity(capacity);
@@ -235,13 +231,14 @@ pub fn extract_mesh2d(
             #[cfg(feature = "render_sparseset")]
             entity,
             #[cfg(not(feature = "render_sparseset"))]
-            entity.index(),
+            entity,
             RenderMesh2dInstance {
-                handle: handle.0.clone_weak(),
                 transforms: Mesh2dTransforms {
                     transform: (&transform.affine()).into(),
                     flags: MeshFlags::empty().bits(),
                 },
+                mesh_asset_id: handle.0.id(),
+                material_bind_group_id: Material2dBindGroupId::default(),
                 automatic_batching: !no_automatic_batching,
             },
         );
@@ -371,19 +368,19 @@ impl Mesh2dPipeline {
 }
 
 impl GetBatchData for Mesh2dPipeline {
-    type Param = (SRes<RenderMesh2dInstances>, SRes<Material2dBindGroupIds>);
+    type Param = SRes<RenderMesh2dInstances>;
     type Query = (Entity, With<Mesh2d>);
-    type CompareData = (Option<Material2dBindGroupId>, AssetId<Mesh>);
+    type CompareData = (Material2dBindGroupId, AssetId<Mesh>);
     type BufferData = Mesh2dUniform;
 
     fn get_batch_data(
-        (mesh_instances, material_bind_group_ids): &SystemParamItem<Self::Param>,
+        mesh_instances: &SystemParamItem<Self::Param>,
         (entity, ..): &QueryItem<Self::Query>,
     ) -> (Self::BufferData, Option<Self::CompareData>) {
         #[cfg(feature = "render_sparseset")]
         let entity = *entity;
         #[cfg(not(feature = "render_sparseset"))]
-        let entity = &entity.index();
+        let entity = entity;
         let mesh_instance = mesh_instances
             .get(entity)
             .expect("Failed to find render mesh2d instance");
@@ -391,8 +388,8 @@ impl GetBatchData for Mesh2dPipeline {
             (&mesh_instance.transforms).into(),
             mesh_instance.automatic_batching.then(|| {
                 (
-                    material_bind_group_ids.get(entity).copied(),
-                    mesh_instance.handle.id(),
+                    mesh_instance.material_bind_group_id,
+                    mesh_instance.mesh_asset_id,
                 )
             }),
         )
@@ -726,12 +723,13 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
         #[cfg(feature = "render_sparseset")]
         let entity = item.entity();
         #[cfg(not(feature = "render_sparseset"))]
-        let entity = &item.entity().index();
+        let entity = &item.entity();
 
-        let Some(RenderMesh2dInstance { handle, .. }) = render_mesh2d_instances.get(entity) else {
+        let Some(RenderMesh2dInstance { mesh_asset_id, .. }) = render_mesh2d_instances.get(entity)
+        else {
             return RenderCommandResult::Failure;
         };
-        let Some(gpu_mesh) = meshes.get(handle) else {
+        let Some(gpu_mesh) = meshes.get(*mesh_asset_id) else {
             return RenderCommandResult::Failure;
         };
 

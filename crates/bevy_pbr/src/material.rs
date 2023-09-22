@@ -366,7 +366,7 @@ impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterial
         #[cfg(feature = "render_sparseset")]
         let entity = item.entity();
         #[cfg(not(feature = "render_sparseset"))]
-        let entity = &item.entity().index();
+        let entity = &item.entity();
 
         let Some(material_instance) = material_instances.get(entity) else {
             return RenderCommandResult::Failure;
@@ -382,7 +382,7 @@ impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterial
 #[derive(Resource, Deref, DerefMut)]
 pub struct RenderMaterialInstances<M: Material>(
     #[cfg(feature = "render_sparseset")] SparseSet<Entity, Handle<M>>,
-    #[cfg(not(feature = "render_sparseset"))] PassHashMap<u32, Handle<M>>,
+    #[cfg(not(feature = "render_sparseset"))] PassHashMap<Entity, Handle<M>>,
 );
 
 impl<M: Material> Default for RenderMaterialInstances<M> {
@@ -394,7 +394,7 @@ impl<M: Material> Default for RenderMaterialInstances<M> {
 #[derive(Resource, Deref, DerefMut)]
 pub struct MaterialBindGroupIds(
     #[cfg(feature = "render_sparseset")] SparseSet<Entity, MaterialBindGroupId>,
-    #[cfg(not(feature = "render_sparseset"))] PassHashMap<u32, MaterialBindGroupId>,
+    #[cfg(not(feature = "render_sparseset"))] PassHashMap<Entity, MaterialBindGroupId>,
 );
 
 impl Default for MaterialBindGroupIds {
@@ -415,7 +415,7 @@ fn extract_material_meshes<M: Material>(
             #[cfg(feature = "render_sparseset")]
             material_instances.insert(entity, handle.clone_weak());
             #[cfg(not(feature = "render_sparseset"))]
-            material_instances.insert(entity.index(), handle.clone_weak());
+            material_instances.insert(entity, handle.clone_weak());
         }
     }
 }
@@ -529,7 +529,7 @@ pub fn queue_material_meshes<M: Material>(
                 continue;
             };
             #[cfg(not(feature = "render_sparseset"))]
-            let Some(material_handle) = render_material_instances.get(&visible_entity.index()) else {
+            let Some(material_handle) = render_material_instances.get(visible_entity) else {
                 continue;
             };
             #[cfg(feature = "render_sparseset")]
@@ -537,7 +537,7 @@ pub fn queue_material_meshes<M: Material>(
                 continue;
             };
             #[cfg(not(feature = "render_sparseset"))]
-            let Some(mesh_instance) = render_mesh_instances.get_mut(&visible_entity.index()) else {
+            let Some(mesh_instance) = render_mesh_instances.get_mut(visible_entity) else {
                 continue;
             };
             let Some(mesh) = render_meshes.get(&mesh_instance.handle) else {
@@ -573,9 +573,9 @@ pub fn queue_material_meshes<M: Material>(
             };
 
             #[cfg(feature = "render_sparseset")]
-            material_bind_group_ids.insert(visible_entity, material.get_bind_group_id());
+            material_bind_group_ids.insert(*visible_entity, material.get_bind_group_id());
             #[cfg(not(feature = "render_sparseset"))]
-            material_bind_group_ids.insert(visible_entity.index(), material.get_bind_group_id());
+            material_bind_group_ids.insert(*visible_entity, material.get_bind_group_id());
 
             let distance = rangefinder
                 .distance_translation(&mesh_instance.transforms.transform.translation)

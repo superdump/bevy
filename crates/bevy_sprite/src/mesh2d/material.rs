@@ -148,7 +148,6 @@ where
                 .init_resource::<ExtractedMaterials2d<M>>()
                 .init_resource::<RenderMaterials2d<M>>()
                 .init_resource::<RenderMaterial2dInstances<M>>()
-                .init_resource::<Material2dBindGroupIds>()
                 .init_resource::<SpecializedMeshPipelines<Material2dPipeline<M>>>()
                 .add_systems(
                     ExtractSchedule,
@@ -177,23 +176,11 @@ where
 
 #[derive(Resource, Deref, DerefMut)]
 pub struct RenderMaterial2dInstances<M: Material2d>(
-    #[cfg(feature = "render_sparseset")] SparseSet<Entity, Handle<M>>,
-    #[cfg(not(feature = "render_sparseset"))] PassHashMap<u32, Handle<M>>,
+    #[cfg(feature = "render_sparseset")] SparseSet<Entity, AssetId<M>>,
+    #[cfg(not(feature = "render_sparseset"))] PassHashMap<Entity, AssetId<M>>,
 );
 
 impl<M: Material2d> Default for RenderMaterial2dInstances<M> {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
-
-#[derive(Resource, Deref, DerefMut)]
-pub struct Material2dBindGroupIds(
-    #[cfg(feature = "render_sparseset")] SparseSet<Entity, Material2dBindGroupId>,
-    #[cfg(not(feature = "render_sparseset"))] PassHashMap<u32, Material2dBindGroupId>,
-);
-
-impl Default for Material2dBindGroupIds {
     fn default() -> Self {
         Self(Default::default())
     }
@@ -212,8 +199,8 @@ fn extract_material_meshes_2d<M: Material2d>(
                 #[cfg(feature = "render_sparseset")]
                 entity,
                 #[cfg(not(feature = "render_sparseset"))]
-                entity.index(),
-                handle.clone_weak(),
+                entity,
+                handle.id(),
             );
         }
     }
@@ -365,11 +352,11 @@ impl<P: PhaseItem, M: Material2d, const I: usize> RenderCommand<P>
         #[cfg(feature = "render_sparseset")]
         let entity = item.entity();
         #[cfg(not(feature = "render_sparseset"))]
-        let entity = &item.entity().index();
+        let entity = &item.entity();
         let Some(material_instance) = material_instances.get(entity) else {
             return RenderCommandResult::Failure;
         };
-        let Some(material2d) = materials.get(&material_instance.id()) else {
+        let Some(material2d) = materials.get(material_instance) else {
             return RenderCommandResult::Failure;
         };
         pass.set_bind_group(I, &material2d.bind_group, &[]);
@@ -402,7 +389,6 @@ pub fn queue_material2d_meshes<M: Material2d>(
     render_meshes: Res<RenderAssets<Mesh>>,
     render_materials: Res<RenderMaterials2d<M>>,
     mut render_mesh_instances: ResMut<RenderMesh2dInstances>,
-    mut material2d_bind_group_ids: ResMut<Material2dBindGroupIds>,
     render_material_instances: Res<RenderMaterial2dInstances<M>>,
     mut views: Query<(
         &ExtractedView,
@@ -435,11 +421,11 @@ pub fn queue_material2d_meshes<M: Material2d>(
         }
         for visible_entity in &visible_entities.entities {
             #[cfg(feature = "render_sparseset")]
-            let Some(material2d_handle) = render_material_instances.get(*visible_entity) else {
+            let Some(material_asset_id) = render_material_instances.get(*visible_entity) else {
                 continue;
             };
             #[cfg(not(feature = "render_sparseset"))]
-            let Some(material2d_handle) = render_material_instances.get(&visible_entity.index()) else {
+            let Some(material_asset_id) = render_material_instances.get(visible_entity) else {
                 continue;
             };
             #[cfg(feature = "render_sparseset")]
@@ -447,13 +433,13 @@ pub fn queue_material2d_meshes<M: Material2d>(
                 continue;
             };
             #[cfg(not(feature = "render_sparseset"))]
-            let Some(mesh_instance) = render_mesh_instances.get_mut(&visible_entity.index()) else {
+            let Some(mesh_instance) = render_mesh_instances.get_mut(visible_entity) else {
                 continue;
             };
-            let Some(material2d) = render_materials.get(&material2d_handle.id()) else {
+            let Some(material2d) = render_materials.get(material_asset_id) else {
                 continue;
             };
-            let Some(mesh) = render_meshes.get(&mesh_instance.handle) else {
+            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
                 continue;
             };
             let mesh_key =
@@ -477,13 +463,7 @@ pub fn queue_material2d_meshes<M: Material2d>(
                 }
             };
 
-            material2d_bind_group_ids.insert(
-                #[cfg(feature = "render_sparseset")]
-                visible_entity,
-                #[cfg(not(feature = "render_sparseset"))]
-                visible_entity.index(),
-                material2d.get_bind_group_id(),
-            );
+            mesh_instance.material_bind_group_id = material2d.get_bind_group_id();
 
             let mesh_z = mesh_instance.transforms.transform.translation.z;
             transparent_phase.add(Transparent2d {

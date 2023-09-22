@@ -236,7 +236,7 @@ pub struct RenderMeshInstance {
 #[derive(Default, Resource, Deref, DerefMut)]
 pub struct RenderMeshInstances(
     #[cfg(feature = "render_sparseset")] SparseSet<Entity, RenderMeshInstance>,
-    #[cfg(not(feature = "render_sparseset"))] PassHashMap<u32, RenderMeshInstance>,
+    #[cfg(not(feature = "render_sparseset"))] PassHashMap<Entity, RenderMeshInstance>,
 );
 
 #[derive(Component)]
@@ -304,7 +304,7 @@ pub fn extract_meshes(
             #[cfg(feature = "render_sparseset")]
             entity,
             #[cfg(not(feature = "render_sparseset"))]
-            entity.index(),
+            entity,
             RenderMeshInstance {
                 handle: handle.clone_weak(),
                 transforms,
@@ -365,7 +365,7 @@ impl SkinnedMeshJoints {
 #[derive(Default, Resource, Deref, DerefMut)]
 pub struct SkinnedMeshJointsInstances(
     #[cfg(feature = "render_sparseset")] SparseSet<Entity, SkinnedMeshJoints>,
-    #[cfg(not(feature = "render_sparseset"))] PassHashMap<u32, SkinnedMeshJoints>,
+    #[cfg(not(feature = "render_sparseset"))] PassHashMap<Entity, SkinnedMeshJoints>,
 );
 
 pub fn extract_skinned_meshes(
@@ -395,7 +395,7 @@ pub fn extract_skinned_meshes(
                 #[cfg(feature = "render_sparseset")]
                 entity,
                 #[cfg(not(feature = "render_sparseset"))]
-                entity.index(),
+                entity,
                 skinned_joints.to_buffer_index(),
             );
         }
@@ -702,7 +702,7 @@ impl GetBatchData for MeshPipeline {
         #[cfg(feature = "render_sparseset")]
         let entity = *entity;
         #[cfg(not(feature = "render_sparseset"))]
-        let entity = &entity.index();
+        let entity = entity;
         let mesh_instance = mesh_instances
             .get(entity)
             .expect("Failed to find render mesh instance");
@@ -1394,7 +1394,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
         #[cfg(feature = "render_sparseset")]
         let entity = item.entity();
         #[cfg(not(feature = "render_sparseset"))]
-        let entity = &item.entity().index();
+        let entity = &item.entity();
 
         let Some(mesh) = mesh_instances.get(entity) else {
             return RenderCommandResult::Success;
@@ -1453,7 +1453,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
         #[cfg(feature = "render_sparseset")]
         let entity = item.entity();
         #[cfg(not(feature = "render_sparseset"))]
-        let entity = &item.entity().index();
+        let entity = &item.entity();
 
         let Some(mesh_instance) = mesh_instances.get(entity) else {
             return RenderCommandResult::Failure;
