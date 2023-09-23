@@ -30,7 +30,7 @@ use bevy_render::{
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{
         skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
-        GpuBufferInfo, InnerMeshVertexBufferLayout, Mesh, MeshVertexBufferLayout,
+        GpuBufferInfo, InnerMeshVertexBufferLayout, MegaMesh, Mesh, MeshVertexBufferLayout,
         VertexAttributeDescriptor,
     },
     prelude::Msaa,
@@ -1411,7 +1411,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
 
 pub struct DrawMesh;
 impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
-    type Param = (SRes<RenderAssets<Mesh>>, SRes<RenderMeshInstances>);
+    type Param = (SRes<MegaMesh>, SRes<RenderMeshInstances>);
     type ViewWorldQuery = ();
     type ItemWorldQuery = ();
     #[inline]
@@ -1419,16 +1419,19 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
         item: &P,
         _view: (),
         _item_query: (),
-        (meshes, mesh_instances): SystemParamItem<'w, '_, Self::Param>,
+        (mega_mesh, mesh_instances): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let meshes = meshes.into_inner();
+        let mega_mesh = mega_mesh.into_inner();
         let mesh_instances = mesh_instances.into_inner();
 
         let Some(mesh_instance) = mesh_instances.get(&item.entity()) else {
             return RenderCommandResult::Failure;
         };
-        let Some(gpu_mesh) = meshes.get(mesh_instance.mesh_asset_id) else {
+        let Some(mesh_indices) = mega_mesh.indices.get(&mesh_instance.mesh_asset_id) else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(gpu_mesh) = mega_mesh.gpu_mesh.as_ref() else {
             return RenderCommandResult::Failure;
         };
 
@@ -1445,10 +1448,10 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
             GpuBufferInfo::Indexed {
                 buffer,
                 index_format,
-                count,
+                ..
             } => {
                 pass.set_index_buffer(buffer.slice(..), 0, *index_format);
-                pass.draw_indexed(0..*count, 0, batch_range.clone());
+                pass.draw_indexed(mesh_indices.range.clone(), 0, batch_range.clone());
             }
             GpuBufferInfo::NonIndexed => {
                 pass.draw(0..gpu_mesh.vertex_count, batch_range.clone());

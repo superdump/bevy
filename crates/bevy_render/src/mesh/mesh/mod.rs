@@ -5,19 +5,21 @@ pub use wgpu::PrimitiveTopology;
 use crate::{
     prelude::Image,
     primitives::Aabb,
-    render_asset::{PrepareAssetError, RenderAsset, RenderAssets},
+    render_asset::{ExtractedAssets, PrepareAssetError, RenderAsset, RenderAssets},
     render_resource::{Buffer, TextureView, VertexBufferLayout},
     renderer::RenderDevice,
 };
-use bevy_asset::{Asset, Handle};
+use bevy_asset::{Asset, AssetId, Handle};
 use bevy_core::cast_slice;
 use bevy_derive::EnumVariantMeta;
-use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
+use bevy_ecs::system::{
+    lifetimeless::SRes, Res, ResMut, Resource, StaticSystemParam, SystemParamItem,
+};
 use bevy_log::warn;
 use bevy_math::*;
 use bevy_reflect::Reflect;
-use bevy_utils::{tracing::error, Hashed};
-use std::{collections::BTreeMap, hash::Hash, iter::FusedIterator};
+use bevy_utils::{tracing::error, HashMap, HashSet, Hashed};
+use std::{collections::BTreeMap, hash::Hash, iter::FusedIterator, ops::Range};
 use thiserror::Error;
 use wgpu::{
     util::BufferInitDescriptor, BufferUsages, IndexFormat, VertexAttribute, VertexFormat,
@@ -350,9 +352,18 @@ impl Mesh {
     ///
     /// If the vertex attributes have different lengths, they are all truncated to
     /// the length of the smallest.
-    pub fn get_vertex_buffer_data(&self) -> Vec<u8> {
+    pub fn get_vertex_buffer_data(&self, attributes: Option<&[MeshVertexAttribute]>) -> Vec<u8> {
+        let attribute_ids = attributes.map(|a| a.iter().map(|a| a.id).collect::<Vec<_>>());
         let mut vertex_size = 0;
-        for attribute_data in self.attributes.values() {
+        for attribute_data in
+            self.attributes
+                .values()
+                .filter(|MeshAttributeData { attribute, .. }| {
+                    attribute_ids
+                        .as_ref()
+                        .map_or(true, |a| a.contains(&attribute.id))
+                })
+        {
             let vertex_format = attribute_data.attribute.format;
             vertex_size += vertex_format.get_size() as usize;
         }
@@ -361,7 +372,16 @@ impl Mesh {
         let mut attributes_interleaved_buffer = vec![0; vertex_count * vertex_size];
         // bundle into interleaved buffers
         let mut attribute_offset = 0;
-        for attribute_data in self.attributes.values().take(vertex_count) {
+        for attribute_data in self
+            .attributes
+            .values()
+            .filter(|MeshAttributeData { attribute, .. }| {
+                attribute_ids
+                    .as_ref()
+                    .map_or(true, |a| a.contains(&attribute.id))
+            })
+            .take(vertex_count)
+        {
             let attribute_size = attribute_data.attribute.format.get_size() as usize;
             let attributes_bytes = attribute_data.values.get_bytes();
             for (vertex_index, attribute_bytes) in
@@ -499,6 +519,158 @@ impl Mesh {
     pub fn morph_target_names(&self) -> Option<&[String]> {
         self.morph_target_names.as_deref()
     }
+
+    pub fn append(&mut self, other: &Mesh) -> Result<MeshIndices, ()> {
+        // Assert mesh equality
+
+        let attributes = self.attributes().map(|(a, _)| a).collect::<HashSet<_>>();
+        let other_attributes = other.attributes().map(|(a, _)| a).collect::<HashSet<_>>();
+        if attributes.symmetric_difference(&other_attributes).count() != 0 {
+            return Err(());
+        }
+
+        let base_vertex = self.count_vertices() as u32;
+
+        for (attribute_id, attribute_values) in other.attributes() {
+            match (attribute_values, self.attribute_mut(attribute_id)) {
+                (
+                    VertexAttributeValues::Float32(src),
+                    Some(VertexAttributeValues::Float32(dst)),
+                ) => dst.extend_from_slice(&src),
+                (VertexAttributeValues::Sint32(src), Some(VertexAttributeValues::Sint32(dst))) => {
+                    dst.extend_from_slice(&src)
+                }
+                (VertexAttributeValues::Uint32(src), Some(VertexAttributeValues::Uint32(dst))) => {
+                    dst.extend_from_slice(&src)
+                }
+                (
+                    VertexAttributeValues::Float32x2(src),
+                    Some(VertexAttributeValues::Float32x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Sint32x2(src),
+                    Some(VertexAttributeValues::Sint32x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Uint32x2(src),
+                    Some(VertexAttributeValues::Uint32x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Float32x3(src),
+                    Some(VertexAttributeValues::Float32x3(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Sint32x3(src),
+                    Some(VertexAttributeValues::Sint32x3(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Uint32x3(src),
+                    Some(VertexAttributeValues::Uint32x3(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Float32x4(src),
+                    Some(VertexAttributeValues::Float32x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Sint32x4(src),
+                    Some(VertexAttributeValues::Sint32x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Uint32x4(src),
+                    Some(VertexAttributeValues::Uint32x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Sint16x2(src),
+                    Some(VertexAttributeValues::Sint16x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Snorm16x2(src),
+                    Some(VertexAttributeValues::Snorm16x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Uint16x2(src),
+                    Some(VertexAttributeValues::Uint16x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Unorm16x2(src),
+                    Some(VertexAttributeValues::Unorm16x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Sint16x4(src),
+                    Some(VertexAttributeValues::Sint16x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Snorm16x4(src),
+                    Some(VertexAttributeValues::Snorm16x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Uint16x4(src),
+                    Some(VertexAttributeValues::Uint16x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Unorm16x4(src),
+                    Some(VertexAttributeValues::Unorm16x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Sint8x2(src),
+                    Some(VertexAttributeValues::Sint8x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Snorm8x2(src),
+                    Some(VertexAttributeValues::Snorm8x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Uint8x2(src),
+                    Some(VertexAttributeValues::Uint8x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Unorm8x2(src),
+                    Some(VertexAttributeValues::Unorm8x2(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Sint8x4(src),
+                    Some(VertexAttributeValues::Sint8x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Snorm8x4(src),
+                    Some(VertexAttributeValues::Snorm8x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Uint8x4(src),
+                    Some(VertexAttributeValues::Uint8x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (
+                    VertexAttributeValues::Unorm8x4(src),
+                    Some(VertexAttributeValues::Unorm8x4(dst)),
+                ) => dst.extend_from_slice(&src),
+                (_, Some(_)) => panic!("BLERP"),
+                (_, None) => {}
+            }
+        }
+
+        let src_indices = other.indices().expect("Other mesh had no indices");
+        let dst_indices = self.indices_mut().expect("No indices");
+        let base_index = dst_indices.len() as u32;
+        let count = src_indices.len() as u32;
+        match (src_indices, dst_indices) {
+            (Indices::U16(src), Indices::U32(dst)) => {
+                dst.extend(src.iter().copied().map(|i| base_vertex + i as u32))
+            }
+            (Indices::U32(src), Indices::U32(dst)) => {
+                dst.extend(src.iter().copied().map(|i| base_vertex + i))
+            }
+            _ => panic!("Only u32 dst indices supported"),
+        }
+
+        Ok(MeshIndices {
+            range: base_index..(base_index + count),
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct MeshIndices {
+    pub range: Range<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -929,6 +1101,61 @@ pub enum GpuBufferInfo {
     NonIndexed,
 }
 
+#[derive(Resource, Default)]
+pub struct MegaMesh {
+    pub mesh: Option<Mesh>,
+    pub gpu_mesh: Option<GpuMesh>,
+    pub indices: HashMap<AssetId<Mesh>, MeshIndices>,
+}
+
+/// This system prepares all assets of the corresponding [`RenderAsset`] type
+/// which where extracted this frame for the GPU.
+pub fn prepare_mega_mesh(
+    extracted_assets: Res<ExtractedAssets<Mesh>>,
+    mega_mesh: ResMut<MegaMesh>,
+    param: StaticSystemParam<<Mesh as RenderAsset>::Param>,
+) {
+    let mut param = param.into_inner();
+    let mega_mesh = mega_mesh.into_inner();
+
+    // for removed in std::mem::take(&mut extracted_assets.removed) {
+    //     render_assets.remove(removed);
+    // }
+
+    let mut updated = false;
+    for (id, extracted_asset) in &extracted_assets.extracted {
+        if let MegaMesh {
+            mesh: Some(mesh),
+            indices,
+            ..
+        } = mega_mesh
+        {
+            let Ok(mesh_indices) = mesh.append(extracted_asset) else {
+                continue;
+            };
+            indices.insert(*id, mesh_indices);
+        } else {
+            mega_mesh.mesh = Some(extracted_asset.clone());
+            mega_mesh.indices.insert(
+                *id,
+                MeshIndices {
+                    range: 0..extracted_asset
+                        .indices()
+                        .map_or(0, |indices| indices.len() as u32),
+                },
+            );
+        }
+        updated = true;
+    }
+    if updated {
+        mega_mesh.gpu_mesh = <Mesh as RenderAsset>::prepare_asset(
+            mega_mesh.mesh.as_ref().expect("No mega mesh").clone(),
+            &mut param,
+        )
+        .ok();
+    }
+}
+
 impl RenderAsset for Mesh {
     type ExtractedAsset = Mesh;
     type PreparedAsset = GpuMesh;
@@ -944,7 +1171,7 @@ impl RenderAsset for Mesh {
         mesh: Self::ExtractedAsset,
         (render_device, images): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
-        let vertex_buffer_data = mesh.get_vertex_buffer_data();
+        let vertex_buffer_data = mesh.get_vertex_buffer_data(None);
         let vertex_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             usage: BufferUsages::VERTEX,
             label: Some("Mesh Vertex Buffer"),

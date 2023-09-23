@@ -39,6 +39,10 @@ struct Args {
     /// the number of different textures from which to randomly select the material base color. 0 means no textures.
     #[argh(option, default = "0")]
     material_texture_count: usize,
+
+    /// the number of different meshes from which to randomly select the mesh.
+    #[argh(option, default = "1")]
+    mesh_count: usize,
 }
 
 #[derive(Default, Clone)]
@@ -87,6 +91,10 @@ fn main() {
 
 const WIDTH: usize = 200;
 const HEIGHT: usize = 200;
+
+struct MeshHandles {
+    meshes: Vec<Handle<Mesh>>,
+}
 
 fn setup(
     mut commands: Commands,

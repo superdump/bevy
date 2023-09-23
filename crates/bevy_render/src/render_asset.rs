@@ -102,7 +102,7 @@ impl<A: RenderAsset> RenderAssetDependency for A {
 /// Temporarily stores the extracted and removed assets of the current frame.
 #[derive(Resource)]
 pub struct ExtractedAssets<A: RenderAsset> {
-    extracted: Vec<(AssetId<A>, A::ExtractedAsset)>,
+    pub(crate) extracted: Vec<(AssetId<A>, A::ExtractedAsset)>,
     removed: Vec<AssetId<A>>,
 }
 

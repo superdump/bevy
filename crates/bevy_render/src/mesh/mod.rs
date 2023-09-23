@@ -6,10 +6,14 @@ pub mod shape;
 
 pub use mesh::*;
 
-use crate::{prelude::Image, render_asset::RenderAssetPlugin};
+use crate::{
+    prelude::Image,
+    render_asset::{prepare_assets, RenderAssetPlugin},
+    Render, RenderApp, RenderSet,
+};
 use bevy_app::{App, Plugin};
 use bevy_asset::{AssetApp, Handle};
-use bevy_ecs::entity::Entity;
+use bevy_ecs::{entity::Entity, schedule::IntoSystemConfigs};
 
 /// Adds the [`Mesh`] as an asset and makes sure that they are extracted and prepared for the GPU.
 pub struct MeshPlugin;
@@ -25,7 +29,20 @@ impl Plugin for MeshPlugin {
             .register_type::<Indices>()
             .register_type::<skinning::SkinnedMesh>()
             .register_type::<Vec<Entity>>()
+            .init_resource::<MegaMesh>()
             // 'Mesh' must be prepared after 'Image' as meshes rely on the morph target image being ready
             .add_plugins(RenderAssetPlugin::<Mesh, Image>::default());
+    }
+
+    fn finish(&self, app: &mut App) {
+        app.sub_app_mut(RenderApp)
+            .init_resource::<MegaMesh>()
+            .add_systems(
+                Render,
+                prepare_mega_mesh
+                    .in_set(RenderSet::PrepareAssets)
+                    .after(prepare_assets::<Image>)
+                    .before(prepare_assets::<Mesh>),
+            );
     }
 }

@@ -1,5 +1,6 @@
 #import bevy_pbr::prepass_bindings
 #import bevy_pbr::pbr_bindings
+#import bevy_pbr::mesh_bindings mesh
 #import bevy_pbr::pbr_types
 #ifdef NORMAL_PREPASS
 #import bevy_pbr::pbr_functions
@@ -27,6 +28,7 @@ struct FragmentInput {
 #ifdef DEPTH_CLAMP_ORTHO
     @location(5) clip_position_unclamped: vec4<f32>,
 #endif // DEPTH_CLAMP_ORTHO
+    @location(6) @interpolate(flat) instance_index: u32,
 };
 
 // Cutoff used for the premultiplied alpha modes BLEND and ADD.
@@ -34,21 +36,23 @@ const PREMULTIPLIED_ALPHA_CUTOFF = 0.05;
 
 // We can use a simplified version of alpha_discard() here since we only need to handle the alpha_cutoff
 fn prepass_alpha_discard(in: FragmentInput) {
+    let material_index = mesh[in.instance_index].material_index;
+    let material = bevy_pbr::pbr_bindings::materials[material_index];
 
 #ifdef MAY_DISCARD
-    var output_color: vec4<f32> = bevy_pbr::pbr_bindings::material.base_color;
+    var output_color: vec4<f32> = material.base_color;
 
 #ifdef VERTEX_UVS
-    if (bevy_pbr::pbr_bindings::material.flags & bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u {
-        let duvdx = dpdx(in.uv) * bevy_pbr::prepass_bindings::view.pow_2_mip_bias;
-        let duvdy = dpdy(in.uv) * bevy_pbr::prepass_bindings::view.pow_2_mip_bias;
+    let duvdx = dpdx(in.uv) * bevy_pbr::prepass_bindings::view.pow_2_mip_bias;
+    let duvdy = dpdy(in.uv) * bevy_pbr::prepass_bindings::view.pow_2_mip_bias;
+    if (material.flags & bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u {
         output_color = output_color * textureSampleGrad(bevy_pbr::pbr_bindings::base_color_texture, bevy_pbr::pbr_bindings::base_color_sampler, in.uv, duvdx, duvdy);
     }
 #endif // VERTEX_UVS
 
-    let alpha_mode = bevy_pbr::pbr_bindings::material.flags & bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
+    let alpha_mode = material.flags & bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
     if alpha_mode == bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK {
-        if output_color.a < bevy_pbr::pbr_bindings::material.alpha_cutoff {
+        if output_color.a < material.alpha_cutoff {
             discard;
         }
     } else if (alpha_mode == bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_BLEND || alpha_mode == bevy_pbr::pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_ADD) {

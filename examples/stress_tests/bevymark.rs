@@ -164,11 +164,13 @@ fn scheduled_spawner(
 struct BirdResources {
     textures: Vec<Handle<Image>>,
     materials: Vec<Handle<ColorMaterial>>,
+    meshes: Vec<Mesh2dHandle>,
     quad: Mesh2dHandle,
     color_rng: StdRng,
     material_rng: StdRng,
     velocity_rng: StdRng,
     transform_rng: StdRng,
+    mesh_rng: StdRng,
 }
 
 #[derive(Component)]
@@ -198,10 +200,20 @@ fn setup(
 
     let material_assets = material_assets.into_inner();
     let materials = init_materials(args, &textures, material_assets);
+    let mesh_handles = (3..5)
+        .into_iter()
+        .map(|i| {
+            Mesh2dHandle(meshes.add(Mesh::from(shape::RegularPolygon::new(
+                BIRD_TEXTURE_SIZE as f32 * 0.5,
+                i,
+            ))))
+        })
+        .collect::<Vec<_>>();
 
     let mut bird_resources = BirdResources {
         textures,
         materials,
+        meshes: mesh_handles,
         quad: meshes
             .add(Mesh::from(shape::Quad::new(Vec2::splat(
                 BIRD_TEXTURE_SIZE as f32,
@@ -211,6 +223,7 @@ fn setup(
         material_rng: StdRng::seed_from_u64(42),
         velocity_rng: StdRng::seed_from_u64(42),
         transform_rng: StdRng::seed_from_u64(42),
+        mesh_rng: StdRng::seed_from_u64(42),
     };
 
     let text_section = move |color, value: &str| {
@@ -436,7 +449,11 @@ fn spawn_birds(
                         };
                     (
                         MaterialMesh2dBundle {
-                            mesh: bird_resources.quad.clone(),
+                            mesh: bird_resources
+                                .meshes
+                                .choose(&mut bird_resources.mesh_rng)
+                                .unwrap()
+                                .clone(),
                             material,
                             transform,
                             ..default()

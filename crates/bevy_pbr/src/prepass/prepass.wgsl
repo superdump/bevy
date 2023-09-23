@@ -54,6 +54,7 @@ struct VertexOutput {
 #ifdef DEPTH_CLAMP_ORTHO
     @location(5) clip_position_unclamped: vec4<f32>,
 #endif // DEPTH_CLAMP_ORTHO
+    @location(6) @interpolate(flat) instance_index: u32,
 }
 
 #ifdef MORPH_TARGETS
@@ -137,6 +138,8 @@ fn vertex(vertex_no_morph: Vertex) -> VertexOutput {
         vec4<f32>(vertex.position, 1.0)
     );
 #endif // MOTION_VECTOR_PREPASS
+
+    out.instance_index = vertex_no_morph.instance_index;
 
     return out;
 }
