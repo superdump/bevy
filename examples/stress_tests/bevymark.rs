@@ -200,7 +200,7 @@ fn setup(
 
     let material_assets = material_assets.into_inner();
     let materials = init_materials(args, &textures, material_assets);
-    let mesh_handles = (3..5)
+    let mesh_handles = (3..33)
         .into_iter()
         .map(|i| {
             Mesh2dHandle(meshes.add(Mesh::from(shape::RegularPolygon::new(
