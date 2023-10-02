@@ -1,13 +1,21 @@
 use crate::{Extract, ExtractSchedule, Render, RenderApp, RenderSet};
-use bevy_app::{App, Plugin};
+use bevy_app::{App, Plugin, PostUpdate};
 use bevy_asset::{Asset, AssetEvent, AssetId, Assets};
+use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::*,
     schedule::SystemConfigs,
     system::{StaticSystemParam, SystemParam, SystemParamItem},
 };
-use bevy_utils::{HashMap, HashSet};
-use std::marker::PhantomData;
+use bevy_utils::{
+    slotmap::{new_key_type, SlotMap},
+    HashMap, HashSet,
+};
+use crossbeam_channel::{Receiver, Sender};
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 pub enum PrepareAssetError<E: Send + Sync + 'static> {
     RetryNextUpdate(E),
@@ -68,10 +76,16 @@ impl<A: RenderAsset, AFTER: RenderAssetDependency + 'static> Plugin
     for RenderAssetPlugin<A, AFTER>
 {
     fn build(&self, app: &mut App) {
+        let (render_asset_key_sender, render_asset_key_receiver) =
+            create_render_asset_key_channel::<A>();
+        app.insert_resource(render_asset_key_receiver)
+            .add_systems(PostUpdate, update_main_world_render_asset_keys::<A>);
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<ExtractedAssets<A>>()
                 .init_resource::<RenderAssets<A>>()
+                .init_resource::<RenderAssetKeyUpdates<A>>()
+                .insert_resource(render_asset_key_sender)
                 .init_resource::<PrepareNextFrameAssets<A>>()
                 .add_systems(ExtractSchedule, extract_render_asset::<A>);
             AFTER::register_system(
@@ -115,45 +129,190 @@ impl<A: RenderAsset> Default for ExtractedAssets<A> {
     }
 }
 
+new_key_type! { pub struct InnerRenderAssetKey; }
+
+#[derive(Component, PartialOrd, Ord, Hash)]
+pub struct RenderAssetKey<A: RenderAsset> {
+    pub inner: InnerRenderAssetKey,
+    marker: PhantomData<A>,
+}
+
+impl<A: RenderAsset> Clone for RenderAssetKey<A> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            marker: self.marker.clone(),
+        }
+    }
+}
+
+impl<A: RenderAsset> Copy for RenderAssetKey<A> {}
+
+impl<A: RenderAsset> PartialEq for RenderAssetKey<A> {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl<A: RenderAsset> Eq for RenderAssetKey<A> {}
+
+impl<A: RenderAsset> RenderAssetKey<A> {
+    pub fn new(inner: InnerRenderAssetKey) -> Self {
+        Self {
+            inner,
+            marker: Default::default(),
+        }
+    }
+}
+
+#[derive(Resource, Clone)]
+pub struct RenderAssetKeyReceiver<A: RenderAsset> {
+    pub inner: Receiver<Vec<(Vec<Entity>, RenderAssetKey<A>)>>,
+    marker: PhantomData<A>,
+}
+
+impl<A: RenderAsset> RenderAssetKeyReceiver<A> {
+    pub fn new(receiver: Receiver<Vec<(Vec<Entity>, RenderAssetKey<A>)>>) -> Self {
+        Self {
+            inner: receiver,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<A: RenderAsset> Deref for RenderAssetKeyReceiver<A> {
+    type Target = Receiver<Vec<(Vec<Entity>, RenderAssetKey<A>)>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<A: RenderAsset> DerefMut for RenderAssetKeyReceiver<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+#[derive(Resource)]
+pub struct RenderAssetKeySender<A: RenderAsset> {
+    pub inner: Sender<Vec<(Vec<Entity>, RenderAssetKey<A>)>>,
+    marker: PhantomData<A>,
+}
+
+impl<A: RenderAsset> RenderAssetKeySender<A> {
+    pub fn new(receiver: Sender<Vec<(Vec<Entity>, RenderAssetKey<A>)>>) -> Self {
+        Self {
+            inner: receiver,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<A: RenderAsset> Deref for RenderAssetKeySender<A> {
+    type Target = Sender<Vec<(Vec<Entity>, RenderAssetKey<A>)>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<A: RenderAsset> DerefMut for RenderAssetKeySender<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+pub fn create_render_asset_key_channel<A: RenderAsset>(
+) -> (RenderAssetKeySender<A>, RenderAssetKeyReceiver<A>) {
+    let (s, r) = crossbeam_channel::unbounded::<Vec<(Vec<Entity>, RenderAssetKey<A>)>>();
+    (
+        RenderAssetKeySender::<A>::new(s),
+        RenderAssetKeyReceiver::<A>::new(r),
+    )
+}
+pub fn update_main_world_render_asset_keys<A: RenderAsset>(
+    mut commands: Commands,
+    render_asset_key_receiver: Res<RenderAssetKeyReceiver<A>>,
+) {
+    while let Ok(mut received) = render_asset_key_receiver.try_recv() {
+        for (entities, key) in received.drain(..) {
+            commands.insert_or_spawn_batch(entities.into_iter().map(move |entity| (entity, key)));
+        }
+    }
+}
+
 /// Stores all GPU representations ([`RenderAsset::PreparedAssets`](RenderAsset::PreparedAsset))
 /// of [`RenderAssets`](RenderAsset) as long as they exist.
 #[derive(Resource)]
-pub struct RenderAssets<A: RenderAsset>(HashMap<AssetId<A>, A::PreparedAsset>);
+pub struct RenderAssets<A: RenderAsset> {
+    asset_id_to_key: HashMap<AssetId<A>, RenderAssetKey<A>>,
+    prepared_assets: SlotMap<InnerRenderAssetKey, A::PreparedAsset>,
+}
 
 impl<A: RenderAsset> Default for RenderAssets<A> {
     fn default() -> Self {
-        Self(Default::default())
+        Self {
+            asset_id_to_key: Default::default(),
+            prepared_assets: Default::default(),
+        }
     }
 }
 
 impl<A: RenderAsset> RenderAssets<A> {
-    pub fn get(&self, id: impl Into<AssetId<A>>) -> Option<&A::PreparedAsset> {
-        self.0.get(&id.into())
+    #[inline]
+    pub fn get_with_asset_id(&self, id: impl Into<AssetId<A>>) -> Option<&A::PreparedAsset> {
+        let Some(key) = self.asset_id_to_key.get(&id.into()) else {
+            return None;
+        };
+        self.get_with_key(*key)
     }
 
-    pub fn get_mut(&mut self, id: impl Into<AssetId<A>>) -> Option<&mut A::PreparedAsset> {
-        self.0.get_mut(&id.into())
+    #[inline]
+    pub fn get_with_key(&self, key: RenderAssetKey<A>) -> Option<&A::PreparedAsset> {
+        self.prepared_assets.get(key.inner)
+    }
+
+    #[inline]
+    pub fn get_mut_with_asset_id(
+        &mut self,
+        id: impl Into<AssetId<A>>,
+    ) -> Option<&mut A::PreparedAsset> {
+        let Some(key) = self.asset_id_to_key.get(&id.into()) else {
+            return None;
+        };
+        self.get_mut_with_key(*key)
+    }
+
+    #[inline]
+    pub fn get_mut_with_key(&mut self, key: RenderAssetKey<A>) -> Option<&mut A::PreparedAsset> {
+        self.prepared_assets.get_mut(key.inner)
     }
 
     pub fn insert(
         &mut self,
         id: impl Into<AssetId<A>>,
         value: A::PreparedAsset,
-    ) -> Option<A::PreparedAsset> {
-        self.0.insert(id.into(), value)
+    ) -> RenderAssetKey<A> {
+        let key = RenderAssetKey::<A>::new(self.prepared_assets.insert(value));
+        self.asset_id_to_key.insert(id.into(), key);
+        key
     }
 
     pub fn remove(&mut self, id: impl Into<AssetId<A>>) -> Option<A::PreparedAsset> {
-        self.0.remove(&id.into())
+        let Some(key) = self.asset_id_to_key.remove(&id.into()) else {
+            return None;
+        };
+        self.prepared_assets.remove(key.inner)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (AssetId<A>, &A::PreparedAsset)> {
-        self.0.iter().map(|(k, v)| (*k, v))
-    }
+    // pub fn iter(&self) -> impl Iterator<Item = (AssetId<A>, &A::PreparedAsset)> {
+    //     self.0.iter().map(|(k, v)| (*k, v))
+    // }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (AssetId<A>, &mut A::PreparedAsset)> {
-        self.0.iter_mut().map(|(k, v)| (*k, v))
-    }
+    // pub fn iter_mut(&mut self) -> impl Iterator<Item = (AssetId<A>, &mut A::PreparedAsset)> {
+    //     self.0.iter_mut().map(|(k, v)| (*k, v))
+    // }
 }
 
 /// This system extracts all created or modified assets of the corresponding [`RenderAsset`] type
@@ -208,11 +367,21 @@ impl<A: RenderAsset> Default for PrepareNextFrameAssets<A> {
     }
 }
 
+#[derive(Resource, Deref, DerefMut)]
+pub struct RenderAssetKeyUpdates<A: RenderAsset>(Vec<(AssetId<A>, RenderAssetKey<A>)>);
+
+impl<A: RenderAsset> Default for RenderAssetKeyUpdates<A> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
 /// This system prepares all assets of the corresponding [`RenderAsset`] type
 /// which where extracted this frame for the GPU.
 pub fn prepare_assets<R: RenderAsset>(
     mut extracted_assets: ResMut<ExtractedAssets<R>>,
     mut render_assets: ResMut<RenderAssets<R>>,
+    mut key_updates: ResMut<RenderAssetKeyUpdates<R>>,
     mut prepare_next_frame: ResMut<PrepareNextFrameAssets<R>>,
     param: StaticSystemParam<<R as RenderAsset>::Param>,
 ) {
@@ -221,7 +390,8 @@ pub fn prepare_assets<R: RenderAsset>(
     for (id, extracted_asset) in queued_assets {
         match R::prepare_asset(extracted_asset, &mut param) {
             Ok(prepared_asset) => {
-                render_assets.insert(id, prepared_asset);
+                let key = render_assets.insert(id, prepared_asset);
+                key_updates.push((id, key));
             }
             Err(PrepareAssetError::RetryNextUpdate(extracted_asset)) => {
                 prepare_next_frame.assets.push((id, extracted_asset));
@@ -236,7 +406,8 @@ pub fn prepare_assets<R: RenderAsset>(
     for (id, extracted_asset) in std::mem::take(&mut extracted_assets.extracted) {
         match R::prepare_asset(extracted_asset, &mut param) {
             Ok(prepared_asset) => {
-                render_assets.insert(id, prepared_asset);
+                let key = render_assets.insert(id, prepared_asset);
+                key_updates.push((id, key));
             }
             Err(PrepareAssetError::RetryNextUpdate(extracted_asset)) => {
                 prepare_next_frame.assets.push((id, extracted_asset));

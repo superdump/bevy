@@ -106,7 +106,7 @@ fn prepare_bind_group(
     game_of_life_image: Res<GameOfLifeImage>,
     render_device: Res<RenderDevice>,
 ) {
-    let view = gpu_images.get(&game_of_life_image.0).unwrap();
+    let view = gpu_images.get_with_asset_id(&game_of_life_image.0).unwrap();
     let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
         label: None,
         layout: &pipeline.texture_bind_group_layout,

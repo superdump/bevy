@@ -142,7 +142,7 @@ fn queue_wireframes(
         let add_render_phase = |phase_item: (Entity, &RenderMeshInstance)| {
             let (entity, mesh_instance) = phase_item;
 
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(mesh) = render_meshes.get_with_asset_id(mesh_instance.mesh_asset_id) else {
                 return;
             };
             let mut key =

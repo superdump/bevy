@@ -15,6 +15,7 @@ pub mod futures;
 pub mod label;
 mod short_names;
 pub use short_names::get_short_name;
+pub use slotmap;
 pub mod synccell;
 pub mod syncunsafecell;
 

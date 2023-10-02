@@ -738,7 +738,9 @@ pub fn prepare_uinodes(
                         .filter(|_| batch_image_handle == extracted_uinode.image);
 
                     if existing_batch.is_none() {
-                        if let Some(gpu_image) = gpu_images.get(extracted_uinode.image) {
+                        if let Some(gpu_image) =
+                            gpu_images.get_with_asset_id(extracted_uinode.image)
+                        {
                             batch_item_index = item_index;
                             batch_image_handle = extracted_uinode.image;
 

@@ -968,7 +968,7 @@ pub fn prepare_lights(
             spot_light_shadowmap_offset: num_directional_cascades_enabled as i32
                 - point_light_count as i32,
             environment_map_smallest_specular_mip_level: environment_map
-                .and_then(|env_map| images.get(&env_map.specular_map))
+                .and_then(|env_map| images.get_with_asset_id(&env_map.specular_map))
                 .map(|specular_map| specular_map.mip_level_count - 1)
                 .unwrap_or(0),
         };
@@ -1610,7 +1610,8 @@ pub fn queue_shadows<M: Material>(
                 let Some(material) = render_materials.get(material_asset_id) else {
                     continue;
                 };
-                let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+                let Some(mesh) = render_meshes.get_with_asset_id(mesh_instance.mesh_asset_id)
+                else {
                     continue;
                 };
 

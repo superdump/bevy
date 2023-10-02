@@ -469,7 +469,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLineGizmo {
         line_gizmos: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
-        let Some(line_gizmo) = line_gizmos.into_inner().get(handle) else {
+        let Some(line_gizmo) = line_gizmos.into_inner().get_with_asset_id(handle) else {
             return RenderCommandResult::Failure;
         };
 

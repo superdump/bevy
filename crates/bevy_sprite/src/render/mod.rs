@@ -650,7 +650,9 @@ pub fn prepare_sprites(
 
                 let batch_image_changed = batch_image_handle != extracted_sprite.image_handle_id;
                 if batch_image_changed {
-                    let Some(gpu_image) = gpu_images.get(extracted_sprite.image_handle_id) else {
+                    let Some(gpu_image) =
+                        gpu_images.get_with_asset_id(extracted_sprite.image_handle_id)
+                    else {
                         continue;
                     };
 

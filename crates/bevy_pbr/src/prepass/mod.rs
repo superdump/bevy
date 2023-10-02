@@ -815,7 +815,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
             let Some(material) = render_materials.get(material_asset_id) else {
                 continue;
             };
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(mesh) = render_meshes.get_with_asset_id(mesh_instance.mesh_asset_id) else {
                 continue;
             };
 

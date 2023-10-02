@@ -973,9 +973,11 @@ impl RenderAsset for Mesh {
             buffer_info,
             primitive_topology: mesh.primitive_topology(),
             layout: mesh_vertex_buffer_layout,
-            morph_targets: mesh
-                .morph_targets
-                .and_then(|mt| images.get(&mt).map(|i| i.texture_view.clone())),
+            morph_targets: mesh.morph_targets.and_then(|mt| {
+                images
+                    .get_with_asset_id(&mt)
+                    .map(|i| i.texture_view.clone())
+            }),
         })
     }
 }

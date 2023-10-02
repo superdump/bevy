@@ -173,7 +173,7 @@ fn queue_line_gizmos_3d(
             | MeshPipelineKey::from_hdr(view.hdr);
 
         for (entity, handle) in &line_gizmos {
-            let Some(line_gizmo) = line_gizmo_assets.get(handle) else {
+            let Some(line_gizmo) = line_gizmo_assets.get_with_asset_id(handle) else {
                 continue;
             };
 

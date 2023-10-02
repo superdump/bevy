@@ -1,4 +1,4 @@
-use bevy_app::{App, Plugin};
+use bevy_app::{App, Plugin, PostUpdate};
 use bevy_asset::{Asset, AssetApp, AssetEvent, AssetId, AssetServer, Assets, Handle};
 use bevy_core_pipeline::{
     core_2d::Transparent2d,
@@ -29,9 +29,14 @@ use bevy_render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_transform::components::{GlobalTransform, Transform};
-use bevy_utils::{EntityHashMap, FloatOrd, HashMap, HashSet};
+use bevy_utils::{
+    slotmap::{new_key_type, SlotMap},
+    EntityHashMap, FloatOrd, HashMap, HashSet,
+};
+use crossbeam_channel::{Receiver, Sender};
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 use crate::{
     DrawMesh2d, Mesh2dHandle, Mesh2dPipeline, Mesh2dPipelineKey, RenderMesh2dInstances,
@@ -139,13 +144,20 @@ where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     fn build(&self, app: &mut App) {
-        app.init_asset::<M>();
+        let (render_material2d_key_sender, render_material2d_key_receiver) =
+            create_render_material_key_channel::<M>();
+        app.init_asset::<M>()
+            .insert_resource(render_material2d_key_receiver.clone())
+            .add_systems(PostUpdate, update_main_world_render_material2d_keys::<M>);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .add_render_command::<Transparent2d, DrawMaterial2d<M>>()
                 .init_resource::<ExtractedMaterials2d<M>>()
                 .init_resource::<RenderMaterials2d<M>>()
+                .init_resource::<RenderMaterial2dKeyUpdates<M>>()
+                .insert_resource(render_material2d_key_sender)
+                .insert_resource(render_material2d_key_receiver)
                 .init_resource::<RenderMaterial2dInstances<M>>()
                 .init_resource::<SpecializedMeshPipelines<Material2dPipeline<M>>>()
                 .add_systems(
@@ -158,6 +170,9 @@ where
                         prepare_materials_2d::<M>
                             .in_set(RenderSet::PrepareAssets)
                             .after(prepare_assets::<Image>),
+                        update_render_world_render_material2d_keys::<M>
+                            .in_set(RenderSet::PrepareAssets)
+                            .after(prepare_materials_2d::<M>),
                         queue_material2d_meshes::<M>
                             .in_set(RenderSet::QueueMeshes)
                             .after(prepare_materials_2d::<M>),
@@ -173,8 +188,15 @@ where
     }
 }
 
+pub struct RenderMaterial2dInstance<M: Material2d> {
+    asset_id: Option<AssetId<M>>,
+    key: Option<RenderMaterial2dKey>,
+}
+
 #[derive(Resource, Deref, DerefMut)]
-pub struct RenderMaterial2dInstances<M: Material2d>(EntityHashMap<Entity, AssetId<M>>);
+pub struct RenderMaterial2dInstances<M: Material2d>(
+    EntityHashMap<Entity, RenderMaterial2dInstance<M>>,
+);
 
 impl<M: Material2d> Default for RenderMaterial2dInstances<M> {
     fn default() -> Self {
@@ -184,12 +206,29 @@ impl<M: Material2d> Default for RenderMaterial2dInstances<M> {
 
 fn extract_material_meshes_2d<M: Material2d>(
     mut material_instances: ResMut<RenderMaterial2dInstances<M>>,
-    query: Extract<Query<(Entity, &ViewVisibility, &Handle<M>)>>,
+    query: Extract<
+        Query<(
+            Entity,
+            &ViewVisibility,
+            Ref<Handle<M>>,
+            Option<&RenderMaterial2dKey>,
+        )>,
+    >,
 ) {
     material_instances.clear();
-    for (entity, view_visibility, handle) in &query {
+    for (entity, view_visibility, handle, key) in &query {
         if view_visibility.get() {
-            material_instances.insert(entity, handle.id());
+            material_instances.insert(
+                entity,
+                RenderMaterial2dInstance {
+                    asset_id: if key.is_none() || handle.is_changed() {
+                        Some(handle.id())
+                    } else {
+                        None
+                    },
+                    key: key.cloned(),
+                },
+            );
         }
     }
 }
@@ -340,7 +379,10 @@ impl<P: PhaseItem, M: Material2d, const I: usize> RenderCommand<P>
         let Some(material_instance) = material_instances.get(&item.entity()) else {
             return RenderCommandResult::Failure;
         };
-        let Some(material2d) = materials.get(material_instance) else {
+        let Some(material_key) = material_instance.key else {
+            return RenderCommandResult::Failure;
+        };
+        let Some(material2d) = materials.get_with_key(material_key) else {
             return RenderCommandResult::Failure;
         };
         pass.set_bind_group(I, &material2d.bind_group, &[]);
@@ -404,16 +446,22 @@ pub fn queue_material2d_meshes<M: Material2d>(
             }
         }
         for visible_entity in &visible_entities.entities {
-            let Some(material_asset_id) = render_material_instances.get(visible_entity) else {
+            let Some(material_instance) = render_material_instances.get(visible_entity) else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.get_mut(visible_entity) else {
                 continue;
             };
-            let Some(material2d) = render_materials.get(material_asset_id) else {
+            let Some(material_key) = material_instance.key else {
                 continue;
             };
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(material2d) = render_materials.get_with_key(material_key) else {
+                continue;
+            };
+            let Some(mesh_asset_key) = mesh_instance.mesh_asset_key else {
+                continue;
+            };
+            let Some(mesh) = render_meshes.get_with_key(mesh_asset_key) else {
                 continue;
             };
             let mesh_key =
@@ -488,13 +536,127 @@ impl<M: Material2d> Default for ExtractedMaterials2d<M> {
     }
 }
 
+new_key_type! {
+    #[derive(Component)]
+    pub struct RenderMaterial2dKey;
+}
+
+#[derive(Resource, Clone)]
+pub struct RenderMaterial2dKeyReceiver<M: Material2d> {
+    pub inner: Receiver<Vec<(Vec<Entity>, RenderMaterial2dKey)>>,
+    marker: PhantomData<M>,
+}
+
+impl<M: Material2d> RenderMaterial2dKeyReceiver<M> {
+    pub fn new(receiver: Receiver<Vec<(Vec<Entity>, RenderMaterial2dKey)>>) -> Self {
+        Self {
+            inner: receiver,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<M: Material2d> Deref for RenderMaterial2dKeyReceiver<M> {
+    type Target = Receiver<Vec<(Vec<Entity>, RenderMaterial2dKey)>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<M: Material2d> DerefMut for RenderMaterial2dKeyReceiver<M> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+#[derive(Resource)]
+pub struct RenderMaterial2dKeySender<M: Material2d> {
+    pub inner: Sender<Vec<(Vec<Entity>, RenderMaterial2dKey)>>,
+    marker: PhantomData<M>,
+}
+
+impl<M: Material2d> RenderMaterial2dKeySender<M> {
+    pub fn new(receiver: Sender<Vec<(Vec<Entity>, RenderMaterial2dKey)>>) -> Self {
+        Self {
+            inner: receiver,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<M: Material2d> Deref for RenderMaterial2dKeySender<M> {
+    type Target = Sender<Vec<(Vec<Entity>, RenderMaterial2dKey)>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<M: Material2d> DerefMut for RenderMaterial2dKeySender<M> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+pub fn create_render_material_key_channel<M: Material2d>(
+) -> (RenderMaterial2dKeySender<M>, RenderMaterial2dKeyReceiver<M>) {
+    let (s, r) = crossbeam_channel::unbounded::<Vec<(Vec<Entity>, RenderMaterial2dKey)>>();
+    (
+        RenderMaterial2dKeySender::<M>::new(s),
+        RenderMaterial2dKeyReceiver::<M>::new(r),
+    )
+}
+
 /// Stores all prepared representations of [`Material2d`] assets for as long as they exist.
-#[derive(Resource, Deref, DerefMut)]
-pub struct RenderMaterials2d<T: Material2d>(HashMap<AssetId<T>, PreparedMaterial2d<T>>);
+#[derive(Resource)]
+pub struct RenderMaterials2d<T: Material2d> {
+    asset_id_to_key: HashMap<AssetId<T>, RenderMaterial2dKey>,
+    prepared_materials: SlotMap<RenderMaterial2dKey, PreparedMaterial2d<T>>,
+}
+
+impl<T: Material2d> RenderMaterials2d<T> {
+    #[inline]
+    pub fn insert(
+        &mut self,
+        asset_id: impl Into<AssetId<T>>,
+        prepared_material: PreparedMaterial2d<T>,
+    ) -> RenderMaterial2dKey {
+        let key = self.prepared_materials.insert(prepared_material);
+        self.asset_id_to_key.insert(asset_id.into(), key);
+        key
+    }
+
+    #[inline]
+    pub fn remove(&mut self, asset_id: impl Into<AssetId<T>>) {
+        let Some(key) = self.asset_id_to_key.remove::<AssetId<T>>(&asset_id.into()) else {
+            return;
+        };
+        self.prepared_materials.remove(key);
+    }
+
+    #[inline]
+    pub fn get_with_asset_id(
+        &self,
+        asset_id: impl Into<AssetId<T>>,
+    ) -> Option<&PreparedMaterial2d<T>> {
+        self.asset_id_to_key
+            .get::<AssetId<T>>(&asset_id.into())
+            .and_then(|key| self.prepared_materials.get(*key))
+    }
+
+    #[inline]
+    pub fn get_with_key(&self, key: RenderMaterial2dKey) -> Option<&PreparedMaterial2d<T>> {
+        self.prepared_materials.get(key)
+    }
+}
 
 impl<T: Material2d> Default for RenderMaterials2d<T> {
     fn default() -> Self {
-        Self(Default::default())
+        Self {
+            asset_id_to_key: Default::default(),
+            prepared_materials: Default::default(),
+        }
     }
 }
 
@@ -555,6 +717,7 @@ pub fn prepare_materials_2d<M: Material2d>(
     mut prepare_next_frame: Local<PrepareNextFrameMaterials<M>>,
     mut extracted_assets: ResMut<ExtractedMaterials2d<M>>,
     mut render_materials: ResMut<RenderMaterials2d<M>>,
+    mut key_updates: ResMut<RenderMaterial2dKeyUpdates<M>>,
     render_device: Res<RenderDevice>,
     images: Res<RenderAssets<Image>>,
     fallback_image: Res<FallbackImage>,
@@ -570,7 +733,8 @@ pub fn prepare_materials_2d<M: Material2d>(
             &pipeline,
         ) {
             Ok(prepared_asset) => {
-                render_materials.insert(id, prepared_asset);
+                let key = render_materials.insert(id, prepared_asset);
+                key_updates.push((id, key));
             }
             Err(AsBindGroupError::RetryNextUpdate) => {
                 prepare_next_frame.assets.push((id, material));
@@ -579,7 +743,7 @@ pub fn prepare_materials_2d<M: Material2d>(
     }
 
     for removed in std::mem::take(&mut extracted_assets.removed) {
-        render_materials.remove(&removed);
+        render_materials.remove(removed);
     }
 
     for (asset_id, material) in std::mem::take(&mut extracted_assets.extracted) {
@@ -591,11 +755,60 @@ pub fn prepare_materials_2d<M: Material2d>(
             &pipeline,
         ) {
             Ok(prepared_asset) => {
-                render_materials.insert(asset_id, prepared_asset);
+                let key = render_materials.insert(asset_id, prepared_asset);
+                key_updates.push((asset_id, key));
             }
             Err(AsBindGroupError::RetryNextUpdate) => {
                 prepare_next_frame.assets.push((asset_id, material));
             }
+        }
+    }
+}
+
+pub fn update_main_world_render_material2d_keys<M: Material2d>(
+    mut commands: Commands,
+    render_material2d_key_receiver: Res<RenderMaterial2dKeyReceiver<M>>,
+) {
+    while let Ok(mut received) = render_material2d_key_receiver.try_recv() {
+        for (entities, key) in received.drain(..) {
+            commands.insert_or_spawn_batch(entities.into_iter().map(move |entity| (entity, key)));
+        }
+    }
+}
+
+#[derive(Resource, Deref, DerefMut)]
+pub struct RenderMaterial2dKeyUpdates<M: Material2d>(Vec<(AssetId<M>, RenderMaterial2dKey)>);
+
+impl<M: Material2d> Default for RenderMaterial2dKeyUpdates<M> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+pub fn update_render_world_render_material2d_keys<M: Material2d>(
+    mut key_updates: ResMut<RenderMaterial2dKeyUpdates<M>>,
+    mut render_material_instances: ResMut<RenderMaterial2dInstances<M>>,
+    mut key_map: Local<HashMap<AssetId<M>, RenderMaterial2dKey>>,
+    render_material2d_key_sender: Res<RenderMaterial2dKeySender<M>>,
+) {
+    let mut map: HashMap<RenderMaterial2dKey, Vec<Entity>> = HashMap::new();
+    key_map.extend(key_updates.drain(..));
+    for (&entity, material_instance) in render_material_instances.iter_mut() {
+        if material_instance.key.is_some() {
+            continue;
+        }
+        material_instance.key = key_map
+            .get(material_instance.asset_id.as_ref().unwrap())
+            .cloned();
+        if let Some(key) = material_instance.key {
+            map.entry(key).or_default().push(entity);
+        }
+    }
+    let to_send = map.into_iter().map(|(k, v)| (v, k)).collect::<Vec<_>>();
+    if !to_send.is_empty() {
+        match render_material2d_key_sender.try_send(to_send) {
+            Ok(_) => {}
+            Err(_) => panic!("Failed to send"),
         }
     }
 }

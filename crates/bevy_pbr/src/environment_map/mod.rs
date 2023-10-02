@@ -56,7 +56,8 @@ impl EnvironmentMapLight {
     /// Whether or not all textures necessary to use the environment map
     /// have been loaded by the asset server.
     pub fn is_loaded(&self, images: &RenderAssets<Image>) -> bool {
-        images.get(&self.diffuse_map).is_some() && images.get(&self.specular_map).is_some()
+        images.get_with_asset_id(&self.diffuse_map).is_some()
+            && images.get_with_asset_id(&self.specular_map).is_some()
     }
 }
 
@@ -77,8 +78,8 @@ pub fn get_bindings<'a>(
     bindings: [u32; 3],
 ) -> [BindGroupEntry<'a>; 3] {
     let (diffuse_map, specular_map) = match (
-        environment_map_light.and_then(|env_map| images.get(&env_map.diffuse_map)),
-        environment_map_light.and_then(|env_map| images.get(&env_map.specular_map)),
+        environment_map_light.and_then(|env_map| images.get_with_asset_id(&env_map.diffuse_map)),
+        environment_map_light.and_then(|env_map| images.get_with_asset_id(&env_map.specular_map)),
     ) {
         (Some(diffuse_map), Some(specular_map)) => {
             (&diffuse_map.texture_view, &specular_map.texture_view)

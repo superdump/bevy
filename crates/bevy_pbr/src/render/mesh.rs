@@ -590,7 +590,7 @@ impl MeshPipeline {
         handle_option: &Option<Handle<Image>>,
     ) -> Option<(&'a TextureView, &'a Sampler)> {
         if let Some(handle) = handle_option {
-            let gpu_image = gpu_images.get(handle)?;
+            let gpu_image = gpu_images.get_with_asset_id(handle)?;
             Some((&gpu_image.texture_view, &gpu_image.sampler))
         } else {
             Some((
@@ -1026,18 +1026,19 @@ pub fn prepare_mesh_bind_group(
         groups.skinned = Some(layouts.skinned(&render_device, &model, skin));
     }
 
-    if let Some(weights) = weights_uniform.buffer.buffer() {
-        for (id, gpu_mesh) in meshes.iter() {
-            if let Some(targets) = gpu_mesh.morph_targets.as_ref() {
-                let group = if let Some(skin) = skin.filter(|_| is_skinned(&gpu_mesh.layout)) {
-                    layouts.morphed_skinned(&render_device, &model, skin, weights, targets)
-                } else {
-                    layouts.morphed(&render_device, &model, weights, targets)
-                };
-                groups.morph_targets.insert(id, group);
-            }
-        }
-    }
+    // FIXME
+    // if let Some(weights) = weights_uniform.buffer.buffer() {
+    //     for (id, gpu_mesh) in meshes.iter() {
+    //         if let Some(targets) = gpu_mesh.morph_targets.as_ref() {
+    //             let group = if let Some(skin) = skin.filter(|_| is_skinned(&gpu_mesh.layout)) {
+    //                 layouts.morphed_skinned(&render_device, &model, skin, weights, targets)
+    //             } else {
+    //                 layouts.morphed(&render_device, &model, weights, targets)
+    //             };
+    //             groups.morph_targets.insert(id, group);
+    //         }
+    //     }
+    // }
 }
 
 #[derive(Component)]
@@ -1322,7 +1323,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
         let Some(mesh_instance) = mesh_instances.get(&item.entity()) else {
             return RenderCommandResult::Failure;
         };
-        let Some(gpu_mesh) = meshes.get(mesh_instance.mesh_asset_id) else {
+        let Some(gpu_mesh) = meshes.get_with_asset_id(mesh_instance.mesh_asset_id) else {
             return RenderCommandResult::Failure;
         };
 

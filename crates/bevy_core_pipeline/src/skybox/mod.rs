@@ -216,9 +216,10 @@ fn prepare_skybox_bind_groups(
     views: Query<(Entity, &Skybox)>,
 ) {
     for (entity, skybox) in &views {
-        if let (Some(skybox), Some(view_uniforms)) =
-            (images.get(&skybox.0), view_uniforms.uniforms.binding())
-        {
+        if let (Some(skybox), Some(view_uniforms)) = (
+            images.get_with_asset_id(&skybox.0),
+            view_uniforms.uniforms.binding(),
+        ) {
             let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
                 label: Some("skybox_bind_group"),
                 layout: &pipeline.bind_group_layout,

@@ -17,7 +17,10 @@ use bevy_render::{
     },
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{GpuBufferInfo, Mesh, MeshVertexBufferLayout},
-    render_asset::RenderAssets,
+    render_asset::{
+        prepare_assets, InnerRenderAssetKey, RenderAssetKey, RenderAssetKeySender,
+        RenderAssetKeyUpdates, RenderAssets,
+    },
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
@@ -30,7 +33,7 @@ use bevy_render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::EntityHashMap;
+use bevy_utils::{EntityHashMap, HashMap};
 
 use crate::Material2dBindGroupId;
 
@@ -102,6 +105,9 @@ impl Plugin for Mesh2dRenderPlugin {
                     (
                         batch_and_prepare_render_phase::<Transparent2d, Mesh2dPipeline>
                             .in_set(RenderSet::PrepareResources),
+                        update_render_world_render_mesh_asset_keys
+                            .in_set(RenderSet::PrepareAssets)
+                            .after(prepare_assets::<Mesh>),
                         write_batched_instance_buffer::<Mesh2dPipeline>
                             .in_set(RenderSet::PrepareResourcesFlush),
                         prepare_mesh2d_bind_group.in_set(RenderSet::PrepareBindGroups),
@@ -186,7 +192,8 @@ bitflags::bitflags! {
 
 pub struct RenderMesh2dInstance {
     pub transforms: Mesh2dTransforms,
-    pub mesh_asset_id: AssetId<Mesh>,
+    pub mesh_asset_id: Option<AssetId<Mesh>>,
+    pub mesh_asset_key: Option<RenderAssetKey<Mesh>>,
     pub material_bind_group_id: Material2dBindGroupId,
     pub automatic_batching: bool,
 }
@@ -206,7 +213,8 @@ pub fn extract_mesh2d(
             Entity,
             &ViewVisibility,
             &GlobalTransform,
-            &Mesh2dHandle,
+            Ref<Mesh2dHandle>,
+            Option<&RenderAssetKey<Mesh>>,
             Has<NoAutomaticBatching>,
         )>,
     >,
@@ -214,7 +222,9 @@ pub fn extract_mesh2d(
     render_mesh_instances.clear();
     let mut entities = Vec::with_capacity(*previous_len);
 
-    for (entity, view_visibility, transform, handle, no_automatic_batching) in &query {
+    for (entity, view_visibility, transform, handle, mesh_asset_key, no_automatic_batching) in
+        &query
+    {
         if !view_visibility.get() {
             continue;
         }
@@ -228,7 +238,12 @@ pub fn extract_mesh2d(
                     transform: (&transform.affine()).into(),
                     flags: MeshFlags::empty().bits(),
                 },
-                mesh_asset_id: handle.0.id(),
+                mesh_asset_id: if mesh_asset_key.is_none() || handle.is_changed() {
+                    Some(handle.0.id())
+                } else {
+                    None
+                },
+                mesh_asset_key: mesh_asset_key.cloned(),
                 material_bind_group_id: Material2dBindGroupId::default(),
                 automatic_batching: !no_automatic_batching,
             },
@@ -236,6 +251,37 @@ pub fn extract_mesh2d(
     }
     *previous_len = entities.len();
     commands.insert_or_spawn_batch(entities);
+}
+
+pub fn update_render_world_render_mesh_asset_keys(
+    mut key_updates: ResMut<RenderAssetKeyUpdates<Mesh>>,
+    mut render_mesh2d_instances: ResMut<RenderMesh2dInstances>,
+    mut key_map: Local<HashMap<AssetId<Mesh>, RenderAssetKey<Mesh>>>,
+    render_asset_key_sender: Res<RenderAssetKeySender<Mesh>>,
+) {
+    let mut map: HashMap<InnerRenderAssetKey, Vec<Entity>> = HashMap::new();
+    key_map.extend(key_updates.drain(..));
+    for (&entity, mesh_instance) in render_mesh2d_instances.iter_mut() {
+        if mesh_instance.mesh_asset_key.is_some() {
+            continue;
+        }
+        mesh_instance.mesh_asset_key = key_map
+            .get(mesh_instance.mesh_asset_id.as_ref().unwrap())
+            .cloned();
+        if let Some(key) = mesh_instance.mesh_asset_key {
+            map.entry(key.inner).or_default().push(entity);
+        }
+    }
+    let to_send = map
+        .into_iter()
+        .map(|(k, v)| (v, RenderAssetKey::<Mesh>::new(k)))
+        .collect::<Vec<_>>();
+    if !to_send.is_empty() {
+        match render_asset_key_sender.try_send(to_send) {
+            Ok(_) => {}
+            Err(_) => panic!("Failed to send"),
+        }
+    }
 }
 
 #[derive(Resource, Clone)]
@@ -348,7 +394,7 @@ impl Mesh2dPipeline {
         handle_option: &Option<Handle<Image>>,
     ) -> Option<(&'a TextureView, &'a Sampler)> {
         if let Some(handle) = handle_option {
-            let gpu_image = gpu_images.get(handle)?;
+            let gpu_image = gpu_images.get_with_asset_id(handle)?;
             Some((&gpu_image.texture_view, &gpu_image.sampler))
         } else {
             Some((
@@ -363,7 +409,7 @@ impl GetBatchData for Mesh2dPipeline {
     type Param = SRes<RenderMesh2dInstances>;
     type Query = Entity;
     type QueryFilter = With<Mesh2d>;
-    type CompareData = (Material2dBindGroupId, AssetId<Mesh>);
+    type CompareData = (Material2dBindGroupId, RenderAssetKey<Mesh>);
     type BufferData = Mesh2dUniform;
 
     fn get_batch_data(
@@ -377,7 +423,9 @@ impl GetBatchData for Mesh2dPipeline {
             (&mesh_instance.transforms).into(),
             mesh_instance.automatic_batching.then_some((
                 mesh_instance.material_bind_group_id,
-                mesh_instance.mesh_asset_id,
+                mesh_instance
+                    .mesh_asset_key
+                    .expect("mesh_asset_key was None"),
             )),
         )
     }
@@ -707,12 +755,14 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
         let meshes = meshes.into_inner();
         let render_mesh2d_instances = render_mesh2d_instances.into_inner();
 
-        let Some(RenderMesh2dInstance { mesh_asset_id, .. }) =
-            render_mesh2d_instances.get(&item.entity())
+        let Some(RenderMesh2dInstance {
+            mesh_asset_key: Some(mesh_asset_key),
+            ..
+        }) = render_mesh2d_instances.get(&item.entity())
         else {
             return RenderCommandResult::Failure;
         };
-        let Some(gpu_mesh) = meshes.get(*mesh_asset_id) else {
+        let Some(gpu_mesh) = meshes.get_with_key(*mesh_asset_key) else {
             return RenderCommandResult::Failure;
         };
 

@@ -130,7 +130,7 @@ fn queue_custom(
             let Some(mesh_instance) = render_mesh_instances.get(&entity) else {
                 continue;
             };
-            let Some(mesh) = meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(mesh) = meshes.get_with_asset_id(mesh_instance.mesh_asset_id) else {
                 continue;
             };
             let key = view_key | MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
@@ -259,7 +259,10 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstanced {
         let Some(mesh_instance) = render_mesh_instances.get(&item.entity()) else {
             return RenderCommandResult::Failure;
         };
-        let gpu_mesh = match meshes.into_inner().get(mesh_instance.mesh_asset_id) {
+        let gpu_mesh = match meshes
+            .into_inner()
+            .get_with_asset_id(mesh_instance.mesh_asset_id)
+        {
             Some(gpu_mesh) => gpu_mesh,
             None => return RenderCommandResult::Failure,
         };
