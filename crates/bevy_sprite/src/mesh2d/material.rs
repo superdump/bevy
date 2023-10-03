@@ -1,7 +1,7 @@
 use bevy_app::{App, Plugin, PostUpdate};
 use bevy_asset::{Asset, AssetApp, AssetEvent, AssetId, AssetServer, Assets, Handle};
 use bevy_core_pipeline::{
-    core_2d::Transparent2d,
+    core_2d::{BatchQueue, BatchStruct, DynamicOffsets, Transparent2d},
     tonemapping::{DebandDither, Tonemapping},
 };
 use bevy_derive::{Deref, DerefMut};
@@ -189,8 +189,8 @@ where
 }
 
 pub struct RenderMaterial2dInstance<M: Material2d> {
-    asset_id: Option<AssetId<M>>,
-    key: Option<RenderMaterial2dKey>,
+    pub asset_id: Option<AssetId<M>>,
+    pub key: Option<RenderMaterial2dKey>,
 }
 
 #[derive(Resource, Deref, DerefMut)]
@@ -407,7 +407,7 @@ const fn tonemapping_pipeline_key(tonemapping: Tonemapping) -> Mesh2dPipelineKey
 
 #[allow(clippy::too_many_arguments)]
 pub fn queue_material2d_meshes<M: Material2d>(
-    transparent_draw_functions: Res<DrawFunctions<Transparent2d>>,
+    // transparent_draw_functions: Res<DrawFunctions<Transparent2d>>,
     material2d_pipeline: Res<Material2dPipeline<M>>,
     mut pipelines: ResMut<SpecializedMeshPipelines<Material2dPipeline<M>>>,
     pipeline_cache: Res<PipelineCache>,
@@ -416,12 +416,14 @@ pub fn queue_material2d_meshes<M: Material2d>(
     render_materials: Res<RenderMaterials2d<M>>,
     mut render_mesh_instances: ResMut<RenderMesh2dInstances>,
     render_material_instances: Res<RenderMaterial2dInstances<M>>,
+    // mut dynamic_offsets: ResMut<DynamicOffsets>,
     mut views: Query<(
         &ExtractedView,
         &VisibleEntities,
         Option<&Tonemapping>,
         Option<&DebandDither>,
-        &mut RenderPhase<Transparent2d>,
+        // &mut RenderPhase<Transparent2d>,
+        &mut BatchQueue,
     )>,
 ) where
     M::Data: PartialEq + Eq + Hash + Clone,
@@ -430,8 +432,9 @@ pub fn queue_material2d_meshes<M: Material2d>(
         return;
     }
 
-    for (view, visible_entities, tonemapping, dither, mut transparent_phase) in &mut views {
-        let draw_transparent_pbr = transparent_draw_functions.read().id::<DrawMaterial2d<M>>();
+    for (view, visible_entities, tonemapping, dither, mut batch_queue) in &mut views {
+        // let draw_transparent_pbr = transparent_draw_functions.read().id::<DrawMaterial2d<M>>();
+        batch_queue.clear();
 
         let mut view_key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples())
             | Mesh2dPipelineKey::from_hdr(view.hdr);
@@ -488,19 +491,27 @@ pub fn queue_material2d_meshes<M: Material2d>(
             mesh_instance.material_bind_group_id = material2d.get_bind_group_id();
 
             let mesh_z = mesh_instance.transforms.transform.translation.z;
-            transparent_phase.add(Transparent2d {
+            batch_queue.push(BatchStruct {
+                view_z: FloatOrd(mesh_z),
+                pipeline_id,
+                material_bind_group_id: mesh_instance.material_bind_group_id.0.unwrap(),
+                material_bind_group_dynamic_offsets: 0..0,
+                mesh_buffers: mesh_instance.mesh_asset_key.unwrap(),
                 entity: *visible_entity,
-                draw_function: draw_transparent_pbr,
-                pipeline: pipeline_id,
-                // NOTE: Back-to-front ordering for transparent with ascending sort means far should have the
-                // lowest sort key and getting closer should increase. As we have
-                // -z in front of the camera, the largest distance is -far with values increasing toward the
-                // camera. As such we can just use mesh_z as the distance
-                sort_key: FloatOrd(mesh_z),
-                // Batching is done in batch_and_prepare_render_phase
-                batch_range: 0..1,
-                dynamic_offset: None,
             });
+            // transparent_phase.add(Transparent2d {
+            //     entity: *visible_entity,
+            //     draw_function: draw_transparent_pbr,
+            //     pipeline: pipeline_id,
+            //     // NOTE: Back-to-front ordering for transparent with ascending sort means far should have the
+            //     // lowest sort key and getting closer should increase. As we have
+            //     // -z in front of the camera, the largest distance is -far with values increasing toward the
+            //     // camera. As such we can just use mesh_z as the distance
+            //     sort_key: FloatOrd(mesh_z),
+            //     // Batching is done in batch_and_prepare_render_phase
+            //     batch_range: 0..1,
+            //     dynamic_offset: None,
+            // });
         }
     }
 }

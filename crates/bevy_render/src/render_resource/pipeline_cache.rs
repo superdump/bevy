@@ -53,7 +53,7 @@ type CachedPipelineId = usize;
 
 /// Index of a cached render pipeline in a [`PipelineCache`].
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-pub struct CachedRenderPipelineId(CachedPipelineId);
+pub struct CachedRenderPipelineId(pub CachedPipelineId);
 
 impl CachedRenderPipelineId {
     /// An invalid cached render pipeline index, often used to initialize a variable.
@@ -820,7 +820,7 @@ impl PipelineCache {
         self.pipelines = pipelines;
     }
 
-    pub(crate) fn process_pipeline_queue_system(mut cache: ResMut<Self>) {
+    pub fn process_pipeline_queue_system(mut cache: ResMut<Self>) {
         cache.process_queue();
     }
 

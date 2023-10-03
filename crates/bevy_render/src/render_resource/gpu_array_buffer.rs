@@ -64,6 +64,13 @@ impl<T: GpuArrayBufferable> GpuArrayBuffer<T> {
         }
     }
 
+    pub fn len(&self) -> usize {
+        match self {
+            GpuArrayBuffer::Uniform(buffer) => buffer.len(),
+            GpuArrayBuffer::Storage((_, buffer)) => buffer.len(),
+        }
+    }
+
     pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
         match self {
             GpuArrayBuffer::Uniform(buffer) => buffer.write_buffer(device, queue),

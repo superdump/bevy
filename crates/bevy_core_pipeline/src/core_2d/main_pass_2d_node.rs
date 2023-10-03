@@ -56,17 +56,19 @@ impl Node for MainPass2dNode {
         {
             #[cfg(feature = "trace")]
             let _main_pass_2d = info_span!("main_pass_2d").entered();
+            // dbg!(transparent_phase.items.len());
 
             let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
                 label: Some("main_pass_2d"),
                 color_attachments: &[Some(target.get_color_attachment(Operations {
-                    load: match camera_2d.clear_color {
-                        ClearColorConfig::Default => {
-                            LoadOp::Clear(world.resource::<ClearColor>().0.into())
-                        }
-                        ClearColorConfig::Custom(color) => LoadOp::Clear(color.into()),
-                        ClearColorConfig::None => LoadOp::Load,
-                    },
+                    // load: match camera_2d.clear_color {
+                    //     ClearColorConfig::Default => {
+                    //         LoadOp::Clear(world.resource::<ClearColor>().0.into())
+                    //     }
+                    //     ClearColorConfig::Custom(color) => LoadOp::Clear(color.into()),
+                    //     ClearColorConfig::None => LoadOp::Load,
+                    // },
+                    load: LoadOp::Load,
                     store: true,
                 }))],
                 depth_stencil_attachment: None,

@@ -1,7 +1,12 @@
+use std::ops::Range;
+
 use bevy_app::Plugin;
 use bevy_asset::{load_internal_asset, AssetId, Handle};
 
-use bevy_core_pipeline::core_2d::Transparent2d;
+use bevy_core_pipeline::{
+    clear_color::{self, ClearColor, ClearColorConfig},
+    core_2d::{BatchQueue, BatchStruct, Camera2d, DrawOperations, DrawStream, DynamicOffsets},
+};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::*,
@@ -11,10 +16,8 @@ use bevy_ecs::{
 use bevy_math::{Affine3, Vec2, Vec4};
 use bevy_reflect::Reflect;
 use bevy_render::{
-    batching::{
-        batch_and_prepare_render_phase, write_batched_instance_buffer, GetBatchData,
-        NoAutomaticBatching,
-    },
+    batching::{write_batched_instance_buffer, GetBatchData, NoAutomaticBatching},
+    camera::ExtractedCamera,
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{GpuBufferInfo, Mesh, MeshVertexBufferLayout},
     render_asset::{
@@ -23,7 +26,7 @@ use bevy_render::{
     },
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
     render_resource::*,
-    renderer::{RenderDevice, RenderQueue},
+    renderer::{render_system, RenderContext, RenderDevice, RenderQueue},
     texture::{
         BevyDefault, DefaultImageSampler, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
     },
@@ -33,9 +36,12 @@ use bevy_render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::{EntityHashMap, HashMap};
+use bevy_utils::{
+    slotmap::{Key, KeyData},
+    EntityHashMap, HashMap,
+};
 
-use crate::Material2dBindGroupId;
+use crate::{ColorMaterial, Material2dBindGroupId, RenderMaterial2dInstances, RenderMaterials2d};
 
 /// Component for rendering with meshes in the 2d pipeline, usually with a [2d material](crate::Material2d) such as [`ColorMaterial`](crate::ColorMaterial).
 ///
@@ -103,8 +109,7 @@ impl Plugin for Mesh2dRenderPlugin {
                 .add_systems(
                     Render,
                     (
-                        batch_and_prepare_render_phase::<Transparent2d, Mesh2dPipeline>
-                            .in_set(RenderSet::PrepareResources),
+                        batch_and_prepare_batch_queue.in_set(RenderSet::PrepareResources),
                         update_render_world_render_mesh_asset_keys
                             .in_set(RenderSet::PrepareAssets)
                             .after(prepare_assets::<Mesh>),
@@ -112,6 +117,10 @@ impl Plugin for Mesh2dRenderPlugin {
                             .in_set(RenderSet::PrepareResourcesFlush),
                         prepare_mesh2d_bind_group.in_set(RenderSet::PrepareBindGroups),
                         prepare_mesh2d_view_bind_groups.in_set(RenderSet::PrepareBindGroups),
+                        render_from_draw_streams
+                            .in_set(RenderSet::Render)
+                            .after(PipelineCache::process_pipeline_queue_system)
+                            .before(render_system),
                     ),
                 );
         }
@@ -428,6 +437,146 @@ impl GetBatchData for Mesh2dPipeline {
                     .expect("mesh_asset_key was None"),
             )),
         )
+    }
+}
+
+/// Batch the items in a render phase. This means comparing metadata needed to draw each phase item
+/// and trying to combine the draws into a batch.
+pub fn batch_and_prepare_batch_queue(
+    gpu_array_buffer: ResMut<GpuArrayBuffer<Mesh2dUniform>>,
+    mut views: Query<(&BatchQueue, &mut DrawStream)>,
+    render_mesh2d_instances: Res<RenderMesh2dInstances>,
+    dynamic_offsets: ResMut<DynamicOffsets>,
+) {
+    let gpu_array_buffer = gpu_array_buffer.into_inner();
+    let dynamic_offsets = dynamic_offsets.into_inner();
+
+    let mut substream = Vec::new();
+
+    for (batch_queue, mut draw_stream) in &mut views {
+        draw_stream.clear();
+
+        if batch_queue.is_empty() {
+            continue;
+        }
+        // dbg!(batch_queue.len());
+
+        let (mut prev_batch, mut prev_dynamic_offset_range, mut prev_instance_range): (
+            Option<&BatchStruct>,
+            Option<Range<u16>>,
+            Range<u32>,
+        ) = (
+            None,
+            None,
+            gpu_array_buffer.len() as u32..gpu_array_buffer.len() as u32,
+        );
+
+        let mut draw_ops = DrawOperations::empty();
+        for i in 1..batch_queue.len() {
+            let batch = &batch_queue[i];
+            let mesh_instance = render_mesh2d_instances.get(&batch.entity).unwrap();
+            let buffer_index =
+                gpu_array_buffer.push(Mesh2dUniform::from(&mesh_instance.transforms));
+
+            let index = buffer_index.index.get();
+            let dynamic_offset_range = if let Some(dynamic_offset) = buffer_index.dynamic_offset {
+                let dynamic_offset_index = dynamic_offsets.len() as u16;
+                dynamic_offsets.push(dynamic_offset.get());
+                dynamic_offset_index..dynamic_offset_index + 1
+            } else {
+                0..0
+            };
+            let instance_range = index..index + 1;
+
+            if let Some(prev_batch) = prev_batch {
+                if prev_batch.pipeline_id != batch.pipeline_id {
+                    draw_ops |= DrawOperations::PIPELINE_ID;
+                    substream.push(batch.pipeline_id.id() as u32);
+                }
+                if prev_batch.material_bind_group_id != batch.material_bind_group_id {
+                    draw_ops |= DrawOperations::MATERIAL_BIND_GROUP_ID;
+                    substream.push(batch.material_bind_group_id.0.get());
+                }
+                if prev_batch.material_bind_group_dynamic_offsets
+                    != batch.material_bind_group_dynamic_offsets
+                {
+                    draw_ops |= DrawOperations::MATERIAL_BIND_GROUP_DYNAMIC_OFFSETS;
+                    substream.push(
+                        ((batch.material_bind_group_dynamic_offsets.start as u32) << 16)
+                            | batch.material_bind_group_dynamic_offsets.end as u32,
+                    );
+                }
+                if prev_batch.mesh_buffers != batch.mesh_buffers {
+                    draw_ops |= DrawOperations::MESH_BUFFERS_ID;
+                    let generational_index = batch.mesh_buffers.inner.data().as_ffi();
+                    substream.push((generational_index >> 32) as u32);
+                    substream.push((generational_index & ((1 << 32) - 1)) as u32);
+                }
+                if let Some(prev_dynamic_offset_range) = prev_dynamic_offset_range.as_ref() {
+                    if *prev_dynamic_offset_range != dynamic_offset_range
+                        && !dynamic_offset_range.is_empty()
+                    {
+                        draw_ops |= DrawOperations::MESH_BIND_GROUP_DYNAMIC_OFFSETS;
+                        substream.push(
+                            ((dynamic_offset_range.start as u32) << 16)
+                                | dynamic_offset_range.end as u32,
+                        );
+                    }
+                }
+            } else {
+                // Encode the initial state
+                draw_ops |= DrawOperations::PIPELINE_ID;
+                substream.push(batch.pipeline_id.id() as u32);
+                draw_ops |= DrawOperations::MATERIAL_BIND_GROUP_ID;
+                substream.push(batch.material_bind_group_id.0.get());
+                draw_ops |= DrawOperations::MATERIAL_BIND_GROUP_DYNAMIC_OFFSETS;
+                substream.push(
+                    ((batch.material_bind_group_dynamic_offsets.start as u32) << 16)
+                        | batch.material_bind_group_dynamic_offsets.end as u32,
+                );
+                draw_ops |= DrawOperations::MESH_BUFFERS_ID;
+                let generational_index = batch.mesh_buffers.inner.data().as_ffi();
+                substream.push((generational_index >> 32) as u32);
+                substream.push((generational_index & ((1 << 32) - 1)) as u32);
+                if !dynamic_offset_range.is_empty() {
+                    draw_ops |= DrawOperations::MESH_BIND_GROUP_DYNAMIC_OFFSETS;
+                    substream.push(
+                        ((dynamic_offset_range.start as u32) << 16)
+                            | dynamic_offset_range.end as u32,
+                    );
+                }
+
+                prev_batch = Some(batch);
+                prev_dynamic_offset_range = Some(dynamic_offset_range.clone());
+                prev_instance_range = instance_range.clone();
+            }
+
+            if draw_ops.is_empty() {
+                prev_instance_range.end = instance_range.end;
+            } else {
+                draw_ops |= DrawOperations::INSTANCE_RANGE;
+                substream.push(prev_instance_range.start);
+                substream.push(prev_instance_range.end);
+
+                draw_stream.push(prev_batch.unwrap().entity.generation());
+                draw_stream.push(prev_batch.unwrap().entity.index());
+                draw_stream.push(draw_ops.bits());
+                draw_stream.extend(substream.drain(..));
+                draw_ops = DrawOperations::empty();
+
+                prev_batch = Some(batch);
+                prev_dynamic_offset_range = Some(dynamic_offset_range);
+                prev_instance_range = instance_range;
+            }
+        }
+        if !draw_ops.is_empty() {
+            draw_ops |= DrawOperations::INSTANCE_RANGE;
+            substream.push(prev_instance_range.start);
+            substream.push(prev_instance_range.end);
+
+            draw_stream.push(draw_ops.bits());
+            draw_stream.extend(substream.drain(..));
+        }
     }
 }
 
@@ -789,5 +938,244 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
             }
         }
         RenderCommandResult::Success
+    }
+}
+
+// FIXME run this
+pub fn render_from_draw_streams(
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    clear_color: Res<ClearColor>,
+    pipeline_cache: Res<PipelineCache>,
+    mesh_bind_group: Res<Mesh2dBindGroup>,
+    materials: Res<RenderMaterials2d<ColorMaterial>>,
+    material_instances: Res<RenderMaterial2dInstances<ColorMaterial>>,
+    meshes: Res<RenderAssets<Mesh>>,
+    dynamic_offsets: Res<DynamicOffsets>,
+    views: Query<(
+        &ExtractedCamera,
+        &ViewTarget,
+        &Camera2d,
+        &DrawStream,
+        &Mesh2dViewBindGroup,
+        &ViewUniformOffset,
+    )>,
+) {
+    let render_device = render_device.into_inner();
+    let pipeline_cache = pipeline_cache.into_inner();
+    let materials = materials.into_inner();
+    let material_instances = material_instances.into_inner();
+    let dynamic_offsets = dynamic_offsets.into_inner();
+    let meshes = meshes.into_inner();
+    let mesh_bind_group = mesh_bind_group.into_inner();
+
+    let mut render_context = RenderContext::new(render_device.clone());
+
+    for (camera, target, camera_2d, draw_stream, view_bind_group, view_bind_group_dynamic_offset) in
+        views.iter()
+    {
+        #[cfg(feature = "trace")]
+        let _main_pass_2d = info_span!("main_pass_2d").entered();
+
+        if draw_stream.is_empty() {
+            continue;
+        }
+
+        // Cannot use command_encoder() as we need to split the borrow on self
+        let command_encoder = render_context.command_encoder();
+        let descriptor = RenderPassDescriptor {
+            label: Some("main_pass_2d"),
+            color_attachments: &[Some(target.get_color_attachment(Operations {
+                load: match camera_2d.clear_color {
+                    ClearColorConfig::Default => LoadOp::Clear(clear_color.0.into()),
+                    ClearColorConfig::Custom(color) => LoadOp::Clear(color.into()),
+                    ClearColorConfig::None => LoadOp::Load,
+                },
+                store: true,
+            }))],
+            depth_stencil_attachment: None,
+        };
+        let mut render_pass = command_encoder.begin_render_pass(&descriptor);
+
+        if let Some(viewport) = camera.viewport.as_ref() {
+            render_pass.set_viewport(
+                viewport.physical_position.x as f32,
+                viewport.physical_position.y as f32,
+                viewport.physical_size.x as f32,
+                viewport.physical_size.y as f32,
+                viewport.depth.start,
+                viewport.depth.end,
+            );
+        }
+
+        // Bind the view bind group
+        render_pass.set_bind_group(
+            0,
+            &view_bind_group.value,
+            &[view_bind_group_dynamic_offset.offset],
+        );
+
+        let has_storage_buffers = render_device.limits().max_storage_buffers_per_shader_stage > 0;
+        if has_storage_buffers {
+            render_pass.set_bind_group(2, &mesh_bind_group.value, &[]);
+        }
+
+        let mut material_bind_group_id = None;
+        let mut material_bind_group_dynamic_offsets = 0..0;
+        let mut material_bind_group_rebind = false;
+
+        let mut indexed = false;
+        let mut vertex_count = 0;
+
+        let mut i = 0;
+        // dbg!(draw_stream.len());
+        while i < draw_stream.len() {
+            let entity =
+                Entity::from_bits((draw_stream[i] as u64) << 32 | draw_stream[i + 1] as u64);
+            i += 2;
+            let draw_ops = DrawOperations::from_bits(draw_stream[i]).unwrap();
+            i += 1;
+
+            if draw_ops.contains(DrawOperations::PIPELINE_ID) {
+                let pipeline_id = draw_stream[i];
+                i += 1;
+
+                if let Some(pipeline) =
+                    pipeline_cache.get_render_pipeline(CachedRenderPipelineId(pipeline_id as usize))
+                {
+                    render_pass.set_pipeline(pipeline);
+                }
+            }
+
+            if draw_ops.contains(DrawOperations::MATERIAL_BIND_GROUP_ID) {
+                material_bind_group_id = Some(draw_stream[i]);
+                i += 1;
+                material_bind_group_rebind = true;
+            }
+
+            if draw_ops.contains(DrawOperations::MATERIAL_BIND_GROUP_DYNAMIC_OFFSETS) {
+                let dynamic_offsets_range_encoded = draw_stream[i];
+                i += 1;
+                material_bind_group_dynamic_offsets = ((dynamic_offsets_range_encoded >> 16)
+                    as usize)
+                    ..((dynamic_offsets_range_encoded & ((1 << 16) - 1)) as usize);
+                material_bind_group_rebind = true;
+            }
+
+            'material_bind_group: {
+                if material_bind_group_rebind {
+                    let Some(material_instance) = material_instances.get(&entity) else {
+                        break 'material_bind_group;
+                    };
+                    let Some(material_key) = material_instance.key else {
+                        break 'material_bind_group;
+                    };
+                    let Some(material2d) = materials.get_with_key(material_key) else {
+                        break 'material_bind_group;
+                    };
+                    render_pass.set_bind_group(
+                        1,
+                        &material2d.bind_group,
+                        if material_bind_group_dynamic_offsets.is_empty() {
+                            &[]
+                        } else {
+                            &dynamic_offsets[material_bind_group_dynamic_offsets.clone()]
+                        },
+                    );
+                }
+            }
+
+            if draw_ops.contains(DrawOperations::MESH_BUFFERS_ID) {
+                let mesh_asset_key = RenderAssetKey::<Mesh>::new(InnerRenderAssetKey::from(
+                    KeyData::from_ffi(((draw_stream[i] as u64) << 32) | draw_stream[i + 1] as u64),
+                ));
+                i += 2;
+
+                let Some(gpu_mesh) = meshes.get_with_key(mesh_asset_key) else {
+                    panic!("BLARGH");
+                };
+
+                render_pass.set_vertex_buffer(0, *gpu_mesh.vertex_buffer.slice(..));
+
+                match &gpu_mesh.buffer_info {
+                    GpuBufferInfo::Indexed {
+                        buffer,
+                        index_format,
+                        count,
+                    } => {
+                        render_pass.set_index_buffer(*buffer.slice(..), *index_format);
+                        indexed = true;
+                        vertex_count = *count;
+                    }
+                    GpuBufferInfo::NonIndexed => {
+                        indexed = false;
+                        vertex_count = gpu_mesh.vertex_count;
+                    }
+                }
+            }
+
+            if draw_ops.contains(DrawOperations::MESH_BIND_GROUP_DYNAMIC_OFFSETS) {
+                let dynamic_offset_range_encoded = draw_stream[i];
+                i += 1;
+                let dynamic_offset_range = (((dynamic_offset_range_encoded >> 16) & ((1 << 16) - 1))
+                    as usize)
+                    ..((dynamic_offset_range_encoded & ((1 << 16) - 1)) as usize);
+                if !has_storage_buffers {
+                    render_pass.set_bind_group(
+                        2,
+                        &mesh_bind_group.value,
+                        &dynamic_offsets[dynamic_offset_range],
+                    );
+                }
+            }
+
+            let instance_range = if draw_ops.contains(DrawOperations::INSTANCE_RANGE) {
+                let range = draw_stream[i]..draw_stream[i + 1];
+                i += 2;
+                range
+            } else {
+                0..1
+            };
+
+            #[cfg(all(feature = "webgl", target_arch = "wasm32"))]
+            render_pass.set_push_constants(
+                ShaderStages::VERTEX,
+                0,
+                &(instance_range.start as i32).to_le_bytes(),
+            );
+
+            if indexed {
+                render_pass.draw_indexed(0..vertex_count, 0, instance_range.clone());
+            } else {
+                render_pass.draw(0..vertex_count, instance_range.clone());
+            }
+        }
+        assert_eq!(i, draw_stream.len());
+    }
+
+    // WebGL2 quirk: if ending with a render pass with a custom viewport, the viewport isn't
+    // reset for the next render pass so add an empty render pass without a custom viewport
+    #[cfg(all(feature = "webgl", target_arch = "wasm32"))]
+    if camera.viewport.is_some() {
+        #[cfg(feature = "trace")]
+        let _reset_viewport_pass_2d = info_span!("reset_viewport_pass_2d").entered();
+        let pass_descriptor = RenderPassDescriptor {
+            label: Some("reset_viewport_pass_2d"),
+            color_attachments: &[Some(target.get_color_attachment(Operations {
+                load: LoadOp::Load,
+                store: true,
+            }))],
+            depth_stencil_attachment: None,
+        };
+
+        render_context
+            .command_encoder()
+            .begin_render_pass(&pass_descriptor);
+    }
+
+    {
+        #[cfg(feature = "trace")]
+        let _span = info_span!("submit_graph_commands").entered();
+        render_queue.0.submit(render_context.finish());
     }
 }

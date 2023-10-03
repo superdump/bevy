@@ -21,6 +21,7 @@ pub const CORE_2D: &str = graph::NAME;
 
 use std::ops::Range;
 
+use bevy_derive::{Deref, DerefMut};
 pub use camera_2d::*;
 pub use main_pass_2d_node::*;
 
@@ -29,15 +30,17 @@ use bevy_ecs::prelude::*;
 use bevy_render::{
     camera::Camera,
     extract_component::ExtractComponentPlugin,
+    mesh::Mesh,
+    render_asset::RenderAssetKey,
     render_graph::{EmptyNode, RenderGraphApp, ViewNodeRunner},
     render_phase::{
         sort_phase_system, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, PhaseItem,
         RenderPhase,
     },
-    render_resource::CachedRenderPipelineId,
+    render_resource::{BindGroupId, CachedRenderPipelineId},
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
-use bevy_utils::{nonmax::NonMaxU32, FloatOrd};
+use bevy_utils::{nonmax::NonMaxU32, slotmap::Key, FloatOrd};
 
 use crate::{tonemapping::TonemappingNode, upscaling::UpscalingNode};
 
@@ -55,10 +58,14 @@ impl Plugin for Core2dPlugin {
 
         render_app
             .init_resource::<DrawFunctions<Transparent2d>>()
+            .init_resource::<DynamicOffsets>()
             .add_systems(ExtractSchedule, extract_core_2d_camera_phases)
             .add_systems(
                 Render,
-                sort_phase_system::<Transparent2d>.in_set(RenderSet::PhaseSort),
+                (
+                    sort_phase_system::<Transparent2d>.in_set(RenderSet::PhaseSort),
+                    sort_batch_queues.in_set(RenderSet::PhaseSort),
+                ),
             );
 
         use graph::node::*;
@@ -77,6 +84,92 @@ impl Plugin for Core2dPlugin {
                     UPSCALING,
                 ],
             );
+    }
+}
+
+#[derive(Resource, Default, Deref, DerefMut, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DynamicOffsets(Vec<u32>);
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct BatchStruct {
+    pub view_z: FloatOrd,
+    pub pipeline_id: CachedRenderPipelineId,
+    pub material_bind_group_id: BindGroupId,
+    pub material_bind_group_dynamic_offsets: Range<u16>,
+    pub mesh_buffers: RenderAssetKey<Mesh>,
+    pub entity: Entity,
+}
+
+impl PartialOrd for BatchStruct {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(
+            self.view_z
+                .cmp(&other.view_z)
+                .then_with(|| self.pipeline_id.id().cmp(&other.pipeline_id.id()))
+                .then_with(|| {
+                    self.material_bind_group_id
+                        .0
+                        .cmp(&other.material_bind_group_id.0)
+                })
+                .then_with(|| {
+                    self.material_bind_group_dynamic_offsets
+                        .start
+                        .cmp(&other.material_bind_group_dynamic_offsets.start)
+                })
+                .then_with(|| {
+                    ((self.mesh_buffers.inner.data().as_ffi() & ((1 << 32) - 1)) as u32)
+                        .cmp(&((other.mesh_buffers.inner.data().as_ffi() & ((1 << 32) - 1)) as u32))
+                })
+                .then_with(|| self.entity.cmp(&other.entity)),
+        )
+    }
+}
+
+impl Ord for BatchStruct {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+pub struct DrawStruct {
+    pub batch: BatchStruct,
+    pub view_bind_group_id: BindGroupId,
+    pub view_bind_group_dynamic_offsets: Range<u16>,
+    pub mesh_bind_group_id: BindGroupId,
+    pub mesh_bind_group_dynamic_offsets: Range<u16>,
+}
+
+#[derive(Component, Default, Deref, DerefMut)]
+pub struct BatchQueue(Vec<BatchStruct>);
+
+pub fn sort_batch_queues(mut query: Query<&mut BatchQueue>) {
+    for batch_queue in query.iter_mut() {
+        radsort::sort_by_key(batch_queue.into_inner(), |batch| {
+            (
+                batch.view_z.0,
+                batch.pipeline_id.id() as u32,
+                batch.material_bind_group_id.0.get(),
+                (batch.mesh_buffers.inner.data().as_ffi() & ((1 << 32) - 1)) as u32,
+            )
+        });
+    }
+}
+
+#[derive(Component, Default, Deref, DerefMut)]
+pub struct DrawQueue(Vec<DrawStruct>);
+
+#[derive(Component, Default, Deref, DerefMut)]
+pub struct DrawStream(Vec<u32>);
+
+bitflags::bitflags! {
+    #[derive(PartialEq, Eq)]
+    pub struct DrawOperations: u32 {
+        const PIPELINE_ID                         = (1 << 0);
+        const MATERIAL_BIND_GROUP_ID              = (1 << 1);
+        const MATERIAL_BIND_GROUP_DYNAMIC_OFFSETS = (1 << 2);
+        const MESH_BUFFERS_ID                     = (1 << 3);
+        const MESH_BIND_GROUP_DYNAMIC_OFFSETS     = (1 << 4);
+        const INSTANCE_RANGE                      = (1 << 5);
     }
 }
 
@@ -147,9 +240,11 @@ pub fn extract_core_2d_camera_phases(
 ) {
     for (entity, camera) in &cameras_2d {
         if camera.is_active {
-            commands
-                .get_or_spawn(entity)
-                .insert(RenderPhase::<Transparent2d>::default());
+            commands.get_or_spawn(entity).insert((
+                RenderPhase::<Transparent2d>::default(),
+                BatchQueue::default(),
+                DrawStream::default(),
+            ));
         }
     }
 }

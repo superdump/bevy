@@ -113,6 +113,11 @@ impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
         }
         binding
     }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.temp.0.len()
+    }
 }
 
 #[inline]
