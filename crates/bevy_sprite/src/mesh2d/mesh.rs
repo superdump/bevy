@@ -41,7 +41,10 @@ use bevy_utils::{
     EntityHashMap, HashMap,
 };
 
-use crate::{ColorMaterial, Material2dBindGroupId, RenderMaterial2dInstances, RenderMaterials2d};
+use crate::{
+    ColorMaterial, Material2dBindGroupId, RenderMaterial2dInstances, RenderMaterial2dKey,
+    RenderMaterials2d,
+};
 
 /// Component for rendering with meshes in the 2d pipeline, usually with a [2d material](crate::Material2d) such as [`ColorMaterial`](crate::ColorMaterial).
 ///
@@ -495,7 +498,8 @@ pub fn batch_and_prepare_batch_queue(
                 }
                 if prev_batch.material_bind_group_id != batch.material_bind_group_id {
                     draw_ops |= DrawOperations::MATERIAL_BIND_GROUP_ID;
-                    substream.push(batch.material_bind_group_id.0.get());
+                    substream.push((batch.material_key >> 32) as u32);
+                    substream.push((batch.material_key & ((1 << 32) - 1)) as u32);
                 }
                 if prev_batch.material_bind_group_dynamic_offsets
                     != batch.material_bind_group_dynamic_offsets
@@ -528,7 +532,8 @@ pub fn batch_and_prepare_batch_queue(
                 draw_ops |= DrawOperations::PIPELINE_ID;
                 substream.push(batch.pipeline_id.id() as u32);
                 draw_ops |= DrawOperations::MATERIAL_BIND_GROUP_ID;
-                substream.push(batch.material_bind_group_id.0.get());
+                substream.push((batch.material_key >> 32) as u32);
+                substream.push((batch.material_key & ((1 << 32) - 1)) as u32);
                 draw_ops |= DrawOperations::MATERIAL_BIND_GROUP_DYNAMIC_OFFSETS;
                 substream.push(
                     ((batch.material_bind_group_dynamic_offsets.start as u32) << 16)
@@ -1020,7 +1025,7 @@ pub fn render_from_draw_streams(
             render_pass.set_bind_group(2, &mesh_bind_group.value, &[]);
         }
 
-        let mut material_bind_group_id = None;
+        let mut material_key = None;
         let mut material_bind_group_dynamic_offsets = 0..0;
         let mut material_bind_group_rebind = false;
 
@@ -1048,8 +1053,10 @@ pub fn render_from_draw_streams(
             }
 
             if draw_ops.contains(DrawOperations::MATERIAL_BIND_GROUP_ID) {
-                material_bind_group_id = Some(draw_stream[i]);
-                i += 1;
+                material_key = Some(RenderMaterial2dKey::from(KeyData::from_ffi(
+                    ((draw_stream[i] as u64) << 32) | draw_stream[i + 1] as u64,
+                )));
+                i += 2;
                 material_bind_group_rebind = true;
             }
 
@@ -1064,13 +1071,7 @@ pub fn render_from_draw_streams(
 
             'material_bind_group: {
                 if material_bind_group_rebind {
-                    let Some(material_instance) = material_instances.get(&entity) else {
-                        break 'material_bind_group;
-                    };
-                    let Some(material_key) = material_instance.key else {
-                        break 'material_bind_group;
-                    };
-                    let Some(material2d) = materials.get_with_key(material_key) else {
+                    let Some(material2d) = materials.get_with_key(material_key.unwrap()) else {
                         break 'material_bind_group;
                     };
                     render_pass.set_bind_group(

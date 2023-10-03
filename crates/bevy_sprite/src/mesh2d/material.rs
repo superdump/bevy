@@ -30,7 +30,7 @@ use bevy_render::{
 };
 use bevy_transform::components::{GlobalTransform, Transform};
 use bevy_utils::{
-    slotmap::{new_key_type, SlotMap},
+    slotmap::{new_key_type, Key, SlotMap},
     EntityHashMap, FloatOrd, HashMap, HashSet,
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -495,6 +495,7 @@ pub fn queue_material2d_meshes<M: Material2d>(
                 view_z: FloatOrd(mesh_z),
                 pipeline_id,
                 material_bind_group_id: mesh_instance.material_bind_group_id.0.unwrap(),
+                material_key: material_key.data().as_ffi(),
                 material_bind_group_dynamic_offsets: 0..0,
                 mesh_buffers: mesh_instance.mesh_asset_key.unwrap(),
                 entity: *visible_entity,

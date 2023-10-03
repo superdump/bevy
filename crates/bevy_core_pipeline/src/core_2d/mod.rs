@@ -95,6 +95,7 @@ pub struct BatchStruct {
     pub view_z: FloatOrd,
     pub pipeline_id: CachedRenderPipelineId,
     pub material_bind_group_id: BindGroupId,
+    pub material_key: u64,
     pub material_bind_group_dynamic_offsets: Range<u16>,
     pub mesh_buffers: RenderAssetKey<Mesh>,
     pub entity: Entity,
