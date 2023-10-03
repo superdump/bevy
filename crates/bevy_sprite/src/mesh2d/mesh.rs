@@ -563,8 +563,6 @@ pub fn batch_and_prepare_batch_queue(
                 substream.push(prev_instance_range.start);
                 substream.push(prev_instance_range.end);
 
-                draw_stream.push(prev_batch.unwrap().entity.generation());
-                draw_stream.push(prev_batch.unwrap().entity.index());
                 draw_stream.push(draw_ops.bits());
                 draw_stream.extend(substream.drain(..));
                 draw_ops = DrawOperations::empty();
@@ -954,7 +952,6 @@ pub fn render_from_draw_streams(
     pipeline_cache: Res<PipelineCache>,
     mesh_bind_group: Res<Mesh2dBindGroup>,
     materials: Res<RenderMaterials2d<ColorMaterial>>,
-    material_instances: Res<RenderMaterial2dInstances<ColorMaterial>>,
     meshes: Res<RenderAssets<Mesh>>,
     dynamic_offsets: Res<DynamicOffsets>,
     views: Query<(
@@ -969,7 +966,6 @@ pub fn render_from_draw_streams(
     let render_device = render_device.into_inner();
     let pipeline_cache = pipeline_cache.into_inner();
     let materials = materials.into_inner();
-    let material_instances = material_instances.into_inner();
     let dynamic_offsets = dynamic_offsets.into_inner();
     let meshes = meshes.into_inner();
     let mesh_bind_group = mesh_bind_group.into_inner();
@@ -1035,9 +1031,6 @@ pub fn render_from_draw_streams(
         let mut i = 0;
         // dbg!(draw_stream.len());
         while i < draw_stream.len() {
-            let entity =
-                Entity::from_bits((draw_stream[i] as u64) << 32 | draw_stream[i + 1] as u64);
-            i += 2;
             let draw_ops = DrawOperations::from_bits(draw_stream[i]).unwrap();
             i += 1;
 
