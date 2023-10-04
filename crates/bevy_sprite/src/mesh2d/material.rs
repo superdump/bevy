@@ -498,7 +498,7 @@ pub fn queue_material2d_meshes<M: Material2d>(
                 material_key: material_key.data().as_ffi(),
                 material_bind_group_dynamic_offsets: 0..0,
                 mesh_buffers: mesh_instance.mesh_asset_key.unwrap(),
-                mesh_transforms: mesh_instance.transforms.clone(),
+                entity: *visible_entity,
             });
             // transparent_phase.add(Transparent2d {
             //     entity: *visible_entity,

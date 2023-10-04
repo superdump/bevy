@@ -22,7 +22,6 @@ pub const CORE_2D: &str = graph::NAME;
 use std::ops::Range;
 
 use bevy_derive::{Deref, DerefMut};
-use bevy_math::Affine3;
 pub use camera_2d::*;
 pub use main_pass_2d_node::*;
 
@@ -88,16 +87,10 @@ impl Plugin for Core2dPlugin {
     }
 }
 
-#[derive(Component, Clone)]
-pub struct Mesh2dTransforms {
-    pub transform: Affine3,
-    pub flags: u32,
-}
-
 #[derive(Resource, Default, Deref, DerefMut, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DynamicOffsets(Vec<u32>);
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct BatchStruct {
     pub view_z: FloatOrd,
     pub pipeline_id: CachedRenderPipelineId,
@@ -105,21 +98,8 @@ pub struct BatchStruct {
     pub material_key: u64,
     pub material_bind_group_dynamic_offsets: Range<u16>,
     pub mesh_buffers: RenderAssetKey<Mesh>,
-    pub mesh_transforms: Mesh2dTransforms,
+    pub entity: Entity,
 }
-
-impl PartialEq for BatchStruct {
-    fn eq(&self, other: &Self) -> bool {
-        self.view_z == other.view_z
-            && self.pipeline_id == other.pipeline_id
-            && self.material_bind_group_id == other.material_bind_group_id
-            && self.material_key == other.material_key
-            && self.material_bind_group_dynamic_offsets == other.material_bind_group_dynamic_offsets
-            && self.mesh_buffers == other.mesh_buffers
-    }
-}
-
-impl Eq for BatchStruct {}
 
 impl PartialOrd for BatchStruct {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
@@ -140,7 +120,8 @@ impl PartialOrd for BatchStruct {
                 .then_with(|| {
                     ((self.mesh_buffers.inner.data().as_ffi() & ((1 << 32) - 1)) as u32)
                         .cmp(&((other.mesh_buffers.inner.data().as_ffi() & ((1 << 32) - 1)) as u32))
-                }),
+                })
+                .then_with(|| self.entity.cmp(&other.entity)),
         )
     }
 }
@@ -151,6 +132,14 @@ impl Ord for BatchStruct {
     }
 }
 
+pub struct DrawStruct {
+    pub batch: BatchStruct,
+    pub view_bind_group_id: BindGroupId,
+    pub view_bind_group_dynamic_offsets: Range<u16>,
+    pub mesh_bind_group_id: BindGroupId,
+    pub mesh_bind_group_dynamic_offsets: Range<u16>,
+}
+
 #[derive(Component, Default, Deref, DerefMut)]
 pub struct BatchQueue(Vec<BatchStruct>);
 
@@ -159,14 +148,16 @@ pub fn sort_batch_queues(mut query: Query<&mut BatchQueue>) {
         radsort::sort_by_key(batch_queue.into_inner(), |batch| {
             (
                 batch.view_z.0,
-                ((batch.pipeline_id.id() as u64) << 32)
-                    | batch.material_bind_group_id.0.get() as u64,
-                ((batch.material_bind_group_dynamic_offsets.start as u64) << (64 - 16))
-                    | (batch.mesh_buffers.inner.data().as_ffi() & ((1 << 32) - 1)),
+                batch.pipeline_id.id() as u32,
+                batch.material_bind_group_id.0.get(),
+                (batch.mesh_buffers.inner.data().as_ffi() & ((1 << 32) - 1)) as u32,
             )
         });
     }
 }
+
+#[derive(Component, Default, Deref, DerefMut)]
+pub struct DrawQueue(Vec<DrawStruct>);
 
 #[derive(Component, Default, Deref, DerefMut)]
 pub struct DrawStream(Vec<u32>);
