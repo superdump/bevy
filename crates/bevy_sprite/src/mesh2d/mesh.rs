@@ -5,7 +5,10 @@ use bevy_asset::{load_internal_asset, AssetId, Handle};
 
 use bevy_core_pipeline::{
     clear_color::{self, ClearColor, ClearColorConfig},
-    core_2d::{BatchQueue, BatchStruct, Camera2d, DrawOperations, DrawStream, DynamicOffsets},
+    core_2d::{
+        BatchQueue, BatchStruct, Camera2d, DrawOperations, DrawStream, DynamicOffsets,
+        Mesh2dTransforms,
+    },
 };
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
@@ -159,12 +162,6 @@ impl Plugin for Mesh2dRenderPlugin {
             mesh_bindings_shader_defs
         );
     }
-}
-
-#[derive(Component)]
-pub struct Mesh2dTransforms {
-    pub transform: Affine3,
-    pub flags: u32,
 }
 
 #[derive(ShaderType, Clone)]
@@ -448,7 +445,6 @@ impl GetBatchData for Mesh2dPipeline {
 pub fn batch_and_prepare_batch_queue(
     gpu_array_buffer: ResMut<GpuArrayBuffer<Mesh2dUniform>>,
     mut views: Query<(&BatchQueue, &mut DrawStream)>,
-    render_mesh2d_instances: Res<RenderMesh2dInstances>,
     dynamic_offsets: ResMut<DynamicOffsets>,
 ) {
     let gpu_array_buffer = gpu_array_buffer.into_inner();
@@ -477,9 +473,7 @@ pub fn batch_and_prepare_batch_queue(
         let mut draw_ops = DrawOperations::empty();
         for i in 1..batch_queue.len() {
             let batch = &batch_queue[i];
-            let mesh_instance = render_mesh2d_instances.get(&batch.entity).unwrap();
-            let buffer_index =
-                gpu_array_buffer.push(Mesh2dUniform::from(&mesh_instance.transforms));
+            let buffer_index = gpu_array_buffer.push(Mesh2dUniform::from(&batch.mesh_transforms));
 
             let index = buffer_index.index.get();
             let dynamic_offset_range = if let Some(dynamic_offset) = buffer_index.dynamic_offset {
