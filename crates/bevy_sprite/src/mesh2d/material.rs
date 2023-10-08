@@ -14,6 +14,7 @@ use bevy_render::{
     mesh::{Mesh, MeshVertexBufferLayout},
     prelude::Image,
     render_asset::{prepare_assets, RenderAssets},
+    render_instances::{RenderInstancePlugin, RenderInstances},
     render_phase::{
         AddRenderCommand, DrawFunctions, PhaseItem, RenderCommand, RenderCommandResult,
         RenderPhase, SetItemPipeline, TrackedRenderPass,
@@ -29,7 +30,7 @@ use bevy_render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_transform::components::{GlobalTransform, Transform};
-use bevy_utils::{EntityHashMap, FloatOrd, HashMap, HashSet};
+use bevy_utils::{FloatOrd, HashMap, HashSet};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
@@ -139,19 +140,16 @@ where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     fn build(&self, app: &mut App) {
-        app.init_asset::<M>();
+        app.init_asset::<M>()
+            .add_plugins(RenderInstancePlugin::<AssetId<M>, true, true>::new());
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .add_render_command::<Transparent2d, DrawMaterial2d<M>>()
                 .init_resource::<ExtractedMaterials2d<M>>()
                 .init_resource::<RenderMaterials2d<M>>()
-                .init_resource::<RenderMaterial2dInstances<M>>()
                 .init_resource::<SpecializedMeshPipelines<Material2dPipeline<M>>>()
-                .add_systems(
-                    ExtractSchedule,
-                    (extract_materials_2d::<M>, extract_material_meshes_2d::<M>),
-                )
+                .add_systems(ExtractSchedule, extract_materials_2d::<M>)
                 .add_systems(
                     Render,
                     (
@@ -173,26 +171,7 @@ where
     }
 }
 
-#[derive(Resource, Deref, DerefMut)]
-pub struct RenderMaterial2dInstances<M: Material2d>(EntityHashMap<Entity, AssetId<M>>);
-
-impl<M: Material2d> Default for RenderMaterial2dInstances<M> {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
-
-fn extract_material_meshes_2d<M: Material2d>(
-    mut material_instances: ResMut<RenderMaterial2dInstances<M>>,
-    query: Extract<Query<(Entity, &ViewVisibility, &Handle<M>)>>,
-) {
-    material_instances.clear();
-    for (entity, view_visibility, handle) in &query {
-        if view_visibility.get() {
-            material_instances.insert(entity, handle.id());
-        }
-    }
-}
+pub type RenderMaterial2dInstances<M> = RenderInstances<AssetId<M>>;
 
 /// Render pipeline data for a given [`Material2d`]
 #[derive(Resource)]

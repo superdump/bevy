@@ -14,7 +14,6 @@ use bevy_core_pipeline::{
         get_lut_bind_group_layout_entries, get_lut_bindings, Tonemapping, TonemappingLuts,
     },
 };
-use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::*,
     query::{QueryItem, ROQueryItem},
@@ -33,6 +32,7 @@ use bevy_render::{
     },
     prelude::Msaa,
     render_asset::RenderAssets,
+    render_instances::{RenderInstance, RenderInstancePlugin, RenderInstances},
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
@@ -40,13 +40,11 @@ use bevy_render::{
         BevyDefault, DefaultImageSampler, FallbackImageCubemap, FallbackImagesDepth,
         FallbackImagesMsaa, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
     },
-    view::{ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms, ViewVisibility},
-    Extract, ExtractSchedule, Render, RenderApp, RenderSet,
+    view::{ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
+    ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::{tracing::error, EntityHashMap, HashMap, Hashed};
-use std::cell::Cell;
-use thread_local::ThreadLocal;
+use bevy_utils::{tracing::error, HashMap, Hashed};
 
 use crate::render::{
     morph::{
@@ -115,23 +113,21 @@ impl Plugin for MeshRenderPlugin {
         app.add_systems(
             PostUpdate,
             (no_automatic_skin_batching, no_automatic_morph_batching),
-        );
+        )
+        .add_plugins(RenderInstancePlugin::<RenderMeshInstance, true, true>::new());
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
-                .init_resource::<RenderMeshInstances>()
                 .init_resource::<MeshBindGroups>()
                 .init_resource::<SkinUniform>()
                 .init_resource::<SkinIndices>()
                 .init_resource::<MorphUniform>()
                 .init_resource::<MorphIndices>()
-                .add_systems(
-                    ExtractSchedule,
-                    (extract_meshes, extract_skins, extract_morphs),
-                )
+                .add_systems(ExtractSchedule, (extract_skins, extract_morphs))
                 .add_systems(
                     Render,
                     (
+                        extract_mesh_entities_workaround.before(RenderSet::ExtractCommands),
                         (
                             batch_and_prepare_render_phase::<Opaque3d, MeshPipeline>,
                             batch_and_prepare_render_phase::<Transparent3d, MeshPipeline>,
@@ -238,84 +234,67 @@ pub struct RenderMeshInstance {
     pub automatic_batching: bool,
 }
 
-#[derive(Default, Resource, Deref, DerefMut)]
-pub struct RenderMeshInstances(EntityHashMap<Entity, RenderMeshInstance>);
+impl RenderInstance for RenderMeshInstance {
+    type Query = (
+        Read<GlobalTransform>,
+        Option<Read<PreviousGlobalTransform>>,
+        Read<Handle<Mesh>>,
+        Has<NotShadowReceiver>,
+        Has<NotShadowCaster>,
+        Has<NoAutomaticBatching>,
+    );
+
+    type Filter = ();
+
+    #[inline]
+    fn extract_to_render_instance(
+        (
+        transform,
+        previous_transform,
+        handle,
+        not_receiver,
+        not_caster,
+        no_automatic_batching,
+    ): QueryItem<'_, Self::Query>,
+    ) -> Option<Self> {
+        let transform = transform.affine();
+        let previous_transform = previous_transform.map(|t| t.0).unwrap_or(transform);
+        let mut flags = if not_receiver {
+            MeshFlags::empty()
+        } else {
+            MeshFlags::SHADOW_RECEIVER
+        };
+        if transform.matrix3.determinant().is_sign_positive() {
+            flags |= MeshFlags::SIGN_DETERMINANT_MODEL_3X3;
+        }
+        let transforms = MeshTransforms {
+            transform: (&transform).into(),
+            previous_transform: (&previous_transform).into(),
+            flags: flags.bits(),
+        };
+        Some(Self {
+            mesh_asset_id: handle.id(),
+            transforms,
+            shadow_caster: !not_caster,
+            material_bind_group_id: MaterialBindGroupId::default(),
+            automatic_batching: !no_automatic_batching,
+        })
+    }
+}
+
+pub type RenderMeshInstances = RenderInstances<RenderMeshInstance>;
 
 #[derive(Component)]
 pub struct Mesh3d;
 
-pub fn extract_meshes(
+// FIXME: Remove this - it is just a workaround to enable rendering to work as
+// render commands require an entity to exist at the moment.
+pub fn extract_mesh_entities_workaround(
     mut commands: Commands,
-    mut previous_len: Local<usize>,
-    mut render_mesh_instances: ResMut<RenderMeshInstances>,
-    mut thread_local_queues: Local<ThreadLocal<Cell<Vec<(Entity, RenderMeshInstance)>>>>,
-    meshes_query: Extract<
-        Query<(
-            Entity,
-            &ViewVisibility,
-            &GlobalTransform,
-            Option<&PreviousGlobalTransform>,
-            &Handle<Mesh>,
-            Has<NotShadowReceiver>,
-            Has<NotShadowCaster>,
-            Has<NoAutomaticBatching>,
-        )>,
-    >,
+    render_mesh_instances: Res<RenderMeshInstances>,
 ) {
-    meshes_query.par_iter().for_each(
-        |(
-            entity,
-            view_visibility,
-            transform,
-            previous_transform,
-            handle,
-            not_receiver,
-            not_caster,
-            no_automatic_batching,
-        )| {
-            if !view_visibility.get() {
-                return;
-            }
-            let transform = transform.affine();
-            let previous_transform = previous_transform.map(|t| t.0).unwrap_or(transform);
-            let mut flags = if not_receiver {
-                MeshFlags::empty()
-            } else {
-                MeshFlags::SHADOW_RECEIVER
-            };
-            if transform.matrix3.determinant().is_sign_positive() {
-                flags |= MeshFlags::SIGN_DETERMINANT_MODEL_3X3;
-            }
-            let transforms = MeshTransforms {
-                transform: (&transform).into(),
-                previous_transform: (&previous_transform).into(),
-                flags: flags.bits(),
-            };
-            let tls = thread_local_queues.get_or_default();
-            let mut queue = tls.take();
-            queue.push((
-                entity,
-                RenderMeshInstance {
-                    mesh_asset_id: handle.id(),
-                    transforms,
-                    shadow_caster: !not_caster,
-                    material_bind_group_id: MaterialBindGroupId::default(),
-                    automatic_batching: !no_automatic_batching,
-                },
-            ));
-            tls.set(queue);
-        },
-    );
-
-    render_mesh_instances.clear();
-    let mut entities = Vec::with_capacity(*previous_len);
-    for queue in thread_local_queues.iter_mut() {
-        // FIXME: Remove this - it is just a workaround to enable rendering to work as
-        // render commands require an entity to exist at the moment.
-        entities.extend(queue.get_mut().iter().map(|(e, _)| (*e, Mesh3d)));
-        render_mesh_instances.extend(queue.get_mut().drain(..));
-    }
-    *previous_len = entities.len();
+    let mut entities = Vec::with_capacity(render_mesh_instances.len());
+    entities.extend(render_mesh_instances.keys().map(|&e| (e, Mesh3d)));
     commands.insert_or_spawn_batch(entities);
 }
 

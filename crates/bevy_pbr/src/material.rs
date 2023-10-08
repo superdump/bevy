@@ -178,7 +178,7 @@ where
 {
     fn build(&self, app: &mut App) {
         app.init_asset::<M>()
-            .add_plugins(RenderInstancePlugin::<AssetId<M>>::extract_visible());
+            .add_plugins(RenderInstancePlugin::<AssetId<M>, true, true>::new());
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app

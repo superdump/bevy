@@ -2,7 +2,6 @@ use bevy_app::Plugin;
 use bevy_asset::{load_internal_asset, AssetId, Handle};
 
 use bevy_core_pipeline::core_2d::Transparent2d;
-use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::*,
     query::{QueryItem, ROQueryItem},
@@ -18,19 +17,17 @@ use bevy_render::{
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{GpuBufferInfo, Mesh, MeshVertexBufferLayout},
     render_asset::RenderAssets,
+    render_instances::{RenderInstance, RenderInstancePlugin, RenderInstances},
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
     texture::{
         BevyDefault, DefaultImageSampler, GpuImage, Image, ImageSampler, TextureFormatPixelInfo,
     },
-    view::{
-        ExtractedView, ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms, ViewVisibility,
-    },
-    Extract, ExtractSchedule, Render, RenderApp, RenderSet,
+    view::{ExtractedView, ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
+    Render, RenderApp, RenderSet,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::EntityHashMap;
 
 use crate::Material2dBindGroupId;
 
@@ -92,14 +89,15 @@ impl Plugin for Mesh2dRenderPlugin {
         );
         load_internal_asset!(app, MESH2D_SHADER_HANDLE, "mesh2d.wgsl", Shader::from_wgsl);
 
+        app.add_plugins(RenderInstancePlugin::<RenderMesh2dInstance, true, true>::new());
+
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
-                .init_resource::<RenderMesh2dInstances>()
                 .init_resource::<SpecializedMeshPipelines<Mesh2dPipeline>>()
-                .add_systems(ExtractSchedule, extract_mesh2d)
                 .add_systems(
                     Render,
                     (
+                        extract_mesh2d_entities_workaround.before(RenderSet::ExtractCommands),
                         batch_and_prepare_render_phase::<Transparent2d, Mesh2dPipeline>
                             .in_set(RenderSet::PrepareResources),
                         write_batched_instance_buffer::<Mesh2dPipeline>
@@ -191,50 +189,44 @@ pub struct RenderMesh2dInstance {
     pub automatic_batching: bool,
 }
 
-#[derive(Default, Resource, Deref, DerefMut)]
-pub struct RenderMesh2dInstances(EntityHashMap<Entity, RenderMesh2dInstance>);
+impl RenderInstance for RenderMesh2dInstance {
+    type Query = (
+        Read<GlobalTransform>,
+        Read<Mesh2dHandle>,
+        Has<NoAutomaticBatching>,
+    );
+
+    type Filter = ();
+
+    #[inline]
+    fn extract_to_render_instance(
+        (transform, handle, no_automatic_batching): QueryItem<'_, Self::Query>,
+    ) -> Option<Self> {
+        Some(Self {
+            transforms: Mesh2dTransforms {
+                transform: (&transform.affine()).into(),
+                flags: MeshFlags::empty().bits(),
+            },
+            mesh_asset_id: handle.0.id(),
+            material_bind_group_id: Material2dBindGroupId::default(),
+            automatic_batching: !no_automatic_batching,
+        })
+    }
+}
+
+pub type RenderMesh2dInstances = RenderInstances<RenderMesh2dInstance>;
 
 #[derive(Component)]
 pub struct Mesh2d;
 
-pub fn extract_mesh2d(
+// FIXME: Remove this - it is just a workaround to enable rendering to work as
+// render commands require an entity to exist at the moment.
+pub fn extract_mesh2d_entities_workaround(
     mut commands: Commands,
-    mut previous_len: Local<usize>,
-    mut render_mesh_instances: ResMut<RenderMesh2dInstances>,
-    query: Extract<
-        Query<(
-            Entity,
-            &ViewVisibility,
-            &GlobalTransform,
-            &Mesh2dHandle,
-            Has<NoAutomaticBatching>,
-        )>,
-    >,
+    render_mesh_instances: Res<RenderMesh2dInstances>,
 ) {
-    render_mesh_instances.clear();
-    let mut entities = Vec::with_capacity(*previous_len);
-
-    for (entity, view_visibility, transform, handle, no_automatic_batching) in &query {
-        if !view_visibility.get() {
-            continue;
-        }
-        // FIXME: Remove this - it is just a workaround to enable rendering to work as
-        // render commands require an entity to exist at the moment.
-        entities.push((entity, Mesh2d));
-        render_mesh_instances.insert(
-            entity,
-            RenderMesh2dInstance {
-                transforms: Mesh2dTransforms {
-                    transform: (&transform.affine()).into(),
-                    flags: MeshFlags::empty().bits(),
-                },
-                mesh_asset_id: handle.0.id(),
-                material_bind_group_id: Material2dBindGroupId::default(),
-                automatic_batching: !no_automatic_batching,
-            },
-        );
-    }
-    *previous_len = entities.len();
+    let mut entities = Vec::with_capacity(render_mesh_instances.len());
+    entities.extend(render_mesh_instances.keys().map(|&e| (e, Mesh2d)));
     commands.insert_or_spawn_batch(entities);
 }
 

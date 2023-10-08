@@ -4,7 +4,7 @@
 //! This is essentially the same as the `extract_component` module, but
 //! higher-performance because it avoids the ECS overhead.
 
-use std::marker::PhantomData;
+use std::{cell::Cell, marker::PhantomData};
 
 use bevy_app::{App, Plugin};
 use bevy_asset::{Asset, AssetId, Handle};
@@ -12,9 +12,10 @@ use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::Entity,
     query::{QueryItem, ReadOnlyWorldQuery, WorldQuery},
-    system::{lifetimeless::Read, Query, ResMut, Resource},
+    system::{lifetimeless::Read, Local, Query, ResMut, Resource},
 };
 use bevy_utils::EntityHashMap;
+use thread_local::ThreadLocal;
 
 use crate::{prelude::ViewVisibility, Extract, ExtractSchedule, RenderApp};
 
@@ -43,13 +44,9 @@ pub trait RenderInstance: Send + Sync + Sized + 'static {
 /// Therefore it sets up the [`ExtractSchedule`] step for the specified
 /// [`RenderInstances`].
 #[derive(Default)]
-pub struct RenderInstancePlugin<RI>
-where
-    RI: RenderInstance,
-{
-    only_extract_visible: bool,
-    marker: PhantomData<fn() -> RI>,
-}
+pub struct RenderInstancePlugin<RI: RenderInstance, const VISIBLE: bool, const PARALLEL: bool>(
+    PhantomData<fn() -> RI>,
+);
 
 /// Stores all render instances of a type in the render world.
 #[derive(Resource, Deref, DerefMut)]
@@ -66,51 +63,70 @@ where
     }
 }
 
-impl<RI> RenderInstancePlugin<RI>
+impl<RI, const VISIBLE: bool, const PARALLEL: bool> RenderInstancePlugin<RI, VISIBLE, PARALLEL>
 where
     RI: RenderInstance,
 {
     /// Creates a new [`RenderInstancePlugin`] that unconditionally extracts to
     /// the render world, whether the entity is visible or not.
     pub fn new() -> Self {
-        Self {
-            only_extract_visible: false,
-            marker: PhantomData,
-        }
+        Self(PhantomData)
     }
 }
 
-impl<RI> RenderInstancePlugin<RI>
-where
-    RI: RenderInstance,
-{
-    /// Creates a new [`RenderInstancePlugin`] that extracts to the render world
-    /// if and only if the entity it's attached to is visible.
-    pub fn extract_visible() -> Self {
-        Self {
-            only_extract_visible: true,
-            marker: PhantomData,
-        }
-    }
-}
-
-impl<RI> Plugin for RenderInstancePlugin<RI>
+impl<RI, const VISIBLE: bool, const PARALLEL: bool> Plugin
+    for RenderInstancePlugin<RI, VISIBLE, PARALLEL>
 where
     RI: RenderInstance,
 {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.init_resource::<RenderInstances<RI>>();
-            if self.only_extract_visible {
-                render_app.add_systems(ExtractSchedule, extract_visible_to_render_instances::<RI>);
-            } else {
-                render_app.add_systems(ExtractSchedule, extract_to_render_instances::<RI>);
-            }
+            // wasm32 currently doesn't support threading so we avoid the overhead automatically
+            // in this plugin by only running extraction single-threaded in that case.
+            let parallel = PARALLEL && !cfg!(target_arch = "wasm32");
+            match (VISIBLE, parallel) {
+                (true, true) => render_app.add_systems(
+                    ExtractSchedule,
+                    extract_visible_to_render_instances_in_parallel::<RI>,
+                ),
+                (true, false) => render_app
+                    .add_systems(ExtractSchedule, extract_visible_to_render_instances::<RI>),
+                (false, true) => render_app.add_systems(
+                    ExtractSchedule,
+                    extract_to_render_instances_in_parallel::<RI>,
+                ),
+                (false, false) => {
+                    render_app.add_systems(ExtractSchedule, extract_to_render_instances::<RI>)
+                }
+            };
         }
     }
 }
 
-fn extract_to_render_instances<RI>(
+pub fn extract_to_render_instances_in_parallel<RI>(
+    mut instances: ResMut<RenderInstances<RI>>,
+    mut thread_local_queues: Local<ThreadLocal<Cell<Vec<(Entity, RI)>>>>,
+    query: Extract<Query<(Entity, RI::Query), RI::Filter>>,
+) where
+    RI: RenderInstance,
+{
+    query.par_iter().for_each(|(entity, other)| {
+        if let Some(render_instance) = RI::extract_to_render_instance(other) {
+            let tls = thread_local_queues.get_or_default();
+            let mut queue = tls.take();
+            queue.push((entity, render_instance));
+            tls.set(queue);
+        }
+    });
+
+    instances.clear();
+    for queue in thread_local_queues.iter_mut() {
+        instances.extend(queue.get_mut().drain(..));
+    }
+}
+
+pub fn extract_to_render_instances<RI>(
     mut instances: ResMut<RenderInstances<RI>>,
     query: Extract<Query<(Entity, RI::Query), RI::Filter>>,
 ) where
@@ -124,7 +140,7 @@ fn extract_to_render_instances<RI>(
     }
 }
 
-fn extract_visible_to_render_instances<RI>(
+pub fn extract_visible_to_render_instances<RI>(
     mut instances: ResMut<RenderInstances<RI>>,
     query: Extract<Query<(Entity, &ViewVisibility, RI::Query), RI::Filter>>,
 ) where
@@ -140,6 +156,33 @@ fn extract_visible_to_render_instances<RI>(
     }
 }
 
+pub fn extract_visible_to_render_instances_in_parallel<RI>(
+    mut instances: ResMut<RenderInstances<RI>>,
+    mut thread_local_queues: Local<ThreadLocal<Cell<Vec<(Entity, RI)>>>>,
+    query: Extract<Query<(Entity, &ViewVisibility, RI::Query), RI::Filter>>,
+) where
+    RI: RenderInstance,
+{
+    query
+        .par_iter()
+        .for_each(|(entity, view_visibility, other)| {
+            if !view_visibility.get() {
+                return;
+            }
+            if let Some(render_instance) = RI::extract_to_render_instance(other) {
+                let tls = thread_local_queues.get_or_default();
+                let mut queue = tls.take();
+                queue.push((entity, render_instance));
+                tls.set(queue);
+            }
+        });
+
+    instances.clear();
+    for queue in thread_local_queues.iter_mut() {
+        instances.extend(queue.get_mut().drain(..));
+    }
+}
+
 impl<A> RenderInstance for AssetId<A>
 where
     A: Asset,
@@ -147,6 +190,7 @@ where
     type Query = Read<Handle<A>>;
     type Filter = ();
 
+    #[inline]
     fn extract_to_render_instance(item: QueryItem<'_, Self::Query>) -> Option<Self> {
         Some(item.id())
     }
