@@ -1951,6 +1951,7 @@ pub fn check_light_mesh_visibility(
     mut directional_lights: Query<
         (
             &DirectionalLight,
+            &GlobalTransform,
             &CascadesFrusta,
             &mut CascadesVisibleEntities,
             Option<&RenderLayers>,
@@ -1967,8 +1968,13 @@ pub fn check_light_mesh_visibility(
             Option<&Aabb>,
             Option<&GlobalTransform>,
         ),
-        (Without<NotShadowCaster>, Without<DirectionalLight>),
+        (
+            Without<NotShadowCaster>,
+            Without<DirectionalLight>,
+            Without<SpotLight>,
+        ),
     >,
+    views: Query<(Entity, &Frustum), (With<Camera>, Without<SpotLight>)>,
 ) {
     fn shrink_entities(visible_entities: &mut VisibleEntities) {
         // Check that visible entities capacity() is no more than two times greater than len()
@@ -1987,8 +1993,14 @@ pub fn check_light_mesh_visibility(
     }
 
     // Directional lights
-    for (directional_light, frusta, mut visible_entities, maybe_view_mask, light_view_visibility) in
-        &mut directional_lights
+    for (
+        directional_light,
+        light_transform,
+        frusta,
+        mut visible_entities,
+        maybe_view_mask,
+        light_view_visibility,
+    ) in &mut directional_lights
     {
         // Re-use already allocated entries where possible.
         let mut views_to_remove = Vec::new();
@@ -2020,6 +2032,21 @@ pub fn check_light_mesh_visibility(
 
         let view_mask = maybe_view_mask.copied().unwrap_or_default();
 
+        let light_direction: Vec3A = light_transform.forward().into();
+
+        let view_far_planes = views
+            .iter()
+            .map(|(entity, frustum)| {
+                let mut view_frusta_far_planes = Vec::with_capacity(6);
+                for half_space in &frustum.half_spaces {
+                    if half_space.normal().dot(light_direction) < 0.0 {
+                        view_frusta_far_planes.push(half_space.clone());
+                    }
+                }
+                (entity, view_frusta_far_planes)
+            })
+            .collect::<HashMap<_, _>>();
+
         for (
             entity,
             inherited_visibility,
@@ -2046,12 +2073,27 @@ pub fn check_light_mesh_visibility(
                         .get_mut(view)
                         .expect("Per-view visible entities should have been inserted already");
 
-                    for (frustum, frustum_visible_entities) in
+                    let view_frusta_far_planes = view_far_planes.get(view).unwrap();
+                    'next: for (frustum, frustum_visible_entities) in
                         view_frusta.iter().zip(view_visible_entities)
                     {
                         // Disable near-plane culling, as a shadow caster could lie before the near plane.
                         if !frustum.intersects_obb(aabb, &transform.affine(), false, true) {
                             continue;
+                        }
+
+                        let aabb_center_world = transform
+                            .affine()
+                            .transform_point3a(aabb.center)
+                            .extend(1.0);
+                        for half_space in view_frusta_far_planes {
+                            let p_normal = half_space.normal();
+                            let relative_radius =
+                                aabb.relative_radius(&p_normal, &transform.affine().matrix3);
+                            if half_space.normal_d().dot(aabb_center_world) + relative_radius <= 0.0
+                            {
+                                continue 'next;
+                            }
                         }
 
                         view_visibility.set();
