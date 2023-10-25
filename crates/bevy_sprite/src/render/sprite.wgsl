@@ -12,11 +12,11 @@
 struct VertexInput {
     @builtin(vertex_index) index: u32,
     // NOTE: Instance-rate vertex buffer members prefixed with i_
-    // NOTE: i_model_transpose_colN are the 3 columns of a 3x4 matrix that is the transpose of the
-    // affine 4x3 model matrix.
-    @location(0) i_model_transpose_col0: vec4<f32>,
-    @location(1) i_model_transpose_col1: vec4<f32>,
-    @location(2) i_model_transpose_col2: vec4<f32>,
+    // NOTE: i_local_to_world_transpose_colN are the 3 columns of a 3x4 matrix that is the transpose of the
+    // affine 4x3 local_to_world matrix.
+    @location(0) i_local_to_world_transpose_col0: vec4<f32>,
+    @location(1) i_local_to_world_transpose_col1: vec4<f32>,
+    @location(2) i_local_to_world_transpose_col2: vec4<f32>,
     @location(3) i_color: vec4<f32>,
     @location(4) i_uv_offset_scale: vec4<f32>,
 }
@@ -37,10 +37,10 @@ fn vertex(in: VertexInput) -> VertexOutput {
         0.0
     );
 
-    out.clip_position = view.view_proj * affine_to_square(mat3x4<f32>(
-        in.i_model_transpose_col0,
-        in.i_model_transpose_col1,
-        in.i_model_transpose_col2,
+    out.clip_position = view.world_to_ndc * affine_to_square(mat3x4<f32>(
+        in.i_local_to_world_transpose_col0,
+        in.i_local_to_world_transpose_col1,
+        in.i_local_to_world_transpose_col2,
     )) * vec4<f32>(vertex_position, 1.0);
     out.uv = vec2<f32>(vertex_position.xy) * in.i_uv_offset_scale.zw + in.i_uv_offset_scale.xy;
     out.color = in.i_color;

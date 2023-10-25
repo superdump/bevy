@@ -41,8 +41,8 @@ fn vertex(vertex: VertexInput) -> VertexOutput {
     let position = positions[vertex.index];
 
     // algorithm based on https://wwwtyro.net/2019/11/18/instanced-lines.html
-    var clip_a = view.view_proj * vec4(vertex.position_a, 1.);
-    var clip_b = view.view_proj * vec4(vertex.position_b, 1.);
+    var clip_a = view.world_to_ndc * vec4(vertex.position_a, 1.);
+    var clip_b = view.world_to_ndc * vec4(vertex.position_b, 1.);
 
     // Manual near plane clipping to avoid errors when doing the perspective divide inside this shader.
     clip_a = clip_near_plane(clip_a, clip_b);
@@ -96,7 +96,7 @@ fn vertex(vertex: VertexInput) -> VertexOutput {
 }
 
 fn clip_near_plane(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
-    // Move a if a is behind the near plane and b is in front. 
+    // Move a if a is behind the near plane and b is in front.
     if a.z > a.w && b.z <= b.w {
         // Interpolate a towards b until it's at the near plane.
         let distance_a = a.z - a.w;

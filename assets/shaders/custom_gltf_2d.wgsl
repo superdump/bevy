@@ -1,6 +1,6 @@
 #import bevy_sprite::{
     mesh2d_view_bindings::globals,
-    mesh2d_functions::{get_model_matrix, mesh2d_position_local_to_clip},
+    mesh2d_functions::{get_local_to_world_matrix, mesh2d_position_local_to_clip},
 }
 
 struct Vertex {
@@ -19,8 +19,8 @@ struct VertexOutput {
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
-    let model = get_model_matrix(vertex.instance_index);
-    out.clip_position = mesh2d_position_local_to_clip(model, vec4<f32>(vertex.position, 1.0));
+    let local_to_world = get_local_to_world_matrix(vertex.instance_index);
+    out.clip_position = mesh2d_position_local_to_clip(local_to_world, vec4<f32>(vertex.position, 1.0));
     out.color = vertex.color;
     out.barycentric = vertex.barycentric;
     return out;

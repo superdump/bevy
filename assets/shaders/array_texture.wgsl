@@ -33,7 +33,7 @@ fn fragment(
         is_front,
     );
 
-    pbr_input.is_orthographic = view.projection[3].w == 1.0;
+    pbr_input.is_orthographic = view.view_to_ndc[3].w == 1.0;
 
     pbr_input.N = fns::apply_normal_mapping(
         pbr_input.material.flags,

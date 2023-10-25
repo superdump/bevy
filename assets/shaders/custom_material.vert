@@ -1,32 +1,44 @@
 #version 450
 
-layout(location = 0) in vec3 Vertex_Position;
-layout(location = 1) in vec3 Vertex_Normal;
-layout(location = 2) in vec2 Vertex_Uv;
+layout(location = 0) in vec3 vertex_position;
+layout(location = 1) in vec3 vertex_normal;
+layout(location = 2) in vec2 vertex_uv;
 
-layout(location = 0) out vec2 v_Uv;
+layout(location = 0) out vec2 v_uv;
 
-layout(set = 0, binding = 0) uniform CameraViewProj {
-    mat4 ViewProj;
-    mat4 View;
-    mat4 InverseView;
-    mat4 Projection;
-    vec3 WorldPosition;
-    float width;
-    float height;
+struct ColorGrading {
+    float exposure,
+    float gamma,
+    float pre_saturation,
+    float post_saturation,
+}
+
+layout(set = 0, binding = 0) uniform View {
+    mat4 world_to_ndc,
+    mat4 unjittered_world_to_ndc,
+    mat4 ndc_to_world,
+    mat4 view_to_world,
+    mat4 world_to_view,
+    mat4 view_to_ndc,
+    mat4 ndc_to_view,
+    vec3 world_position,
+    // viewport(x_origin, y_origin, width, height)
+    vec4 viewport,
+    ColorGrading color_grading,
+    float mip_bias,
 };
 
 struct Mesh {
-    mat3x4 Model;
-    mat4 InverseTransposeModel;
+    mat3x4 local_to_world;
+    mat4 inverse_transpose_local_to_world;
     uint flags;
 };
 
 #ifdef PER_OBJECT_BUFFER_BATCH_SIZE
-layout(set = 2, binding = 0) uniform Mesh Meshes[#{PER_OBJECT_BUFFER_BATCH_SIZE}];
+layout(set = 2, binding = 0) uniform Mesh meshes[#{PER_OBJECT_BUFFER_BATCH_SIZE}];
 #else
-layout(set = 2, binding = 0) readonly buffer _Meshes {
-    Mesh Meshes[];
+layout(set = 2, binding = 0) readonly buffer _meshes {
+    Mesh meshes[];
 };
 #endif // PER_OBJECT_BUFFER_BATCH_SIZE
 
@@ -40,8 +52,8 @@ mat4 affine_to_square(mat3x4 affine) {
 }
 
 void main() {
-    v_Uv = Vertex_Uv;
-    gl_Position = ViewProj
-        * affine_to_square(Meshes[gl_InstanceIndex].Model)
-        * vec4(Vertex_Position, 1.0);
+    v_uv = vertex_uv;
+    gl_Position = world_to_ndc
+        * affine_to_square(meshes[gl_InstanceIndex].local_to_world)
+        * vec4(vertex_position, 1.0);
 }

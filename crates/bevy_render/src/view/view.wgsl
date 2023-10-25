@@ -8,13 +8,13 @@ struct ColorGrading {
 }
 
 struct View {
-    view_proj: mat4x4<f32>,
-    unjittered_view_proj: mat4x4<f32>,
-    inverse_view_proj: mat4x4<f32>,
-    view: mat4x4<f32>,
-    inverse_view: mat4x4<f32>,
-    projection: mat4x4<f32>,
-    inverse_projection: mat4x4<f32>,
+    world_to_ndc: mat4x4<f32>,
+    unjittered_world_to_ndc: mat4x4<f32>,
+    ndc_to_world: mat4x4<f32>,
+    view_to_world: mat4x4<f32>,
+    world_to_view: mat4x4<f32>,
+    view_to_ndc: mat4x4<f32>,
+    ndc_to_view: mat4x4<f32>,
     world_position: vec3<f32>,
     // viewport(x_origin, y_origin, width, height)
     viewport: vec4<f32>,

@@ -30,7 +30,7 @@ fn pbr_input_from_vertex_output(
     var pbr_input: pbr_types::PbrInput = pbr_types::pbr_input_new();
 
     pbr_input.flags = mesh[in.instance_index].flags;
-    pbr_input.is_orthographic = view.projection[3].w == 1.0;
+    pbr_input.is_orthographic = view.view_to_ndc[3].w == 1.0;
     pbr_input.V = pbr_functions::calculate_view(in.world_position, pbr_input.is_orthographic);
     pbr_input.frag_coord = in.position;
     pbr_input.world_position = in.world_position;
@@ -104,7 +104,7 @@ fn pbr_input_from_standard_material(
         pbr_input.material.reflectance = pbr_bindings::material.reflectance;
         pbr_input.material.alpha_cutoff = pbr_bindings::material.alpha_cutoff;
 
-        // emissive       
+        // emissive
         // TODO use .a for exposure compensation in HDR
         var emissive: vec4<f32> = pbr_bindings::material.emissive;
 #ifdef VERTEX_UVS

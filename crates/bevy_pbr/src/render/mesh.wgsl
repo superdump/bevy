@@ -39,16 +39,16 @@ fn vertex(vertex_no_morph: Vertex) -> VertexOutput {
 #endif
 
 #ifdef SKINNED
-    var model = skinning::skin_model(vertex.joint_indices, vertex.joint_weights);
+    var local_to_world = skinning::skin_model(vertex.joint_indices, vertex.joint_weights);
 #else
     // Use vertex_no_morph.instance_index instead of vertex.instance_index to work around a wgpu dx12 bug.
     // See https://github.com/gfx-rs/naga/issues/2416 .
-    var model = mesh_functions::get_model_matrix(vertex_no_morph.instance_index);
+    var local_to_world = mesh_functions::get_local_to_world_matrix(vertex_no_morph.instance_index);
 #endif
 
 #ifdef VERTEX_NORMALS
 #ifdef SKINNED
-    out.world_normal = skinning::skin_normals(model, vertex.normal);
+    out.world_normal = skinning::skin_normals(local_to_world, vertex.normal);
 #else
     out.world_normal = mesh_functions::mesh_normal_local_to_world(
         vertex.normal,
@@ -60,7 +60,7 @@ fn vertex(vertex_no_morph: Vertex) -> VertexOutput {
 #endif
 
 #ifdef VERTEX_POSITIONS
-    out.world_position = mesh_functions::mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
+    out.world_position = mesh_functions::mesh_position_local_to_world(local_to_world, vec4<f32>(vertex.position, 1.0));
     out.position = position_world_to_clip(out.world_position.xyz);
 #endif
 
@@ -70,7 +70,7 @@ fn vertex(vertex_no_morph: Vertex) -> VertexOutput {
 
 #ifdef VERTEX_TANGENTS
     out.world_tangent = mesh_functions::mesh_tangent_local_to_world(
-        model,
+        local_to_world,
         vertex.tangent,
         // Use vertex_no_morph.instance_index instead of vertex.instance_index to work around a wgpu dx12 bug.
         // See https://github.com/gfx-rs/naga/issues/2416

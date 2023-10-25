@@ -17,7 +17,7 @@ const POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT: u32   = 1u;
 const POINT_LIGHT_FLAGS_SPOT_LIGHT_Y_NEGATIVE: u32 = 2u;
 
 struct DirectionalCascade {
-    view_projection: mat4x4<f32>,
+    world_to_ndc: mat4x4<f32>,
     texel_size: f32,
     far_bound: f32,
 }

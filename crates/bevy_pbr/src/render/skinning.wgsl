@@ -6,7 +6,7 @@
 
 #ifdef MESH_BINDGROUP_1
     @group(1) @binding(1) var<uniform> joint_matrices: SkinnedMesh;
-#else 
+#else
     @group(2) @binding(1) var<uniform> joint_matrices: SkinnedMesh;
 #endif
 
@@ -34,15 +34,15 @@ fn inverse_transpose_3x3m(in: mat3x3<f32>) -> mat3x3<f32> {
 }
 
 fn skin_normals(
-    model: mat4x4<f32>,
+    local_to_world: mat4x4<f32>,
     normal: vec3<f32>,
 ) -> vec3<f32> {
     return normalize(
         inverse_transpose_3x3m(
             mat3x3<f32>(
-                model[0].xyz,
-                model[1].xyz,
-                model[2].xyz
+                local_to_world[0].xyz,
+                local_to_world[1].xyz,
+                local_to_world[2].xyz
             )
         ) * normal
     );

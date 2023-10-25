@@ -124,7 +124,7 @@ fn sample_directional_cascade(light_id: u32, cascade_index: u32, frag_position: 
     let depth_offset = (*light).shadow_depth_bias * (*light).direction_to_light.xyz;
     let offset_position = vec4<f32>(frag_position.xyz + normal_offset + depth_offset, frag_position.w);
 
-    let offset_position_clip = (*cascade).view_projection * offset_position;
+    let offset_position_clip = (*cascade).world_to_ndc * offset_position;
     if (offset_position_clip.w <= 0.0) {
         return 1.0;
     }

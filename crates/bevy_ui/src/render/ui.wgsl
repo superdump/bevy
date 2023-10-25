@@ -20,7 +20,7 @@ fn vertex(
 ) -> VertexOutput {
     var out: VertexOutput;
     out.uv = vertex_uv;
-    out.position = view.view_proj * vec4<f32>(vertex_position, 1.0);
+    out.position = view.world_to_ndc * vec4<f32>(vertex_position, 1.0);
     out.color = vertex_color;
     out.mode = mode;
     return out;
