@@ -97,9 +97,11 @@ fn fetch_spot_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: ve
     // 0.1 must match POINT_LIGHT_NEAR_Z
     let depth = 0.1 / -projected_position.z;
 
-     // Number determined by trial and error that gave nice results.
-     let texel_size = 0.0134277345;
-    return sample_shadow_map(shadow_uv, depth, i32(light_id) + view_bindings::lights.spot_light_shadowmap_offset, texel_size);
+    // Number determined by trial and error that gave nice results.
+    let texel_size = 0.0134277345;
+
+    let light_local = vec3(shadow_uv, depth);
+    return sample_shadow_map(light_local, i32(light_id) + view_bindings::lights.spot_light_shadowmap_offset, texel_size, dpdx(light_local), dpdy(light_local));
 }
 
 fn get_cascade_index(light_id: u32, view_z: f32) -> u32 {
@@ -113,7 +115,9 @@ fn get_cascade_index(light_id: u32, view_z: f32) -> u32 {
     return (*light).num_cascades;
 }
 
-fn sample_directional_cascade(light_id: u32, cascade_index: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> f32 {
+// transform world position to cascade light-space position (xyz) + valid flag (w)
+fn get_directional_light_local(light_id: u32, cascade_index: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>) -> vec4<f32> {
+    var valid = 1.0;
     let light = &view_bindings::lights.directional_lights[light_id];
     let cascade = &(*light).cascades[cascade_index];
 
@@ -124,35 +128,54 @@ fn sample_directional_cascade(light_id: u32, cascade_index: u32, frag_position: 
 
     let offset_position_clip = (*cascade).view_projection * offset_position;
     if (offset_position_clip.w <= 0.0) {
-        return 1.0;
+        valid = 0.0;
     }
     let offset_position_ndc = offset_position_clip.xyz / offset_position_clip.w;
     // No shadow outside the orthographic projection volume
     if (any(offset_position_ndc.xy < vec2<f32>(-1.0)) || offset_position_ndc.z < 0.0
             || any(offset_position_ndc > vec3<f32>(1.0))) {
-        return 1.0;
+        valid = 0.0;
     }
 
     // compute texture coordinates for shadow lookup, compensating for the Y-flip difference
     // between the NDC and texture coordinates
-    let flip_correction = vec2<f32>(0.5, -0.5);
-    let light_local = offset_position_ndc.xy * flip_correction + vec2<f32>(0.5, 0.5);
+    let light_local = offset_position_ndc.xyz * vec3<f32>(0.5, -0.5, 1.0) + vec3<f32>(0.5, 0.5, 0.0);
+    return vec4<f32>(light_local, valid);
+}
 
-    let depth = offset_position_ndc.z;
-
+fn sample_directional_cascade(light_id: u32, cascade_index: u32, light_local: vec3<f32>, dx: vec3<f32>, dy: vec3<f32>) -> f32 {
+    let light = &view_bindings::lights.directional_lights[light_id];
+    let cascade = &(*light).cascades[cascade_index];
     let array_index = i32((*light).depth_texture_base_index + cascade_index);
-    return sample_shadow_map(light_local, depth, array_index, (*cascade).texel_size);
+    return sample_shadow_map(light_local, array_index, (*cascade).texel_size, dx, dy);
 }
 
 fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_normal: vec3<f32>, view_z: f32) -> f32 {
     let light = &view_bindings::lights.directional_lights[light_id];
     let cascade_index = get_cascade_index(light_id, view_z);
 
+    // we need derivatives of the light-local position, but due to non-uniform cascade accesses those are not in uniform control flow directly
+    // and dpdx / dpdy can't be used. so we take derivatives of the frag position instead, and manually calculate light-local derivatives
+    let dpdx_frag_position = dpdx(frag_position);
+    let dpdy_frag_position = dpdy(frag_position);
+
     if (cascade_index >= (*light).num_cascades) {
         return 1.0;
     }
 
-    var shadow = sample_directional_cascade(light_id, cascade_index, frag_position, surface_normal);
+    let light_local_valid = get_directional_light_local(light_id, cascade_index, frag_position, surface_normal);
+    let light_local = light_local_valid.xyz;
+    let valid = light_local_valid.w;
+
+    let light_local_dx = get_directional_light_local(light_id, cascade_index, frag_position + dpdx_frag_position, surface_normal).xyz - light_local;
+    let light_local_dy = get_directional_light_local(light_id, cascade_index, frag_position + dpdy_frag_position, surface_normal).xyz - light_local;
+
+    var shadow = 1.0;
+    if valid != 0.0 {
+        shadow = sample_directional_cascade(light_id, cascade_index, light_local, light_local_dx, light_local_dy);
+    } else {
+        // outside frustum
+    }
 
     // Blend with the next cascade, if there is one.
     let next_cascade_index = cascade_index + 1u;
@@ -160,8 +183,18 @@ fn fetch_directional_shadow(light_id: u32, frag_position: vec4<f32>, surface_nor
         let this_far_bound = (*light).cascades[cascade_index].far_bound;
         let next_near_bound = (1.0 - (*light).cascades_overlap_proportion) * this_far_bound;
         if (-view_z >= next_near_bound) {
-            let next_shadow = sample_directional_cascade(light_id, next_cascade_index, frag_position, surface_normal);
-            shadow = mix(shadow, next_shadow, (-view_z - next_near_bound) / (this_far_bound - next_near_bound));
+            let next_light_local_valid = get_directional_light_local(light_id, next_cascade_index, frag_position, surface_normal);
+            let next_light_local = next_light_local_valid.xyz;
+            let next_valid = next_light_local_valid.w;
+            if next_valid != 0.0 {
+                // scale derivatives by texel ratio
+                let ratio = (*light).cascades[cascade_index].texel_size / (*light).cascades[next_cascade_index].texel_size;
+                let next_light_local_dx = light_local_dx * ratio;
+                let next_light_local_dy = light_local_dy * ratio;
+                // sample next cascade
+                let next_shadow = sample_directional_cascade(light_id, next_cascade_index, next_light_local, next_light_local_dx, next_light_local_dy);
+                shadow = mix(shadow, next_shadow, (-view_z - next_near_bound) / (this_far_bound - next_near_bound));
+            }
         }
     }
     return shadow;

@@ -168,13 +168,12 @@ fn compute_receiver_plane_depth_bias(tex_coord_dx: vec3<f32>, tex_coord_dy: vec3
     return bias_uv;
 }
 
-fn sample_shadow_map(light_local: vec2<f32>, depth: f32, array_index: i32, texel_size: f32) -> f32 {
+fn sample_shadow_map(light_local_plus_depth: vec3<f32>, array_index: i32, texel_size: f32, dx: vec3<f32>, dy: vec3<f32>) -> f32 {
+    let light_local = light_local_plus_depth.xy;
+    let depth = light_local_plus_depth.z;
+
 #ifndef SHADOW_FILTER_METHOD_HARDWARE_2X2
-    let shadow_pos = vec3(light_local, depth);
-    let receiver_plane_depth_bias = compute_receiver_plane_depth_bias(
-        dpdx(shadow_pos),
-        dpdy(shadow_pos),
-    );
+    let receiver_plane_depth_bias = compute_receiver_plane_depth_bias(dx, dy);
 #endif
 
 #ifdef SHADOW_FILTER_METHOD_CASTANO_13
