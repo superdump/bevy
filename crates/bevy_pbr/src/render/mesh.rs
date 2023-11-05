@@ -27,6 +27,7 @@ use bevy_render::{
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::{tracing::error, EntityHashMap, HashMap, Hashed};
+use bytemuck::{Pod, Zeroable};
 use std::cell::Cell;
 use thread_local::ThreadLocal;
 
@@ -73,6 +74,65 @@ pub const MORPH_HANDLE: Handle<Shader> = Handle::weak_from_u128(9709828135876073
 /// See: <https://gpuweb.github.io/gpuweb/#limits>
 #[cfg(debug_assertions)]
 pub const MESH_PIPELINE_VIEW_LAYOUT_SAFE_MAX_TEXTURES: usize = 10;
+
+pub fn instance_buffer_layout() -> VertexBufferLayout {
+    VertexBufferLayout {
+        array_stride: 144,
+        step_mode: VertexStepMode::Instance,
+        attributes: vec![
+            VertexAttribute {
+                format: VertexFormat::Float32x4,
+                offset: 0,
+                shader_location: 8,
+            },
+            VertexAttribute {
+                format: VertexFormat::Float32x4,
+                offset: 16,
+                shader_location: 9,
+            },
+            VertexAttribute {
+                format: VertexFormat::Float32x4,
+                offset: 32,
+                shader_location: 10,
+            },
+            VertexAttribute {
+                format: VertexFormat::Float32x4,
+                offset: 48,
+                shader_location: 11,
+            },
+            VertexAttribute {
+                format: VertexFormat::Float32x4,
+                offset: 64,
+                shader_location: 12,
+            },
+            VertexAttribute {
+                format: VertexFormat::Float32x4,
+                offset: 80,
+                shader_location: 13,
+            },
+            VertexAttribute {
+                format: VertexFormat::Float32x4,
+                offset: 96,
+                shader_location: 14,
+            },
+            VertexAttribute {
+                format: VertexFormat::Float32x4,
+                offset: 112,
+                shader_location: 15,
+            },
+            VertexAttribute {
+                format: VertexFormat::Float32,
+                offset: 128,
+                shader_location: 16,
+            },
+            VertexAttribute {
+                format: VertexFormat::Uint32,
+                offset: 132,
+                shader_location: 17,
+            },
+        ],
+    }
+}
 
 impl Plugin for MeshRenderPlugin {
     fn build(&self, app: &mut bevy_app::App) {
@@ -155,19 +215,20 @@ impl Plugin for MeshRenderPlugin {
         let mut mesh_bindings_shader_defs = Vec::with_capacity(1);
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            if let Some(per_object_buffer_batch_size) = GpuArrayBuffer::<MeshUniform>::batch_size(
-                render_app.world.resource::<RenderDevice>(),
-            ) {
-                mesh_bindings_shader_defs.push(ShaderDefVal::UInt(
-                    "PER_OBJECT_BUFFER_BATCH_SIZE".into(),
-                    per_object_buffer_batch_size,
-                ));
-            }
+            // if let Some(per_object_buffer_batch_size) = GpuArrayBuffer::<MeshUniform>::batch_size(
+            //     render_app.world.resource::<RenderDevice>(),
+            // ) {
+            //     mesh_bindings_shader_defs.push(ShaderDefVal::UInt(
+            //         "PER_OBJECT_BUFFER_BATCH_SIZE".into(),
+            //         per_object_buffer_batch_size,
+            //     ));
+            // }
 
             render_app
-                .insert_resource(GpuArrayBuffer::<MeshUniform>::new(
-                    render_app.world.resource::<RenderDevice>(),
-                ))
+                .insert_resource(InstanceBuffer::<MeshUniform>::new(instance_buffer_layout()))
+                // .insert_resource(GpuArrayBuffer::<MeshUniform>::new(
+                //     render_app.world.resource::<RenderDevice>(),
+                // ))
                 .init_resource::<MeshPipeline>();
         }
 
@@ -190,7 +251,8 @@ pub struct MeshTransforms {
     pub flags: u32,
 }
 
-#[derive(ShaderType, Clone)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
 pub struct MeshUniform {
     // Affine 4x3 matrices transposed to 3x4
     pub transform: [Vec4; 3],
@@ -202,6 +264,8 @@ pub struct MeshUniform {
     pub inverse_transpose_model_a: [Vec4; 2],
     pub inverse_transpose_model_b: f32,
     pub flags: u32,
+    pub padding0: u32,
+    pub padding1: u32,
 }
 
 impl From<&MeshTransforms> for MeshUniform {
@@ -214,6 +278,8 @@ impl From<&MeshTransforms> for MeshUniform {
             inverse_transpose_model_a,
             inverse_transpose_model_b,
             flags: mesh_transforms.flags,
+            padding0: 0,
+            padding1: 0,
         }
     }
 }
@@ -344,7 +410,7 @@ pub struct MeshPipeline {
     /// @group(2) @binding(0) var<storage> mesh: array<Mesh>;
     /// ##endif // PER_OBJECT_BUFFER_BATCH_SIZE
     /// ```
-    pub per_object_buffer_batch_size: Option<u32>,
+    // pub per_object_buffer_batch_size: Option<u32>,
 
     #[cfg(debug_assertions)]
     pub did_warn_about_too_many_textures: Arc<AtomicBool>,
@@ -408,7 +474,7 @@ impl FromWorld for MeshPipeline {
             clustered_forward_buffer_binding_type,
             dummy_white_gpu_image,
             mesh_layouts: MeshLayouts::new(&render_device),
-            per_object_buffer_batch_size: GpuArrayBuffer::<MeshUniform>::batch_size(&render_device),
+            // per_object_buffer_batch_size: GpuArrayBuffer::<MeshUniform>::batch_size(&render_device),
             #[cfg(debug_assertions)]
             did_warn_about_too_many_textures: Arc::new(AtomicBool::new(false)),
         }
@@ -606,7 +672,7 @@ pub fn setup_morph_and_skinning_defs(
     key: &MeshPipelineKey,
     shader_defs: &mut Vec<ShaderDefVal>,
     vertex_attributes: &mut Vec<VertexAttributeDescriptor>,
-) -> BindGroupLayout {
+) -> Option<BindGroupLayout> {
     let mut add_skin_data = || {
         shader_defs.push("SKINNED".into());
         vertex_attributes.push(Mesh::ATTRIBUTE_JOINT_INDEX.at_shader_location(offset));
@@ -616,18 +682,18 @@ pub fn setup_morph_and_skinning_defs(
     match (is_skinned(layout), is_morphed) {
         (true, false) => {
             add_skin_data();
-            mesh_layouts.skinned.clone()
+            Some(mesh_layouts.skinned.clone())
         }
         (true, true) => {
             add_skin_data();
             shader_defs.push("MORPH_TARGETS".into());
-            mesh_layouts.morphed_skinned.clone()
+            Some(mesh_layouts.morphed_skinned.clone())
         }
         (false, true) => {
             shader_defs.push("MORPH_TARGETS".into());
-            mesh_layouts.morphed.clone()
+            Some(mesh_layouts.morphed.clone())
         }
-        (false, false) => mesh_layouts.model_only.clone(),
+        (false, false) => None,
     }
 }
 
@@ -687,14 +753,16 @@ impl SpecializedMeshPipeline for MeshPipeline {
             shader_defs.push("MULTISAMPLED".into());
         };
 
-        bind_group_layout.push(setup_morph_and_skinning_defs(
+        if let Some(bgl) = setup_morph_and_skinning_defs(
             &self.mesh_layouts,
             layout,
             6,
             &key,
             &mut shader_defs,
             &mut vertex_attributes,
-        ));
+        ) {
+            bind_group_layout.push(bgl);
+        }
 
         if key.contains(MeshPipelineKey::SCREEN_SPACE_AMBIENT_OCCLUSION) {
             shader_defs.push("SCREEN_SPACE_AMBIENT_OCCLUSION".into());
@@ -848,15 +916,15 @@ impl SpecializedMeshPipeline for MeshPipeline {
             TextureFormat::bevy_default()
         };
 
-        // This is defined here so that custom shaders that use something other than
-        // the mesh binding from bevy_pbr::mesh_bindings can easily make use of this
-        // in their own shaders.
-        if let Some(per_object_buffer_batch_size) = self.per_object_buffer_batch_size {
-            shader_defs.push(ShaderDefVal::UInt(
-                "PER_OBJECT_BUFFER_BATCH_SIZE".into(),
-                per_object_buffer_batch_size,
-            ));
-        }
+        // // This is defined here so that custom shaders that use something other than
+        // // the mesh binding from bevy_pbr::mesh_bindings can easily make use of this
+        // // in their own shaders.
+        // if let Some(per_object_buffer_batch_size) = self.per_object_buffer_batch_size {
+        //     shader_defs.push(ShaderDefVal::UInt(
+        //         "PER_OBJECT_BUFFER_BATCH_SIZE".into(),
+        //         per_object_buffer_batch_size,
+        //     ));
+        // }
 
         let mut push_constant_ranges = Vec::with_capacity(1);
         if cfg!(all(feature = "webgl", target_arch = "wasm32")) {
@@ -871,7 +939,7 @@ impl SpecializedMeshPipeline for MeshPipeline {
                 shader: MESH_SHADER_HANDLE,
                 entry_point: "vertex".into(),
                 shader_defs: shader_defs.clone(),
-                buffers: vec![vertex_buffer_layout],
+                buffers: vec![vertex_buffer_layout, instance_buffer_layout()],
             },
             fragment: Some(FragmentState {
                 shader: MESH_SHADER_HANDLE,
@@ -953,29 +1021,34 @@ pub fn prepare_mesh_bind_group(
     mut groups: ResMut<MeshBindGroups>,
     mesh_pipeline: Res<MeshPipeline>,
     render_device: Res<RenderDevice>,
-    mesh_uniforms: Res<GpuArrayBuffer<MeshUniform>>,
+    // mesh_uniforms: Res<GpuArrayBuffer<MeshUniform>>,
     skins_uniform: Res<SkinUniform>,
     weights_uniform: Res<MorphUniform>,
 ) {
     groups.reset();
     let layouts = &mesh_pipeline.mesh_layouts;
-    let Some(model) = mesh_uniforms.binding() else {
-        return;
-    };
-    groups.model_only = Some(layouts.model_only(&render_device, &model));
+    // let Some(model) = mesh_uniforms.binding() else {
+    //     return;
+    // };
+    // groups.model_only = Some(layouts.model_only(&render_device, &model));
 
     let skin = skins_uniform.buffer.buffer();
     if let Some(skin) = skin {
-        groups.skinned = Some(layouts.skinned(&render_device, &model, skin));
+        groups.skinned = Some(layouts.skinned(&render_device, /* &model, */ skin));
     }
 
     if let Some(weights) = weights_uniform.buffer.buffer() {
         for (id, gpu_mesh) in meshes.iter() {
             if let Some(targets) = gpu_mesh.morph_targets.as_ref() {
                 let group = if let Some(skin) = skin.filter(|_| is_skinned(&gpu_mesh.layout)) {
-                    layouts.morphed_skinned(&render_device, &model, skin, weights, targets)
+                    layouts.morphed_skinned(
+                        &render_device,
+                        /* &model, */ skin,
+                        weights,
+                        targets,
+                    )
                 } else {
-                    layouts.morphed(&render_device, &model, weights, targets)
+                    layouts.morphed(&render_device, /* &model, */ weights, targets)
                 };
                 groups.morph_targets.insert(id, group);
             }
@@ -1054,30 +1127,23 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
         let is_skinned = skin_index.is_some();
         let is_morphed = morph_index.is_some();
 
-        let Some(bind_group) = bind_groups.get(mesh.mesh_asset_id, is_skinned, is_morphed) else {
-            error!(
-                "The MeshBindGroups resource wasn't set in the render phase. \
-                It should be set by the queue_mesh_bind_group system.\n\
-                This is a bevy bug! Please open an issue."
-            );
-            return RenderCommandResult::Failure;
-        };
-
-        let mut dynamic_offsets: [u32; 3] = Default::default();
-        let mut offset_count = 0;
-        if let Some(dynamic_offset) = item.dynamic_offset() {
-            dynamic_offsets[offset_count] = dynamic_offset.get();
-            offset_count += 1;
+        if let Some(bind_group) = bind_groups.get(mesh.mesh_asset_id, is_skinned, is_morphed) {
+            let mut dynamic_offsets: [u32; 3] = Default::default();
+            let mut offset_count = 0;
+            if let Some(dynamic_offset) = item.dynamic_offset() {
+                dynamic_offsets[offset_count] = dynamic_offset.get();
+                offset_count += 1;
+            }
+            if let Some(skin_index) = skin_index {
+                dynamic_offsets[offset_count] = skin_index.index;
+                offset_count += 1;
+            }
+            if let Some(morph_index) = morph_index {
+                dynamic_offsets[offset_count] = morph_index.index;
+                offset_count += 1;
+            }
+            pass.set_bind_group(I, bind_group, &dynamic_offsets[0..offset_count]);
         }
-        if let Some(skin_index) = skin_index {
-            dynamic_offsets[offset_count] = skin_index.index;
-            offset_count += 1;
-        }
-        if let Some(morph_index) = morph_index {
-            dynamic_offsets[offset_count] = morph_index.index;
-            offset_count += 1;
-        }
-        pass.set_bind_group(I, bind_group, &dynamic_offsets[0..offset_count]);
 
         RenderCommandResult::Success
     }
@@ -1085,7 +1151,11 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
 
 pub struct DrawMesh;
 impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
-    type Param = (SRes<RenderAssets<Mesh>>, SRes<RenderMeshInstances>);
+    type Param = (
+        SRes<RenderAssets<Mesh>>,
+        SRes<RenderMeshInstances>,
+        SRes<InstanceBuffer<MeshUniform>>,
+    );
     type ViewWorldQuery = ();
     type ItemWorldQuery = ();
     #[inline]
@@ -1093,11 +1163,12 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
         item: &P,
         _view: (),
         _item_query: (),
-        (meshes, mesh_instances): SystemParamItem<'w, '_, Self::Param>,
+        (meshes, mesh_instances, instance_buffer): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let meshes = meshes.into_inner();
         let mesh_instances = mesh_instances.into_inner();
+        let instance_buffer = instance_buffer.into_inner();
 
         let Some(mesh_instance) = mesh_instances.get(&item.entity()) else {
             return RenderCommandResult::Failure;
@@ -1107,6 +1178,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
         };
 
         pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, instance_buffer.buffer.buffer().unwrap().slice(..));
 
         let batch_range = item.batch_range();
         #[cfg(all(feature = "webgl", target_arch = "wasm32"))]

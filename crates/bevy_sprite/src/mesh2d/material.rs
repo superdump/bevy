@@ -276,7 +276,7 @@ where
         descriptor.layout = vec![
             self.mesh2d_pipeline.view_layout.clone(),
             self.material2d_layout.clone(),
-            self.mesh2d_pipeline.mesh_layout.clone(),
+            // self.mesh2d_pipeline.mesh_layout.clone(),
         ];
 
         M::specialize(&mut descriptor, layout, key)?;
@@ -312,7 +312,7 @@ type DrawMaterial2d<M> = (
     SetItemPipeline,
     SetMesh2dViewBindGroup<0>,
     SetMaterial2dBindGroup<M, 1>,
-    SetMesh2dBindGroup<2>,
+    // SetMesh2dBindGroup<2>,
     DrawMesh2d,
 );
 

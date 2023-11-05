@@ -29,7 +29,7 @@ fn pbr_input_from_vertex_output(
 ) -> pbr_types::PbrInput {
     var pbr_input: pbr_types::PbrInput = pbr_types::pbr_input_new();
 
-    pbr_input.flags = mesh[in.instance_index].flags;
+    pbr_input.flags = in.flags;
     pbr_input.is_orthographic = view.projection[3].w == 1.0;
     pbr_input.V = pbr_functions::calculate_view(in.world_position, pbr_input.is_orthographic);
     pbr_input.frag_coord = in.position;
@@ -145,9 +145,9 @@ fn pbr_input_from_standard_material(
         }
 #endif
         // scale thickness, accounting for non-uniform scaling (e.g. a “squished” mesh)
-        thickness *= length(
-            (transpose(mesh[in.instance_index].model) * vec4(pbr_input.N, 0.0)).xyz
-        );
+        // thickness *= length(
+        //     (transpose(mesh[in.instance_index].model) * vec4(pbr_input.N, 0.0)).xyz
+        // );
         pbr_input.material.thickness = thickness;
 
         var diffuse_transmission = pbr_bindings::material.diffuse_transmission;

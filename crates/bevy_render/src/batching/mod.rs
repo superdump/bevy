@@ -5,10 +5,11 @@ use bevy_ecs::{
     system::{Query, ResMut, StaticSystemParam, SystemParam, SystemParamItem},
 };
 use bevy_utils::nonmax::NonMaxU32;
+use bytemuck::Pod;
 
 use crate::{
     render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, RenderPhase},
-    render_resource::{CachedRenderPipelineId, GpuArrayBuffer, GpuArrayBufferable},
+    render_resource::{CachedRenderPipelineId, GpuArrayBuffer, GpuArrayBufferable, InstanceBuffer},
     renderer::{RenderDevice, RenderQueue},
 };
 
@@ -65,7 +66,7 @@ pub trait GetBatchData {
     type CompareData: PartialEq;
     /// The per-instance data to be inserted into the [`GpuArrayBuffer`]
     /// containing these data for all instances.
-    type BufferData: GpuArrayBufferable + Sync + Send + 'static;
+    type BufferData: Pod + Sync + Send + 'static;
     /// Get the per-instance data to be inserted into the [`GpuArrayBuffer`].
     /// If the instance can be batched, also return the data used for
     /// comparison when deciding whether draws can be batched, else return None
@@ -79,23 +80,23 @@ pub trait GetBatchData {
 /// Batch the items in a render phase. This means comparing metadata needed to draw each phase item
 /// and trying to combine the draws into a batch.
 pub fn batch_and_prepare_render_phase<I: CachedRenderPipelinePhaseItem, F: GetBatchData>(
-    gpu_array_buffer: ResMut<GpuArrayBuffer<F::BufferData>>,
+    instance_buffer: ResMut<InstanceBuffer<F::BufferData>>,
     mut views: Query<&mut RenderPhase<I>>,
     query: Query<F::Query, F::QueryFilter>,
     param: StaticSystemParam<F::Param>,
 ) {
-    let gpu_array_buffer = gpu_array_buffer.into_inner();
+    let instance_buffer = instance_buffer.into_inner();
     let system_param_item = param.into_inner();
 
     let mut process_item = |item: &mut I| {
         let batch_query_item = query.get(item.entity()).ok()?;
 
         let (buffer_data, compare_data) = F::get_batch_data(&system_param_item, &batch_query_item);
-        let buffer_index = gpu_array_buffer.push(buffer_data);
+        let buffer_index = instance_buffer.buffer.push(buffer_data);
 
-        let index = buffer_index.index.get();
+        let index = buffer_index as u32;
         *item.batch_range_mut() = index..index + 1;
-        *item.dynamic_offset_mut() = buffer_index.dynamic_offset;
+        *item.dynamic_offset_mut() = None;
 
         if I::AUTOMATIC_BATCHING {
             compare_data.map(|compare_data| BatchMeta::new(item, compare_data))
@@ -123,9 +124,11 @@ pub fn batch_and_prepare_render_phase<I: CachedRenderPipelinePhaseItem, F: GetBa
 pub fn write_batched_instance_buffer<F: GetBatchData>(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    gpu_array_buffer: ResMut<GpuArrayBuffer<F::BufferData>>,
+    instance_buffer: ResMut<InstanceBuffer<F::BufferData>>,
 ) {
-    let gpu_array_buffer = gpu_array_buffer.into_inner();
-    gpu_array_buffer.write_buffer(&render_device, &render_queue);
-    gpu_array_buffer.clear();
+    let instance_buffer = instance_buffer.into_inner();
+    instance_buffer
+        .buffer
+        .write_buffer(&render_device, &render_queue);
+    instance_buffer.buffer.clear();
 }

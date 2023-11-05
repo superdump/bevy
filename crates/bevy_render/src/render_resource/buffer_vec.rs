@@ -3,7 +3,25 @@ use crate::{
     renderer::{RenderDevice, RenderQueue},
 };
 use bevy_core::{cast_slice, Pod};
+use bevy_ecs::system::Resource;
 use wgpu::BufferUsages;
+
+use super::VertexBufferLayout;
+
+#[derive(Resource)]
+pub struct InstanceBuffer<T: Pod> {
+    pub layout: VertexBufferLayout,
+    pub buffer: BufferVec<T>,
+}
+
+impl<T: Pod> InstanceBuffer<T> {
+    pub fn new(layout: VertexBufferLayout) -> Self {
+        Self {
+            layout,
+            buffer: BufferVec::new(BufferUsages::VERTEX),
+        }
+    }
+}
 
 /// A structure for storing raw bytes that have already been properly formatted
 /// for use by the GPU.

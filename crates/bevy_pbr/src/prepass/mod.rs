@@ -453,15 +453,16 @@ where
             shader_defs.push("PREPASS_FRAGMENT".into());
         }
 
-        let bind_group = setup_morph_and_skinning_defs(
+        if let Some(bind_group) = setup_morph_and_skinning_defs(
             &self.mesh_layouts,
             layout,
             4,
             &key.mesh_key,
             &mut shader_defs,
             &mut vertex_attributes,
-        );
-        bind_group_layouts.insert(2, bind_group);
+        ) {
+            bind_group_layouts.insert(2, bind_group);
+        }
 
         let vertex_buffer_layout = layout.get_layout(&vertex_attributes)?;
 
