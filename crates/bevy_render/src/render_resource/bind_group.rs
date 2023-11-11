@@ -12,6 +12,8 @@ use encase::ShaderType;
 use std::ops::Deref;
 use wgpu::{BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource};
 
+use super::{BufferId, GpuArrayBuffer, GpuArrayBufferable, SamplerId, TextureViewId};
+
 define_atomic_id!(BindGroupId);
 render_resource_wrapper!(ErasedBindGroup, wgpu::BindGroup);
 
@@ -263,6 +265,8 @@ pub trait AsBindGroup {
     /// Data that will be stored alongside the "prepared" bind group.
     type Data: Send + Sync;
 
+    type ConvertedShaderType: GpuArrayBufferable + Send + Sync;
+
     /// label
     fn label() -> Option<&'static str> {
         None
@@ -271,13 +275,20 @@ pub trait AsBindGroup {
     /// Creates a bind group for `self` matching the layout defined in [`AsBindGroup::bind_group_layout`].
     fn as_bind_group(
         &self,
+        buffer: &GpuArrayBuffer<Self::ConvertedShaderType>,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
         images: &RenderAssets<Image>,
         fallback_image: &FallbackImage,
     ) -> Result<PreparedBindGroup<Self::Data>, AsBindGroupError> {
-        let UnpreparedBindGroup { bindings, data } =
-            Self::unprepared_bind_group(self, layout, render_device, images, fallback_image)?;
+        let UnpreparedBindGroup { bindings, data } = Self::unprepared_bind_group(
+            self,
+            buffer,
+            layout,
+            render_device,
+            images,
+            fallback_image,
+        )?;
 
         let entries = bindings
             .iter()
@@ -302,6 +313,7 @@ pub trait AsBindGroup {
     /// from working correctly.
     fn unprepared_bind_group(
         &self,
+        buffer: &GpuArrayBuffer<Self::ConvertedShaderType>,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
         images: &RenderAssets<Image>,
@@ -344,6 +356,26 @@ pub struct PreparedBindGroup<T> {
 pub struct UnpreparedBindGroup<T> {
     pub bindings: Vec<(u32, OwnedBindingResource)>,
     pub data: T,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+pub enum OwnedBindingResourceId {
+    Buffer(BufferId),
+    TextureView(TextureViewId),
+    Sampler(SamplerId),
+}
+
+impl From<&OwnedBindingResource> for OwnedBindingResourceId {
+    #[inline]
+    fn from(resource: &OwnedBindingResource) -> Self {
+        match resource {
+            OwnedBindingResource::Buffer(buffer) => OwnedBindingResourceId::Buffer(buffer.id()),
+            OwnedBindingResource::TextureView(texture_view) => {
+                OwnedBindingResourceId::TextureView(texture_view.id())
+            }
+            OwnedBindingResource::Sampler(sampler) => OwnedBindingResourceId::Sampler(sampler.id()),
+        }
+    }
 }
 
 /// An owned binding resource of any type (ex: a [`Buffer`], [`TextureView`], etc).
@@ -397,6 +429,8 @@ mod test {
     fn texture_visibility() {
         #[derive(AsBindGroup)]
         pub struct TextureVisibilityTest {
+            #[uniform(9)]
+            pub test: u32,
             #[texture(0, visibility(all))]
             pub all: Handle<Image>,
             #[texture(1, visibility(none))]

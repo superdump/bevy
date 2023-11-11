@@ -30,9 +30,9 @@ use bevy_render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::EntityHashMap;
+use bevy_utils::{nonmax::NonMaxU32, EntityHashMap};
 
-use crate::Material2dBindGroupId;
+use crate::Material2dBindGroupMeta;
 
 /// Component for rendering with meshes in the 2d pipeline, usually with a [2d material](crate::Material2d) such as [`ColorMaterial`](crate::ColorMaterial).
 ///
@@ -160,10 +160,11 @@ pub struct Mesh2dUniform {
     pub inverse_transpose_model_a: [Vec4; 2],
     pub inverse_transpose_model_b: f32,
     pub flags: u32,
+    pub material_index: u32,
 }
 
-impl From<&Mesh2dTransforms> for Mesh2dUniform {
-    fn from(mesh_transforms: &Mesh2dTransforms) -> Self {
+impl Mesh2dUniform {
+    pub fn new(mesh_transforms: &Mesh2dTransforms, material_index: u32) -> Self {
         let (inverse_transpose_model_a, inverse_transpose_model_b) =
             mesh_transforms.transform.inverse_transpose_3x3();
         Self {
@@ -171,6 +172,7 @@ impl From<&Mesh2dTransforms> for Mesh2dUniform {
             inverse_transpose_model_a,
             inverse_transpose_model_b,
             flags: mesh_transforms.flags,
+            material_index,
         }
     }
 }
@@ -187,7 +189,7 @@ bitflags::bitflags! {
 pub struct RenderMesh2dInstance {
     pub transforms: Mesh2dTransforms,
     pub mesh_asset_id: AssetId<Mesh>,
-    pub material_bind_group_id: Material2dBindGroupId,
+    pub material_bind_group_meta: Material2dBindGroupMeta,
     pub automatic_batching: bool,
 }
 
@@ -229,7 +231,7 @@ pub fn extract_mesh2d(
                     flags: MeshFlags::empty().bits(),
                 },
                 mesh_asset_id: handle.0.id(),
-                material_bind_group_id: Material2dBindGroupId::default(),
+                material_bind_group_meta: Material2dBindGroupMeta::default(),
                 automatic_batching: !no_automatic_batching,
             },
         );
@@ -362,7 +364,7 @@ impl GetBatchData for Mesh2dPipeline {
     type Param = SRes<RenderMesh2dInstances>;
     type Query = Entity;
     type QueryFilter = With<Mesh2d>;
-    type CompareData = (Material2dBindGroupId, AssetId<Mesh>);
+    type CompareData = (Option<BindGroupId>, Option<NonMaxU32>, AssetId<Mesh>);
     type BufferData = Mesh2dUniform;
 
     fn get_batch_data(
@@ -373,11 +375,21 @@ impl GetBatchData for Mesh2dPipeline {
             .get(entity)
             .expect("Failed to find render mesh2d instance");
         (
-            (&mesh_instance.transforms).into(),
-            mesh_instance.automatic_batching.then_some((
-                mesh_instance.material_bind_group_id,
-                mesh_instance.mesh_asset_id,
-            )),
+            Mesh2dUniform::new(
+                &mesh_instance.transforms,
+                mesh_instance
+                    .material_bind_group_meta
+                    .index
+                    .map(|index| index.get())
+                    .unwrap_or_default(),
+            ),
+            mesh_instance.automatic_batching.then(|| {
+                (
+                    mesh_instance.material_bind_group_meta.bind_group_id,
+                    mesh_instance.material_bind_group_meta.dynamic_offset,
+                    mesh_instance.mesh_asset_id,
+                )
+            }),
         )
     }
 }

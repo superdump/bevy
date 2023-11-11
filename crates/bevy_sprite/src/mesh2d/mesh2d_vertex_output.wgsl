@@ -1,7 +1,7 @@
 #define_import_path bevy_sprite::mesh2d_vertex_output
 
 struct VertexOutput {
-    // this is `clip position` when the struct is used as a vertex stage output 
+    // this is `clip position` when the struct is used as a vertex stage output
     // and `frag coord` when used as a fragment stage input
     @builtin(position) position: vec4<f32>,
     @location(0) world_position: vec4<f32>,
@@ -13,4 +13,5 @@ struct VertexOutput {
     #ifdef VERTEX_COLORS
     @location(4) color: vec4<f32>,
     #endif
+    @location(5) @interpolate(flat) instance_index: u32,
 }

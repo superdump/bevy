@@ -4,7 +4,8 @@ use bevy_asset::{load_internal_asset, Asset, AssetApp, Assets, Handle};
 use bevy_math::Vec4;
 use bevy_reflect::prelude::*;
 use bevy_render::{
-    color::Color, prelude::Shader, render_asset::RenderAssets, render_resource::*, texture::Image,
+    color::Color, prelude::Shader, render_asset::RenderAssets, render_resource::*,
+    renderer::RenderDevice, texture::Image, RenderApp,
 };
 
 pub const COLOR_MATERIAL_SHADER_HANDLE: Handle<Shader> =
@@ -15,13 +16,6 @@ pub struct ColorMaterialPlugin;
 
 impl Plugin for ColorMaterialPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            COLOR_MATERIAL_SHADER_HANDLE,
-            "color_material.wgsl",
-            Shader::from_wgsl
-        );
-
         app.add_plugins(Material2dPlugin::<ColorMaterial>::default())
             .register_asset_reflect::<ColorMaterial>();
 
@@ -31,6 +25,34 @@ impl Plugin for ColorMaterialPlugin {
                 color: Color::rgb(1.0, 0.0, 1.0),
                 ..Default::default()
             },
+        );
+    }
+
+    fn finish(&self, app: &mut App) {
+        let mut color_bindings_shader_defs = Vec::with_capacity(1);
+
+        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            let material_buffer_batch_size =
+                GpuArrayBuffer::<<ColorMaterial as AsBindGroup>::ConvertedShaderType>::batch_size(
+                    render_app.world.resource::<RenderDevice>(),
+                );
+
+            if let Some(material_buffer_batch_size) = material_buffer_batch_size {
+                color_bindings_shader_defs.push(ShaderDefVal::UInt(
+                    "MATERIAL_BUFFER_BATCH_SIZE".into(),
+                    material_buffer_batch_size as u32,
+                ));
+            }
+        }
+
+        // Load the color_material shader module here as it depends on runtime information about
+        // whether storage buffers are supported, or the maximum uniform buffer binding size.
+        load_internal_asset!(
+            app,
+            COLOR_MATERIAL_SHADER_HANDLE,
+            "color_material.wgsl",
+            Shader::from_wgsl_with_defs,
+            color_bindings_shader_defs
         );
     }
 }

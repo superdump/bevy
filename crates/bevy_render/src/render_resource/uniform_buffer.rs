@@ -125,9 +125,10 @@ impl<T: ShaderType + WriteInto> UniformBuffer<T> {
     ///
     /// If a GPU-side buffer does not already exist for this data, such a buffer is initialized with currently
     /// available data.
-    pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
+    pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) -> bool {
         self.scratch.write(&self.value).unwrap();
 
+        let mut new_buffer = false;
         if self.changed || self.buffer.is_none() {
             self.buffer = Some(device.create_buffer_with_data(&BufferInitDescriptor {
                 label: self.label.as_deref(),
@@ -135,9 +136,11 @@ impl<T: ShaderType + WriteInto> UniformBuffer<T> {
                 contents: self.scratch.as_ref(),
             }));
             self.changed = false;
+            new_buffer = true;
         } else if let Some(buffer) = &self.buffer {
             queue.write_buffer(buffer, 0, self.scratch.as_ref());
         }
+        new_buffer
     }
 }
 
@@ -330,10 +333,11 @@ impl<T: ShaderType + WriteInto> DynamicUniformBuffer<T> {
     /// If there is no GPU-side buffer allocated to hold the data currently stored, or if a GPU-side buffer previously
     /// allocated does not have enough capacity, a new GPU-side buffer is created.
     #[inline]
-    pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) {
+    pub fn write_buffer(&mut self, device: &RenderDevice, queue: &RenderQueue) -> bool {
         let capacity = self.buffer.as_deref().map(wgpu::Buffer::size).unwrap_or(0);
         let size = self.scratch.as_ref().len() as u64;
 
+        let mut new_buffer = false;
         if capacity < size || self.changed {
             self.buffer = Some(device.create_buffer_with_data(&BufferInitDescriptor {
                 label: self.label.as_deref(),
@@ -341,9 +345,11 @@ impl<T: ShaderType + WriteInto> DynamicUniformBuffer<T> {
                 contents: self.scratch.as_ref(),
             }));
             self.changed = false;
+            new_buffer = true;
         } else if let Some(buffer) = &self.buffer {
             queue.write_buffer(buffer, 0, self.scratch.as_ref());
         }
+        new_buffer
     }
 
     #[inline]

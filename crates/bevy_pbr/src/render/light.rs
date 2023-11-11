@@ -118,7 +118,7 @@ impl GpuPointLights {
         }
     }
 
-    fn write_buffer(&mut self, render_device: &RenderDevice, render_queue: &RenderQueue) {
+    fn write_buffer(&mut self, render_device: &RenderDevice, render_queue: &RenderQueue) -> bool {
         match self {
             GpuPointLights::Uniform(buffer) => buffer.write_buffer(render_device, render_queue),
             GpuPointLights::Storage(buffer) => buffer.write_buffer(render_device, render_queue),

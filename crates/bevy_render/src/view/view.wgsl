@@ -20,5 +20,6 @@ struct View {
     viewport: vec4<f32>,
     frustum: array<vec4<f32>, 6>,
     color_grading: ColorGrading,
-    mip_bias: f32,
+    // 2^(mip bias)
+    pow_2_mip_bias: f32,
 };

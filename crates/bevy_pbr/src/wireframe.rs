@@ -8,6 +8,7 @@ use bevy_render::{
     extract_resource::ExtractResource,
     mesh::{Mesh, MeshVertexBufferLayout},
     prelude::*,
+    render_asset::RenderAssets,
     render_resource::*,
 };
 
