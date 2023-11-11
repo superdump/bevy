@@ -65,7 +65,8 @@ use bevy_render::{
     render_asset::prepare_assets,
     render_graph::RenderGraph,
     render_phase::sort_phase_system,
-    render_resource::Shader,
+    render_resource::{AsBindGroup, GpuArrayBuffer, Shader, ShaderDefVal},
+    renderer::RenderDevice,
     texture::Image,
     view::VisibilitySystems,
     ExtractSchedule, Render, RenderApp, RenderSet,
@@ -122,12 +123,6 @@ impl Plugin for PbrPlugin {
             app,
             PBR_TYPES_SHADER_HANDLE,
             "render/pbr_types.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            PBR_BINDINGS_SHADER_HANDLE,
-            "render/pbr_bindings.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(app, UTILS_HANDLE, "render/utils.wgsl", Shader::from_wgsl);
@@ -367,14 +362,36 @@ impl Plugin for PbrPlugin {
     }
 
     fn finish(&self, app: &mut App) {
-        let render_app = match app.get_sub_app_mut(RenderApp) {
-            Ok(render_app) => render_app,
-            Err(_) => return,
-        };
+        let mut pbr_bindings_shader_defs = Vec::with_capacity(1);
 
-        // Extract the required data from the main world
-        render_app
-            .init_resource::<ShadowSamplers>()
-            .init_resource::<GlobalLightMeta>();
+        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+            let material_buffer_batch_size = GpuArrayBuffer::<
+                <StandardMaterial as AsBindGroup>::ConvertedShaderType,
+            >::batch_size(
+                render_app.world.resource::<RenderDevice>()
+            );
+
+            if let Some(material_buffer_batch_size) = material_buffer_batch_size {
+                pbr_bindings_shader_defs.push(ShaderDefVal::UInt(
+                    "MATERIAL_BUFFER_BATCH_SIZE".into(),
+                    material_buffer_batch_size as u32,
+                ));
+            }
+
+            // Extract the required data from the main world
+            render_app
+                .init_resource::<ShadowSamplers>()
+                .init_resource::<GlobalLightMeta>();
+        }
+
+        // Load the mesh_bindings shader module here as it depends on runtime information about
+        // whether storage buffers are supported, or the maximum uniform buffer binding size.
+        load_internal_asset!(
+            app,
+            PBR_BINDINGS_SHADER_HANDLE,
+            "render/pbr_bindings.wgsl",
+            Shader::from_wgsl_with_defs,
+            pbr_bindings_shader_defs
+        );
     }
 }

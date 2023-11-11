@@ -6,14 +6,17 @@
     prepass_io,
     mesh_view_bindings::view,
 }
- 
+
 #ifdef PREPASS_FRAGMENT
 @fragment
 fn fragment(
     in: prepass_io::VertexOutput,
     @builtin(front_facing) is_front: bool,
 ) -> prepass_io::FragmentOutput {
-    pbr_prepass_functions::prepass_alpha_discard(in);
+    let duvdx = dpdx(in.uv);
+    let duvdy = dpdy(in.uv);
+
+    pbr_prepass_functions::prepass_alpha_discard(in, duvdx, duvdy);
 
     var out: prepass_io::FragmentOutput;
 
@@ -44,8 +47,9 @@ fn fragment(
 #endif // VERTEX_TANGENTS
 #ifdef VERTEX_UVS
             in.uv,
+            duvdx,
+            duvdy,
 #endif // VERTEX_UVS
-            view.mip_bias,
         );
 
         out.normal = vec4(normal * 0.5 + vec3(0.5), 1.0);
@@ -63,6 +67,9 @@ fn fragment(
 #else
 @fragment
 fn fragment(in: prepass_io::VertexOutput) {
-    pbr_prepass_functions::prepass_alpha_discard(in);
+    let duvdx = dpdx(in.uv);
+    let duvdy = dpdy(in.uv);
+
+    pbr_prepass_functions::prepass_alpha_discard(in, duvdx, duvdy);
 }
 #endif // PREPASS_FRAGMENT

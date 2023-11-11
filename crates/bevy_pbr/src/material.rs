@@ -9,7 +9,6 @@ use bevy_core_pipeline::{
     prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
     tonemapping::{DebandDither, Tonemapping},
 };
-use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::SRes, SystemParamItem},
@@ -25,12 +24,12 @@ use bevy_render::{
     render_asset::{prepare_assets, RenderAssets},
     render_phase::*,
     render_resource::*,
-    renderer::RenderDevice,
+    renderer::{RenderDevice, RenderQueue},
     texture::FallbackImage,
     view::{ExtractedView, Msaa, VisibleEntities},
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
-use bevy_utils::{tracing::error, HashMap, HashSet};
+use bevy_utils::{nonmax::NonMaxU32, tracing::error, HashMap, HashSet};
 use std::hash::Hash;
 use std::marker::PhantomData;
 
@@ -91,7 +90,13 @@ use std::marker::PhantomData;
 /// @group(1) @binding(1) var color_texture: texture_2d<f32>;
 /// @group(1) @binding(2) var color_sampler: sampler;
 /// ```
-pub trait Material: Asset + AsBindGroup + Clone + Sized {
+pub trait Material:
+    Asset
+    + AsBindGroup
+    + AsBindGroupShaderType<<Self as AsBindGroup>::ConvertedShaderType>
+    + Clone
+    + Sized
+{
     /// Returns this material's vertex shader. If [`ShaderRef::Default`] is returned, the default mesh vertex shader
     /// will be used.
     fn vertex_shader() -> ShaderRef {
@@ -220,7 +225,6 @@ where
                 .add_render_command::<Opaque3d, DrawMaterial<M>>()
                 .add_render_command::<AlphaMask3d, DrawMaterial<M>>()
                 .init_resource::<ExtractedMaterials<M>>()
-                .init_resource::<RenderMaterials<M>>()
                 .init_resource::<SpecializedMeshPipelines<MaterialPipeline<M>>>()
                 .add_systems(ExtractSchedule, extract_materials::<M>)
                 .add_systems(
@@ -249,7 +253,11 @@ where
 
     fn finish(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<MaterialPipeline<M>>();
+            render_app
+                .insert_resource(RenderMaterials::<M>::new(
+                    render_app.world.resource::<RenderDevice>(),
+                ))
+                .init_resource::<MaterialPipeline<M>>();
         }
     }
 }
@@ -394,7 +402,7 @@ impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterial
         let Some(material_asset_id) = material_instances.get(&item.entity()) else {
             return RenderCommandResult::Failure;
         };
-        let Some(material) = materials.get(material_asset_id) else {
+        let Some(material) = materials.prepared.get(material_asset_id) else {
             return RenderCommandResult::Failure;
         };
         pass.set_bind_group(I, &material.bind_group, &[]);
@@ -589,7 +597,7 @@ pub fn queue_material_meshes<M: Material>(
             let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
                 continue;
             };
-            let Some(material) = render_materials.get(material_asset_id) else {
+            let Some(material) = render_materials.prepared.get(material_asset_id) else {
                 continue;
             };
 
@@ -625,7 +633,7 @@ pub fn queue_material_meshes<M: Material>(
                 }
             };
 
-            mesh_instance.material_bind_group_id = material.get_bind_group_id();
+            mesh_instance.material_bind_group_meta = material.get_bind_group_meta();
 
             let distance = rangefinder
                 .distance_translation(&mesh_instance.transforms.transform.translation)
@@ -757,20 +765,32 @@ pub struct MaterialProperties {
     pub reads_view_transmission_texture: bool,
 }
 
+#[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MaterialBindGroupMeta {
+    pub bind_group_id: Option<BindGroupId>,
+    pub index: Option<NonMaxU32>,
+    pub dynamic_offset: Option<NonMaxU32>,
+}
+
 /// Data prepared for a [`Material`] instance.
 pub struct PreparedMaterial<T: Material> {
     pub bindings: Vec<(u32, OwnedBindingResource)>,
     pub bind_group: BindGroup,
+    pub indices: Option<GpuArrayBufferIndex<<T as AsBindGroup>::ConvertedShaderType>>,
     pub key: T::Data,
     pub properties: MaterialProperties,
 }
 
-#[derive(Component, Clone, Copy, Default, PartialEq, Eq, Deref, DerefMut)]
-pub struct MaterialBindGroupId(Option<BindGroupId>);
-
 impl<T: Material> PreparedMaterial<T> {
-    pub fn get_bind_group_id(&self) -> MaterialBindGroupId {
-        MaterialBindGroupId(Some(self.bind_group.id()))
+    pub fn get_bind_group_meta(&self) -> MaterialBindGroupMeta {
+        let (index, dynamic_offset) = self.indices.as_ref().map_or((None, None), |indices| {
+            (Some(indices.index), indices.dynamic_offset)
+        });
+        MaterialBindGroupMeta {
+            bind_group_id: Some(self.bind_group.id()),
+            index,
+            dynamic_offset,
+        }
     }
 }
 
@@ -790,12 +810,20 @@ impl<M: Material> Default for ExtractedMaterials<M> {
 }
 
 /// Stores all prepared representations of [`Material`] assets for as long as they exist.
-#[derive(Resource, Deref, DerefMut)]
-pub struct RenderMaterials<T: Material>(pub HashMap<AssetId<T>, PreparedMaterial<T>>);
+#[derive(Resource)]
+pub struct RenderMaterials<T: Material> {
+    pub prepared: HashMap<AssetId<T>, PreparedMaterial<T>>,
+    pub buffer: GpuArrayBuffer<<T as AsBindGroup>::ConvertedShaderType>,
+    pub bind_group_cache: HashMap<Vec<(u32, OwnedBindingResourceId)>, BindGroup>,
+}
 
-impl<T: Material> Default for RenderMaterials<T> {
-    fn default() -> Self {
-        Self(Default::default())
+impl<T: Material> RenderMaterials<T> {
+    fn new(render_device: &RenderDevice) -> Self {
+        Self {
+            prepared: Default::default(),
+            buffer: GpuArrayBuffer::<<T as AsBindGroup>::ConvertedShaderType>::new(render_device),
+            bind_group_cache: Default::default(),
+        }
     }
 }
 
@@ -855,17 +883,56 @@ impl<M: Material> Default for PrepareNextFrameMaterials<M> {
 pub fn prepare_materials<M: Material>(
     mut prepare_next_frame: Local<PrepareNextFrameMaterials<M>>,
     mut extracted_assets: ResMut<ExtractedMaterials<M>>,
-    mut render_materials: ResMut<RenderMaterials<M>>,
+    render_materials: ResMut<RenderMaterials<M>>,
     render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
     images: Res<RenderAssets<Image>>,
     fallback_image: Res<FallbackImage>,
     pipeline: Res<MaterialPipeline<M>>,
     default_opaque_render_method: Res<DefaultOpaqueRendererMethod>,
 ) {
+    let render_materials = render_materials.into_inner();
+
+    let mut asset_data_indices = HashMap::new();
+    for (id, material) in prepare_next_frame.assets.iter() {
+        asset_data_indices.insert(
+            *id,
+            render_materials
+                .buffer
+                .push(material.as_bind_group_shader_type(&images)),
+        );
+    }
+
+    // for removed in std::mem::take(&mut extracted_assets.removed) {
+    //     updated.remove(&removed);
+    //     render_materials.prepared.remove(&removed);
+    // }
+
+    for (id, material) in &extracted_assets.extracted {
+        asset_data_indices.insert(
+            *id,
+            render_materials
+                .buffer
+                .push(material.as_bind_group_shader_type(&images)),
+        );
+    }
+
+    let new_buffer = render_materials
+        .buffer
+        .write_buffer(&render_device, &render_queue);
+
+    let mut updated = HashSet::with_capacity(
+        prepare_next_frame.assets.len() - extracted_assets.removed.len()
+            + extracted_assets.extracted.len(),
+    );
+
     let queued_assets = std::mem::take(&mut prepare_next_frame.assets);
     for (id, material) in queued_assets.into_iter() {
+        let indices = asset_data_indices.get(&id).cloned().expect("No indices");
         match prepare_material(
+            render_materials,
             &material,
+            indices,
             &render_device,
             &images,
             &fallback_image,
@@ -873,7 +940,8 @@ pub fn prepare_materials<M: Material>(
             default_opaque_render_method.0,
         ) {
             Ok(prepared_asset) => {
-                render_materials.insert(id, prepared_asset);
+                updated.insert(id);
+                render_materials.prepared.insert(id, prepared_asset);
             }
             Err(AsBindGroupError::RetryNextUpdate) => {
                 prepare_next_frame.assets.push((id, material));
@@ -882,12 +950,16 @@ pub fn prepare_materials<M: Material>(
     }
 
     for removed in std::mem::take(&mut extracted_assets.removed) {
-        render_materials.remove(&removed);
+        updated.remove(&removed);
+        render_materials.prepared.remove(&removed);
     }
 
     for (id, material) in std::mem::take(&mut extracted_assets.extracted) {
+        let indices = asset_data_indices.get(&id).cloned().expect("No indices");
         match prepare_material(
+            render_materials,
             &material,
+            indices,
             &render_device,
             &images,
             &fallback_image,
@@ -895,17 +967,72 @@ pub fn prepare_materials<M: Material>(
             default_opaque_render_method.0,
         ) {
             Ok(prepared_asset) => {
-                render_materials.insert(id, prepared_asset);
+                updated.insert(id);
+                render_materials.prepared.insert(id, prepared_asset);
             }
             Err(AsBindGroupError::RetryNextUpdate) => {
                 prepare_next_frame.assets.push((id, material));
             }
         }
     }
+
+    if new_buffer {
+        for (_id, prepared_asset) in render_materials.prepared.iter_mut() {
+            let binding_ids = prepared_asset
+                .bindings
+                .iter()
+                .map(|(binding, resource)| (*binding, OwnedBindingResourceId::from(resource)))
+                .collect::<Vec<_>>();
+            prepared_asset.bind_group = render_materials
+                .bind_group_cache
+                .entry(binding_ids)
+                .or_insert_with(|| {
+                    render_device.create_bind_group(
+                        None,
+                        &pipeline.material_layout,
+                        &&DynamicBindGroupEntries::new_with_indices_from_slice(
+                            prepared_asset
+                                .bindings
+                                .iter()
+                                .map(|(binding, resource)| (*binding, resource.get_binding())),
+                        ),
+                    )
+                })
+                .clone();
+        }
+    } else {
+        for id in updated.into_iter() {
+            if let Some(prepared_asset) = render_materials.prepared.get_mut(&id) {
+                let binding_ids = prepared_asset
+                    .bindings
+                    .iter()
+                    .map(|(binding, resource)| (*binding, OwnedBindingResourceId::from(resource)))
+                    .collect::<Vec<_>>();
+                prepared_asset.bind_group = render_materials
+                    .bind_group_cache
+                    .entry(binding_ids)
+                    .or_insert_with(|| {
+                        render_device.create_bind_group(
+                            None,
+                            &pipeline.material_layout,
+                            &&DynamicBindGroupEntries::new_with_indices_from_slice(
+                                prepared_asset
+                                    .bindings
+                                    .iter()
+                                    .map(|(binding, resource)| (*binding, resource.get_binding())),
+                            ),
+                        )
+                    })
+                    .clone();
+            }
+        }
+    }
 }
 
 fn prepare_material<M: Material>(
+    render_materials: &mut RenderMaterials<M>,
     material: &M,
+    indices: GpuArrayBufferIndex<<M as AsBindGroup>::ConvertedShaderType>,
     render_device: &RenderDevice,
     images: &RenderAssets<Image>,
     fallback_image: &FallbackImage,
@@ -913,6 +1040,7 @@ fn prepare_material<M: Material>(
     default_opaque_render_method: OpaqueRendererMethod,
 ) -> Result<PreparedMaterial<M>, AsBindGroupError> {
     let prepared = material.as_bind_group(
+        &render_materials.buffer,
         &pipeline.material_layout,
         render_device,
         images,
@@ -926,6 +1054,7 @@ fn prepare_material<M: Material>(
     Ok(PreparedMaterial {
         bindings: prepared.bindings,
         bind_group: prepared.bind_group,
+        indices: Some(indices),
         key: prepared.data,
         properties: MaterialProperties {
             alpha_mode: material.alpha_mode(),

@@ -48,7 +48,7 @@ fn fragment(
 #endif
 #endif
         mesh.uv,
-        view.mip_bias,
+        view.pow_2_mip_bias,
     );
     pbr_input.V = fns::calculate_view(mesh.world_position, pbr_input.is_orthographic);
 

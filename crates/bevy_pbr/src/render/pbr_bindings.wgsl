@@ -2,7 +2,12 @@
 
 #import bevy_pbr::pbr_types::StandardMaterial
 
-@group(1) @binding(0) var<uniform> material: StandardMaterial;
+#ifdef MATERIAL_BUFFER_BATCH_SIZE
+@group(1) @binding(0) var<uniform> materials: array<StandardMaterial, #{MATERIAL_BUFFER_BATCH_SIZE}u>;
+#else // MATERIAL_BUFFER_BATCH_SIZE
+@group(1) @binding(0) var<storage> materials: array<StandardMaterial>;
+#endif // MATERIAL_BUFFER_BATCH_SIZE
+
 @group(1) @binding(1) var base_color_texture: texture_2d<f32>;
 @group(1) @binding(2) var base_color_sampler: sampler;
 @group(1) @binding(3) var emissive_texture: texture_2d<f32>;

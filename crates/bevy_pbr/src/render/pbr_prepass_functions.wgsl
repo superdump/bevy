@@ -12,14 +12,14 @@
 const PREMULTIPLIED_ALPHA_CUTOFF = 0.05;
 
 // We can use a simplified version of alpha_discard() here since we only need to handle the alpha_cutoff
-fn prepass_alpha_discard(in: VertexOutput) {
+fn prepass_alpha_discard(in: VertexOutput, duvdx: vec2<f32>, duvdy: vec2<f32>) {
 
 #ifdef MAY_DISCARD
     var output_color: vec4<f32> = pbr_bindings::material.base_color;
 
 #ifdef VERTEX_UVS
     if (pbr_bindings::material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u {
-        output_color = output_color * textureSampleBias(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, in.uv, view.mip_bias);
+        output_color = output_color * textureSampleGrad(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, in.uv, duvdx, duvdy);
     }
 #endif // VERTEX_UVS
 
