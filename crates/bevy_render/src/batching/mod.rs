@@ -7,7 +7,7 @@ use bevy_ecs::{
 use bevy_utils::nonmax::NonMaxU32;
 
 use crate::{
-    render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, RenderPhase},
+    render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, PhaseItem, RenderPhase},
     render_resource::{CachedRenderPipelineId, GpuArrayBuffer, GpuArrayBufferable},
     renderer::{RenderDevice, RenderQueue},
 };
@@ -73,6 +73,7 @@ pub trait GetBatchData {
     fn get_batch_data(
         param: &SystemParamItem<Self::Param>,
         query_item: &QueryItem<Self::Query>,
+        item: &impl PhaseItem,
     ) -> (Self::BufferData, Option<Self::CompareData>);
 }
 
@@ -90,7 +91,8 @@ pub fn batch_and_prepare_render_phase<I: CachedRenderPipelinePhaseItem, F: GetBa
     let mut process_item = |item: &mut I| {
         let batch_query_item = query.get(item.entity()).ok()?;
 
-        let (buffer_data, compare_data) = F::get_batch_data(&system_param_item, &batch_query_item);
+        let (buffer_data, compare_data) =
+            F::get_batch_data(&system_param_item, &batch_query_item, item);
         let buffer_index = gpu_array_buffer.push(buffer_data);
 
         let index = buffer_index.index.get();

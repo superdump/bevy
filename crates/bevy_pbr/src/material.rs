@@ -635,8 +635,10 @@ pub fn queue_material_meshes<M: Material>(
                     if material.properties.reads_view_transmission_texture {
                         transmissive_phase.add(Transmissive3d {
                             entity: *visible_entity,
-                            draw_function: draw_transmissive_pbr,
                             pipeline: pipeline_id,
+                            draw_function: draw_transmissive_pbr,
+                            material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                            mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                             distance,
                             batch_range: 0..1,
                             dynamic_offset: None,
@@ -658,8 +660,10 @@ pub fn queue_material_meshes<M: Material>(
                     if material.properties.reads_view_transmission_texture {
                         transmissive_phase.add(Transmissive3d {
                             entity: *visible_entity,
-                            draw_function: draw_transmissive_pbr,
                             pipeline: pipeline_id,
+                            draw_function: draw_transmissive_pbr,
+                            material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                            mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                             distance,
                             batch_range: 0..1,
                             dynamic_offset: None,
@@ -683,8 +687,10 @@ pub fn queue_material_meshes<M: Material>(
                 | AlphaMode::Multiply => {
                     transparent_phase.add(Transparent3d {
                         entity: *visible_entity,
-                        draw_function: draw_transparent_pbr,
                         pipeline: pipeline_id,
+                        draw_function: draw_transparent_pbr,
+                        material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                        mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                         distance,
                         batch_range: 0..1,
                         dynamic_offset: None,
@@ -770,7 +776,7 @@ pub struct PreparedMaterial<T: Material> {
 }
 
 #[derive(Component, Clone, Copy, Default, PartialEq, Eq, Deref, DerefMut)]
-pub struct MaterialBindGroupId(Option<BindGroupId>);
+pub struct MaterialBindGroupId(pub Option<BindGroupId>);
 
 impl<T: Material> PreparedMaterial<T> {
     pub fn get_bind_group_id(&self) -> MaterialBindGroupId {

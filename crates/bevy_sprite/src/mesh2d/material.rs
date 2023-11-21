@@ -442,8 +442,10 @@ pub fn queue_material2d_meshes<M: Material2d>(
             let mesh_z = mesh_instance.transforms.transform.translation.z;
             transparent_phase.add(Transparent2d {
                 entity: *visible_entity,
-                draw_function: draw_transparent_pbr,
                 pipeline: pipeline_id,
+                draw_function: draw_transparent_pbr,
+                material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                 // NOTE: Back-to-front ordering for transparent with ascending sort means far should have the
                 // lowest sort key and getting closer should increase. As we have
                 // -z in front of the camera, the largest distance is -far with values increasing toward the

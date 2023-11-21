@@ -566,9 +566,11 @@ pub fn queue_sprites(
             // Add the item to the render phase
             if extracted_sprite.color != Color::WHITE {
                 transparent_phase.add(Transparent2d {
-                    draw_function: draw_sprite_function,
-                    pipeline: colored_pipeline,
                     entity: *entity,
+                    pipeline: colored_pipeline,
+                    draw_function: draw_sprite_function,
+                    material_bind_group_id: None,
+                    mesh_asset_id: None,
                     sort_key,
                     // batch_range and dynamic_offset will be calculated in prepare_sprites
                     batch_range: 0..0,
@@ -576,9 +578,11 @@ pub fn queue_sprites(
                 });
             } else {
                 transparent_phase.add(Transparent2d {
-                    draw_function: draw_sprite_function,
-                    pipeline,
                     entity: *entity,
+                    pipeline,
+                    draw_function: draw_sprite_function,
+                    material_bind_group_id: None,
+                    mesh_asset_id: None,
                     sort_key,
                     // batch_range and dynamic_offset will be calculated in prepare_sprites
                     batch_range: 0..0,

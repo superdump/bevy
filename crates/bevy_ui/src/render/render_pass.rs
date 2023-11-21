@@ -9,7 +9,9 @@ use bevy_ecs::{
 use bevy_render::{
     render_graph::*,
     render_phase::*,
-    render_resource::{CachedRenderPipelineId, LoadOp, Operations, RenderPassDescriptor},
+    render_resource::{
+        BindGroupId, CachedRenderPipelineId, LoadOp, Operations, RenderPassDescriptor,
+    },
     renderer::*,
     view::*,
 };
@@ -137,6 +139,16 @@ impl PhaseItem for TransparentUi {
     #[inline]
     fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
         &mut self.dynamic_offset
+    }
+
+    #[inline]
+    fn material_bind_group_id(&self) -> Option<BindGroupId> {
+        None
+    }
+
+    #[inline]
+    fn mesh_asset_id(&self) -> Option<u64> {
+        None
     }
 }
 

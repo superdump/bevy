@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use bevy_app::Plugin;
 use bevy_asset::{load_internal_asset, AssetId, Handle};
 
@@ -362,12 +364,13 @@ impl GetBatchData for Mesh2dPipeline {
     type Param = SRes<RenderMesh2dInstances>;
     type Query = Entity;
     type QueryFilter = With<Mesh2d>;
-    type CompareData = (Material2dBindGroupId, AssetId<Mesh>);
+    type CompareData = (BindGroupId, u64);
     type BufferData = Mesh2dUniform;
 
     fn get_batch_data(
         mesh_instances: &SystemParamItem<Self::Param>,
         entity: &QueryItem<Self::Query>,
+        item: &impl PhaseItem,
     ) -> (Self::BufferData, Option<Self::CompareData>) {
         let mesh_instance = mesh_instances
             .get(entity)
@@ -375,8 +378,9 @@ impl GetBatchData for Mesh2dPipeline {
         (
             (&mesh_instance.transforms).into(),
             mesh_instance.automatic_batching.then_some((
-                mesh_instance.material_bind_group_id,
-                mesh_instance.mesh_asset_id,
+                item.material_bind_group_id()
+                    .unwrap_or(BindGroupId(NonZeroU32::MAX)),
+                item.mesh_asset_id().unwrap(),
             )),
         )
     }

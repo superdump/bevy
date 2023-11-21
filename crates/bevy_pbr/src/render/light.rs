@@ -1,3 +1,4 @@
+use bevy_asset::AssetId;
 use bevy_core_pipeline::core_3d::{Transparent3d, CORE_3D_DEPTH_FORMAT};
 use bevy_ecs::prelude::*;
 use bevy_math::{Mat4, UVec3, UVec4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
@@ -1644,9 +1645,11 @@ pub fn queue_shadows<M: Material>(
                 };
 
                 shadow_phase.add(Shadow {
-                    draw_function: draw_shadow_mesh,
-                    pipeline: pipeline_id,
                     entity,
+                    pipeline: pipeline_id,
+                    draw_function: draw_shadow_mesh,
+                    material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                    mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                     distance: 0.0, // TODO: sort front-to-back
                     batch_range: 0..1,
                     dynamic_offset: None,
@@ -1657,10 +1660,12 @@ pub fn queue_shadows<M: Material>(
 }
 
 pub struct Shadow {
-    pub distance: f32,
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub material_bind_group_id: Option<BindGroupId>,
+    pub mesh_asset_id: Option<AssetId<Mesh>>,
+    pub distance: f32,
     pub batch_range: Range<u32>,
     pub dynamic_offset: Option<NonMaxU32>,
 }
@@ -1688,7 +1693,14 @@ impl PhaseItem for Shadow {
         // The shadow phase is sorted by pipeline id for performance reasons.
         // Grouping all draw commands using the same pipeline together performs
         // better than rebinding everything at a high rate.
-        radsort::sort_by_key(items, |item| item.sort_key());
+        radsort::sort_by_key(items, |item| {
+            (
+                item.pipeline.id(),
+                item.material_bind_group_id.map_or(0, |bgid| bgid.0.get()),
+                item.mesh_asset_id().unwrap_or(0),
+                -item.distance,
+            )
+        });
     }
 
     #[inline]
@@ -1709,6 +1721,19 @@ impl PhaseItem for Shadow {
     #[inline]
     fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
         &mut self.dynamic_offset
+    }
+
+    #[inline]
+    fn material_bind_group_id(&self) -> Option<BindGroupId> {
+        self.material_bind_group_id
+    }
+
+    #[inline]
+    fn mesh_asset_id(&self) -> Option<u64> {
+        self.mesh_asset_id.map(|maid| match maid {
+            AssetId::Index { index, .. } => index.generation as u64 | ((index.index as u64) << 32),
+            AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+        })
     }
 }
 

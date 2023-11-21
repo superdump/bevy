@@ -187,7 +187,7 @@ impl PhaseItem for Opaque3d {
     type SortKey = (
         CachedRenderPipelineId,
         Option<BindGroupId>,
-        Option<AssetId<Mesh>>,
+        Option<u64>,
         Reverse<FloatOrd>,
     );
 
@@ -201,7 +201,7 @@ impl PhaseItem for Opaque3d {
         (
             self.pipeline,
             self.material_bind_group_id,
-            self.mesh_asset_id,
+            self.mesh_asset_id(),
             Reverse(FloatOrd(self.distance)),
         )
     }
@@ -218,12 +218,7 @@ impl PhaseItem for Opaque3d {
             (
                 item.pipeline.id(),
                 item.material_bind_group_id.map_or(0, |bgid| bgid.0.get()),
-                item.mesh_asset_id.map_or(0, |maid| match maid {
-                    AssetId::Index { index, .. } => {
-                        (index.generation as u64 | ((index.index as u64) << 32))
-                    }
-                    AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
-                }),
+                item.mesh_asset_id().unwrap_or(0),
                 -item.distance,
             )
         });
@@ -247,6 +242,19 @@ impl PhaseItem for Opaque3d {
     #[inline]
     fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
         &mut self.dynamic_offset
+    }
+
+    #[inline]
+    fn material_bind_group_id(&self) -> Option<BindGroupId> {
+        self.material_bind_group_id
+    }
+
+    #[inline]
+    fn mesh_asset_id(&self) -> Option<u64> {
+        self.mesh_asset_id.map(|maid| match maid {
+            AssetId::Index { index, .. } => index.generation as u64 | ((index.index as u64) << 32),
+            AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+        })
     }
 }
 
@@ -294,12 +302,7 @@ impl PhaseItem for AlphaMask3d {
             (
                 item.pipeline.id(),
                 item.material_bind_group_id.map_or(0, |bgid| bgid.0.get()),
-                item.mesh_asset_id.map_or(0, |maid| match maid {
-                    AssetId::Index { index, .. } => {
-                        (index.generation as u64 | ((index.index as u64) << 32))
-                    }
-                    AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
-                }),
+                item.mesh_asset_id().unwrap_or(0),
                 -item.distance,
             )
         });
@@ -324,6 +327,19 @@ impl PhaseItem for AlphaMask3d {
     fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
         &mut self.dynamic_offset
     }
+
+    #[inline]
+    fn material_bind_group_id(&self) -> Option<BindGroupId> {
+        self.material_bind_group_id
+    }
+
+    #[inline]
+    fn mesh_asset_id(&self) -> Option<u64> {
+        self.mesh_asset_id.map(|maid| match maid {
+            AssetId::Index { index, .. } => index.generation as u64 | ((index.index as u64) << 32),
+            AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+        })
+    }
 }
 
 impl CachedRenderPipelinePhaseItem for AlphaMask3d {
@@ -334,10 +350,12 @@ impl CachedRenderPipelinePhaseItem for AlphaMask3d {
 }
 
 pub struct Transmissive3d {
-    pub distance: f32,
-    pub pipeline: CachedRenderPipelineId,
     pub entity: Entity,
+    pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub material_bind_group_id: Option<BindGroupId>,
+    pub mesh_asset_id: Option<AssetId<Mesh>>,
+    pub distance: f32,
     pub batch_range: Range<u32>,
     pub dynamic_offset: Option<NonMaxU32>,
 }
@@ -396,6 +414,19 @@ impl PhaseItem for Transmissive3d {
     fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
         &mut self.dynamic_offset
     }
+
+    #[inline]
+    fn material_bind_group_id(&self) -> Option<BindGroupId> {
+        self.material_bind_group_id
+    }
+
+    #[inline]
+    fn mesh_asset_id(&self) -> Option<u64> {
+        self.mesh_asset_id.map(|maid| match maid {
+            AssetId::Index { index, .. } => index.generation as u64 | ((index.index as u64) << 32),
+            AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+        })
+    }
 }
 
 impl CachedRenderPipelinePhaseItem for Transmissive3d {
@@ -406,10 +437,12 @@ impl CachedRenderPipelinePhaseItem for Transmissive3d {
 }
 
 pub struct Transparent3d {
-    pub distance: f32,
-    pub pipeline: CachedRenderPipelineId,
     pub entity: Entity,
+    pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub material_bind_group_id: Option<BindGroupId>,
+    pub mesh_asset_id: Option<AssetId<Mesh>>,
+    pub distance: f32,
     pub batch_range: Range<u32>,
     pub dynamic_offset: Option<NonMaxU32>,
 }
@@ -435,7 +468,14 @@ impl PhaseItem for Transparent3d {
 
     #[inline]
     fn sort(items: &mut [Self]) {
-        radsort::sort_by_key(items, |item| item.distance);
+        radsort::sort_by_key(items, |item| {
+            (
+                item.pipeline.id(),
+                item.material_bind_group_id.map_or(0, |bgid| bgid.0.get()),
+                item.mesh_asset_id().unwrap_or(0),
+                item.distance,
+            )
+        });
     }
 
     #[inline]
@@ -456,6 +496,19 @@ impl PhaseItem for Transparent3d {
     #[inline]
     fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
         &mut self.dynamic_offset
+    }
+
+    #[inline]
+    fn material_bind_group_id(&self) -> Option<BindGroupId> {
+        self.material_bind_group_id
+    }
+
+    #[inline]
+    fn mesh_asset_id(&self) -> Option<u64> {
+        self.mesh_asset_id.map(|maid| match maid {
+            AssetId::Index { index, .. } => index.generation as u64 | ((index.index as u64) << 32),
+            AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+        })
     }
 }
 

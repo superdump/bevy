@@ -175,8 +175,10 @@ fn queue_line_gizmos_2d(
 
             transparent_phase.add(Transparent2d {
                 entity,
-                draw_function,
                 pipeline,
+                draw_function,
+                material_bind_group_id: None,
+                mesh_asset_id: None,
                 sort_key: FloatOrd(f32::INFINITY),
                 batch_range: 0..1,
                 dynamic_offset: None,

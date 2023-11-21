@@ -861,8 +861,10 @@ pub fn queue_prepass_material_meshes<M: Material>(
                             .unwrap()
                             .add(Opaque3dDeferred {
                                 entity: *visible_entity,
-                                draw_function: opaque_draw_deferred,
                                 pipeline_id,
+                                draw_function: opaque_draw_deferred,
+                                material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                                mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                                 distance,
                                 batch_range: 0..1,
                                 dynamic_offset: None,
@@ -870,8 +872,10 @@ pub fn queue_prepass_material_meshes<M: Material>(
                     } else if let Some(opaque_phase) = opaque_phase.as_mut() {
                         opaque_phase.add(Opaque3dPrepass {
                             entity: *visible_entity,
-                            draw_function: opaque_draw_prepass,
                             pipeline_id,
+                            draw_function: opaque_draw_prepass,
+                            material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                            mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                             distance,
                             batch_range: 0..1,
                             dynamic_offset: None,
@@ -885,8 +889,10 @@ pub fn queue_prepass_material_meshes<M: Material>(
                             .unwrap()
                             .add(AlphaMask3dDeferred {
                                 entity: *visible_entity,
-                                draw_function: alpha_mask_draw_deferred,
                                 pipeline_id,
+                                draw_function: alpha_mask_draw_deferred,
+                                material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                                mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                                 distance,
                                 batch_range: 0..1,
                                 dynamic_offset: None,
@@ -894,8 +900,10 @@ pub fn queue_prepass_material_meshes<M: Material>(
                     } else if let Some(alpha_mask_phase) = alpha_mask_phase.as_mut() {
                         alpha_mask_phase.add(AlphaMask3dPrepass {
                             entity: *visible_entity,
-                            draw_function: alpha_mask_draw_prepass,
                             pipeline_id,
+                            draw_function: alpha_mask_draw_prepass,
+                            material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                            mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                             distance,
                             batch_range: 0..1,
                             dynamic_offset: None,

@@ -220,8 +220,10 @@ fn queue_line_gizmos_3d(
 
             transparent_phase.add(Transparent3d {
                 entity,
-                draw_function,
                 pipeline,
+                draw_function,
+                material_bind_group_id: None,
+                mesh_asset_id: None,
                 distance: 0.,
                 batch_range: 0..1,
                 dynamic_offset: None,

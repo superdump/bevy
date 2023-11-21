@@ -21,6 +21,7 @@ pub const CORE_2D: &str = graph::NAME;
 
 use std::ops::Range;
 
+use bevy_asset::AssetId;
 pub use camera_2d::*;
 pub use main_pass_2d_node::*;
 
@@ -29,12 +30,13 @@ use bevy_ecs::prelude::*;
 use bevy_render::{
     camera::Camera,
     extract_component::ExtractComponentPlugin,
+    mesh::Mesh,
     render_graph::{EmptyNode, RenderGraphApp, ViewNodeRunner},
     render_phase::{
         sort_phase_system, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, PhaseItem,
         RenderPhase,
     },
-    render_resource::CachedRenderPipelineId,
+    render_resource::{BindGroupId, CachedRenderPipelineId},
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_utils::{nonmax::NonMaxU32, FloatOrd};
@@ -81,10 +83,12 @@ impl Plugin for Core2dPlugin {
 }
 
 pub struct Transparent2d {
-    pub sort_key: FloatOrd,
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub material_bind_group_id: Option<BindGroupId>,
+    pub mesh_asset_id: Option<AssetId<Mesh>>,
+    pub sort_key: FloatOrd,
     pub batch_range: Range<u32>,
     pub dynamic_offset: Option<NonMaxU32>,
 }
@@ -131,6 +135,19 @@ impl PhaseItem for Transparent2d {
     #[inline]
     fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
         &mut self.dynamic_offset
+    }
+
+    #[inline]
+    fn material_bind_group_id(&self) -> Option<BindGroupId> {
+        self.material_bind_group_id
+    }
+
+    #[inline]
+    fn mesh_asset_id(&self) -> Option<u64> {
+        self.mesh_asset_id.map(|maid| match maid {
+            AssetId::Index { index, .. } => index.generation as u64 | ((index.index as u64) << 32),
+            AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+        })
     }
 }
 

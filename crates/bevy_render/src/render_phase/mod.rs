@@ -34,7 +34,7 @@ pub use draw::*;
 pub use draw_state::*;
 pub use rangefinder::*;
 
-use crate::render_resource::{CachedRenderPipelineId, PipelineCache};
+use crate::render_resource::{BindGroupId, CachedRenderPipelineId, PipelineCache};
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::SRes, SystemParamItem},
@@ -108,6 +108,8 @@ impl<I: PhaseItem> RenderPhase<I> {
         draw_functions.prepare(world);
 
         let mut index = 0;
+        let mut n_batches = 0;
+        let mut n_draws_saved = 0;
         while index < items.len() {
             let item = &items[index];
             let batch_range = item.batch_range();
@@ -117,8 +119,16 @@ impl<I: PhaseItem> RenderPhase<I> {
                 let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
                 draw_function.draw(world, render_pass, view, item);
                 index += batch_range.len();
+                n_batches += 1;
+                n_draws_saved += batch_range.len() - 1;
             }
         }
+        eprintln!(
+            "{}: {} draws ({} draws saved)",
+            std::any::type_name::<I>(),
+            n_batches,
+            n_draws_saved
+        );
     }
 }
 
@@ -153,6 +163,9 @@ pub trait PhaseItem: Sized + Send + Sync + 'static {
 
     /// Specifies the [`Draw`] function used to render the item.
     fn draw_function(&self) -> DrawFunctionId;
+
+    fn material_bind_group_id(&self) -> Option<BindGroupId>;
+    fn mesh_asset_id(&self) -> Option<u64>;
 
     /// Sorts a slice of phase items into render order. Generally if the same type
     /// is batched this should use a stable sort like [`slice::sort_by_key`].

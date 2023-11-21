@@ -27,7 +27,7 @@ use bevy_render::{
 };
 use bevy_transform::components::GlobalTransform;
 use bevy_utils::{tracing::error, EntityHashMap, HashMap, Hashed};
-use std::cell::Cell;
+use std::{cell::Cell, num::NonZeroU32};
 use thread_local::ThreadLocal;
 
 #[cfg(debug_assertions)]
@@ -455,12 +455,13 @@ impl GetBatchData for MeshPipeline {
     type Param = SRes<RenderMeshInstances>;
     type Query = Entity;
     type QueryFilter = With<Mesh3d>;
-    type CompareData = (MaterialBindGroupId, AssetId<Mesh>);
+    type CompareData = (BindGroupId, u64);
     type BufferData = MeshUniform;
 
     fn get_batch_data(
         mesh_instances: &SystemParamItem<Self::Param>,
         entity: &QueryItem<Self::Query>,
+        item: &impl PhaseItem,
     ) -> (Self::BufferData, Option<Self::CompareData>) {
         let mesh_instance = mesh_instances
             .get(entity)
@@ -468,8 +469,9 @@ impl GetBatchData for MeshPipeline {
         (
             (&mesh_instance.transforms).into(),
             mesh_instance.automatic_batching.then_some((
-                mesh_instance.material_bind_group_id,
-                mesh_instance.mesh_asset_id,
+                item.material_bind_group_id()
+                    .unwrap_or(BindGroupId(NonZeroU32::MAX)),
+                item.mesh_asset_id().unwrap(),
             )),
         )
     }

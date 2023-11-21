@@ -29,11 +29,13 @@ pub mod node;
 
 use std::{cmp::Reverse, ops::Range};
 
+use bevy_asset::AssetId;
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use bevy_render::{
+    mesh::Mesh,
     render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, PhaseItem},
-    render_resource::{CachedRenderPipelineId, Extent3d, TextureFormat},
+    render_resource::{BindGroupId, CachedRenderPipelineId, Extent3d, TextureFormat},
     texture::CachedTexture,
 };
 use bevy_utils::{nonmax::NonMaxU32, FloatOrd};
@@ -89,10 +91,12 @@ pub struct ViewPrepassTextures {
 ///
 /// Used to render all 3D meshes with materials that have no transparency.
 pub struct Opaque3dPrepass {
-    pub distance: f32,
     pub entity: Entity,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub material_bind_group_id: Option<BindGroupId>,
+    pub mesh_asset_id: Option<AssetId<Mesh>>,
+    pub distance: f32,
     pub batch_range: Range<u32>,
     pub dynamic_offset: Option<NonMaxU32>,
 }
@@ -119,7 +123,14 @@ impl PhaseItem for Opaque3dPrepass {
     #[inline]
     fn sort(items: &mut [Self]) {
         // Key negated to match reversed SortKey ordering
-        radsort::sort_by_key(items, |item| -item.distance);
+        radsort::sort_by_key(items, |item| {
+            (
+                item.pipeline_id.id(),
+                item.material_bind_group_id.map_or(0, |bgid| bgid.0.get()),
+                item.mesh_asset_id().unwrap_or(0),
+                -item.distance,
+            )
+        });
     }
 
     #[inline]
@@ -141,6 +152,19 @@ impl PhaseItem for Opaque3dPrepass {
     fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
         &mut self.dynamic_offset
     }
+
+    #[inline]
+    fn material_bind_group_id(&self) -> Option<BindGroupId> {
+        self.material_bind_group_id
+    }
+
+    #[inline]
+    fn mesh_asset_id(&self) -> Option<u64> {
+        self.mesh_asset_id.map(|maid| match maid {
+            AssetId::Index { index, .. } => index.generation as u64 | ((index.index as u64) << 32),
+            AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+        })
+    }
 }
 
 impl CachedRenderPipelinePhaseItem for Opaque3dPrepass {
@@ -156,10 +180,12 @@ impl CachedRenderPipelinePhaseItem for Opaque3dPrepass {
 ///
 /// Used to render all meshes with a material with an alpha mask.
 pub struct AlphaMask3dPrepass {
-    pub distance: f32,
     pub entity: Entity,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub material_bind_group_id: Option<BindGroupId>,
+    pub mesh_asset_id: Option<AssetId<Mesh>>,
+    pub distance: f32,
     pub batch_range: Range<u32>,
     pub dynamic_offset: Option<NonMaxU32>,
 }
@@ -186,7 +212,14 @@ impl PhaseItem for AlphaMask3dPrepass {
     #[inline]
     fn sort(items: &mut [Self]) {
         // Key negated to match reversed SortKey ordering
-        radsort::sort_by_key(items, |item| -item.distance);
+        radsort::sort_by_key(items, |item| {
+            (
+                item.pipeline_id.id(),
+                item.material_bind_group_id.map_or(0, |bgid| bgid.0.get()),
+                item.mesh_asset_id().unwrap_or(0),
+                -item.distance,
+            )
+        });
     }
 
     #[inline]
@@ -207,6 +240,19 @@ impl PhaseItem for AlphaMask3dPrepass {
     #[inline]
     fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
         &mut self.dynamic_offset
+    }
+
+    #[inline]
+    fn material_bind_group_id(&self) -> Option<BindGroupId> {
+        self.material_bind_group_id
+    }
+
+    #[inline]
+    fn mesh_asset_id(&self) -> Option<u64> {
+        self.mesh_asset_id.map(|maid| match maid {
+            AssetId::Index { index, .. } => index.generation as u64 | ((index.index as u64) << 32),
+            AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+        })
     }
 }
 
