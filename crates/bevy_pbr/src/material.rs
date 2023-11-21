@@ -644,8 +644,10 @@ pub fn queue_material_meshes<M: Material>(
                     } else if forward {
                         opaque_phase.add(Opaque3d {
                             entity: *visible_entity,
-                            draw_function: draw_opaque_pbr,
                             pipeline: pipeline_id,
+                            draw_function: draw_opaque_pbr,
+                            material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                            mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                             distance,
                             batch_range: 0..1,
                             dynamic_offset: None,
@@ -665,8 +667,10 @@ pub fn queue_material_meshes<M: Material>(
                     } else if forward {
                         alpha_mask_phase.add(AlphaMask3d {
                             entity: *visible_entity,
-                            draw_function: draw_alpha_mask_pbr,
                             pipeline: pipeline_id,
+                            draw_function: draw_alpha_mask_pbr,
+                            material_bind_group_id: mesh_instance.material_bind_group_id.0,
+                            mesh_asset_id: Some(mesh_instance.mesh_asset_id),
                             distance,
                             batch_range: 0..1,
                             dynamic_offset: None,

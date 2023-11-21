@@ -115,8 +115,8 @@ macro_rules! render_resource_wrapper {
 #[macro_export]
 macro_rules! define_atomic_id {
     ($atomic_id_type:ident) => {
-        #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
-        pub struct $atomic_id_type(core::num::NonZeroU32);
+        #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Debug)]
+        pub struct $atomic_id_type(pub core::num::NonZeroU32);
 
         // We use new instead of default to indicate that each ID created will be unique.
         #[allow(clippy::new_without_default)]

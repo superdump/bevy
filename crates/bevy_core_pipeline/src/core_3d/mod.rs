@@ -34,6 +34,7 @@ pub const CORE_3D_DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
 use std::{cmp::Reverse, ops::Range};
 
+use bevy_asset::AssetId;
 pub use camera_3d::*;
 pub use main_opaque_pass_3d_node::*;
 pub use main_transparent_pass_3d_node::*;
@@ -43,6 +44,7 @@ use bevy_ecs::prelude::*;
 use bevy_render::{
     camera::{Camera, ExtractedCamera},
     extract_component::ExtractComponentPlugin,
+    mesh::Mesh,
     prelude::Msaa,
     render_graph::{EmptyNode, RenderGraphApp, ViewNodeRunner},
     render_phase::{
@@ -50,8 +52,8 @@ use bevy_render::{
         RenderPhase,
     },
     render_resource::{
-        CachedRenderPipelineId, Extent3d, FilterMode, Sampler, SamplerDescriptor, Texture,
-        TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+        BindGroupId, CachedRenderPipelineId, Extent3d, FilterMode, Sampler, SamplerDescriptor,
+        Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
     },
     renderer::RenderDevice,
     texture::{BevyDefault, TextureCache},
@@ -170,17 +172,24 @@ impl Plugin for Core3dPlugin {
 }
 
 pub struct Opaque3d {
-    pub distance: f32,
-    pub pipeline: CachedRenderPipelineId,
     pub entity: Entity,
+    pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub material_bind_group_id: Option<BindGroupId>,
+    pub mesh_asset_id: Option<AssetId<Mesh>>,
+    pub distance: f32,
     pub batch_range: Range<u32>,
     pub dynamic_offset: Option<NonMaxU32>,
 }
 
 impl PhaseItem for Opaque3d {
     // NOTE: Values increase towards the camera. Front-to-back ordering for opaque means we need a descending sort.
-    type SortKey = Reverse<FloatOrd>;
+    type SortKey = (
+        CachedRenderPipelineId,
+        Option<BindGroupId>,
+        Option<AssetId<Mesh>>,
+        Reverse<FloatOrd>,
+    );
 
     #[inline]
     fn entity(&self) -> Entity {
@@ -189,7 +198,12 @@ impl PhaseItem for Opaque3d {
 
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
-        Reverse(FloatOrd(self.distance))
+        (
+            self.pipeline,
+            self.material_bind_group_id,
+            self.mesh_asset_id,
+            Reverse(FloatOrd(self.distance)),
+        )
     }
 
     #[inline]
@@ -200,7 +214,19 @@ impl PhaseItem for Opaque3d {
     #[inline]
     fn sort(items: &mut [Self]) {
         // Key negated to match reversed SortKey ordering
-        radsort::sort_by_key(items, |item| -item.distance);
+        radsort::sort_by_key(items, |item| {
+            (
+                item.pipeline.id(),
+                item.material_bind_group_id.map_or(0, |bgid| bgid.0.get()),
+                item.mesh_asset_id.map_or(0, |maid| match maid {
+                    AssetId::Index { index, .. } => {
+                        (index.generation as u64 | ((index.index as u64) << 32))
+                    }
+                    AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+                }),
+                -item.distance,
+            )
+        });
     }
 
     #[inline]
@@ -232,10 +258,12 @@ impl CachedRenderPipelinePhaseItem for Opaque3d {
 }
 
 pub struct AlphaMask3d {
-    pub distance: f32,
-    pub pipeline: CachedRenderPipelineId,
     pub entity: Entity,
+    pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
+    pub material_bind_group_id: Option<BindGroupId>,
+    pub mesh_asset_id: Option<AssetId<Mesh>>,
+    pub distance: f32,
     pub batch_range: Range<u32>,
     pub dynamic_offset: Option<NonMaxU32>,
 }
@@ -262,7 +290,19 @@ impl PhaseItem for AlphaMask3d {
     #[inline]
     fn sort(items: &mut [Self]) {
         // Key negated to match reversed SortKey ordering
-        radsort::sort_by_key(items, |item| -item.distance);
+        radsort::sort_by_key(items, |item| {
+            (
+                item.pipeline.id(),
+                item.material_bind_group_id.map_or(0, |bgid| bgid.0.get()),
+                item.mesh_asset_id.map_or(0, |maid| match maid {
+                    AssetId::Index { index, .. } => {
+                        (index.generation as u64 | ((index.index as u64) << 32))
+                    }
+                    AssetId::Uuid { uuid } => uuid.as_u64_pair().1,
+                }),
+                -item.distance,
+            )
+        });
     }
 
     #[inline]
