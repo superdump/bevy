@@ -1,11 +1,10 @@
 use crate::{
-    camera::CameraProjection,
-    camera::{ManualTextureViewHandle, ManualTextureViews},
+    camera::{CameraProjection, ManualTextureViewHandle, ManualTextureViews},
     prelude::Image,
     primitives::Frustum,
     render_asset::RenderAssets,
     render_graph::{InternedRenderSubGraph, RenderSubGraph},
-    render_resource::TextureView,
+    render_resource::{CachedRenderPipelineId, TextureView},
     view::{ColorGrading, ExtractedView, ExtractedWindows, RenderLayers, VisibleEntities},
     Extract,
 };
@@ -14,7 +13,7 @@ use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     change_detection::DetectChanges,
     component::Component,
-    entity::Entity,
+    entity::{Entity, EntityHashMap},
     event::EventReader,
     prelude::With,
     reflect::ReflectComponent,
@@ -787,6 +786,18 @@ impl Default for CameraMainTextureUsages {
         )
     }
 }
+
+#[derive(Debug)]
+pub struct CachedViewPipeline<Key: PartialEq + Eq> {
+    pub view_key: Key,
+    pub pipeline: Option<CachedRenderPipelineId>,
+}
+
+#[derive(Component, Debug, Deref, DerefMut, Default)]
+pub struct CachedViewPipelines<Key: PartialEq + Eq>(EntityHashMap<CachedViewPipeline<Key>>);
+
+#[derive(Resource, Debug, Deref, DerefMut, Default)]
+pub struct CachedEntityPipelines<Key: PartialEq + Eq>(EntityHashMap<CachedViewPipelines<Key>>);
 
 #[derive(Component, Debug)]
 pub struct ExtractedCamera {

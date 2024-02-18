@@ -407,7 +407,7 @@ impl GetBatchData for Mesh2dPipeline {
 }
 
 bitflags::bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
     #[repr(transparent)]
     // NOTE: Apparently quadro drivers support up to 64x MSAA.
     // MSAA uses the highest 3 bits for the MSAA log2(sample count) to support up to 128x MSAA.

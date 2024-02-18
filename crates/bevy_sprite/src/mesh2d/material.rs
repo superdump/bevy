@@ -12,6 +12,7 @@ use bevy_ecs::{
 };
 use bevy_log::error;
 use bevy_render::{
+    camera::{CachedEntityPipelines, CachedViewPipelines},
     mesh::{Mesh, MeshVertexBufferLayout},
     prelude::Image,
     render_asset::{prepare_assets, RenderAssets},
@@ -166,6 +167,7 @@ where
                 .insert_resource(render_material2d_key_sender)
                 .insert_resource(render_material2d_key_receiver)
                 .init_resource::<RenderMaterial2dInstances<M>>()
+                .init_resource::<CachedEntityPipelines<View2dPipelineKey>>()
                 .init_resource::<SpecializedMeshPipelines<Material2dPipeline<M>>>()
                 .add_systems(
                     ExtractSchedule,
@@ -174,6 +176,7 @@ where
                 .add_systems(
                     Render,
                     (
+                        update_view_2d_pipeline_keys.after(RenderSet::ExtractCommands),
                         prepare_materials_2d::<M>
                             .in_set(RenderSet::PrepareAssets)
                             .after(prepare_assets::<Image>),
@@ -182,7 +185,8 @@ where
                             .after(prepare_materials_2d::<M>),
                         queue_material2d_meshes::<M>
                             .in_set(RenderSet::QueueMeshes)
-                            .after(prepare_materials_2d::<M>),
+                            .after(prepare_materials_2d::<M>)
+                            .after(update_view_2d_pipeline_keys),
                     ),
                 );
         }
@@ -410,34 +414,23 @@ pub const fn tonemapping_pipeline_key(tonemapping: Tonemapping) -> Mesh2dPipelin
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn queue_material2d_meshes<M: Material2d>(
-    transparent_draw_functions: Res<DrawFunctions<Transparent2d>>,
-    material2d_pipeline: Res<Material2dPipeline<M>>,
-    mut pipelines: ResMut<SpecializedMeshPipelines<Material2dPipeline<M>>>,
-    pipeline_cache: Res<PipelineCache>,
+#[derive(Component, Debug, PartialEq, Eq, Default)]
+pub struct View2dPipelineKey(Mesh2dPipelineKey);
+
+pub fn update_view_2d_pipeline_keys(
+    mut commands: Commands,
     msaa: Res<Msaa>,
-    render_meshes: Res<RenderAssets<Mesh>>,
-    render_materials: Res<RenderMaterials2d<M>>,
-    mut render_mesh_instances: ResMut<RenderMesh2dInstances>,
-    render_material_instances: Res<RenderMaterial2dInstances<M>>,
-    mut views: Query<(
-        &ExtractedView,
-        &VisibleEntities,
-        Option<&Tonemapping>,
-        Option<&DebandDither>,
-        &mut RenderPhase<Transparent2d>,
-    )>,
-) where
-    M::Data: PartialEq + Eq + Hash + Clone,
-{
-    if render_material_instances.is_empty() {
-        return;
-    }
-
-    for (view, visible_entities, tonemapping, dither, mut transparent_phase) in &mut views {
-        let draw_transparent_pbr = transparent_draw_functions.read().id::<DrawMaterial2d<M>>();
-
+    mut views: Query<
+        (
+            Entity,
+            &ExtractedView,
+            Option<&Tonemapping>,
+            Option<&DebandDither>,
+        ),
+        With<RenderPhase<Transparent2d>>,
+    >,
+) {
+    for (entity, view, tonemapping, dither) in &mut views {
         let mut view_key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples())
             | Mesh2dPipelineKey::from_hdr(view.hdr);
 
@@ -450,11 +443,43 @@ pub fn queue_material2d_meshes<M: Material2d>(
                 view_key |= Mesh2dPipelineKey::DEBAND_DITHER;
             }
         }
+
+        commands.entity(entity).insert(View2dPipelineKey(view_key));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn queue_material2d_meshes<M: Material2d>(
+    transparent_draw_functions: Res<DrawFunctions<Transparent2d>>,
+    material2d_pipeline: Res<Material2dPipeline<M>>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<Material2dPipeline<M>>>,
+    pipeline_cache: Res<PipelineCache>,
+    render_meshes: Res<RenderAssets<Mesh>>,
+    render_materials: Res<RenderMaterials2d<M>>,
+    mut render_mesh_instances: ResMut<RenderMesh2dInstances>,
+    mut cached_pipelines: ResMut<CachedEntityPipelines<View2dPipelineKey>>,
+    render_material_instances: Res<RenderMaterial2dInstances<M>>,
+    mut views: Query<(
+        Entity,
+        &View2dPipelineKey,
+        &VisibleEntities,
+        &mut RenderPhase<Transparent2d>,
+    )>,
+) where
+    M::Data: PartialEq + Eq + Hash + Clone,
+{
+    if render_material_instances.is_empty() {
+        return;
+    }
+
+    for (view_entity, view_key, visible_entities, mut transparent_phase) in &mut views {
+        let draw_transparent_pbr = transparent_draw_functions.read().id::<DrawMaterial2d<M>>();
+
         for visible_entity in &visible_entities.entities {
-            let Some(material_instance) = render_material_instances.get(visible_entity) else {
+            let Some(mesh_instance) = render_mesh_instances.get_mut(visible_entity) else {
                 continue;
             };
-            let Some(mesh_instance) = render_mesh_instances.get_mut(visible_entity) else {
+            let Some(material_instance) = render_material_instances.get(visible_entity) else {
                 continue;
             };
             let Some(material_key) = material_instance.key else {
@@ -463,32 +488,48 @@ pub fn queue_material2d_meshes<M: Material2d>(
             let Some(material2d) = render_materials.get_with_key(material_key) else {
                 continue;
             };
-            let Some(mesh_asset_key) = mesh_instance.mesh_asset_key else {
-                continue;
-            };
-            let Some(mesh) = render_meshes.get_with_key(mesh_asset_key) else {
-                continue;
-            };
-            let mesh_key =
-                view_key | Mesh2dPipelineKey::from_primitive_topology(mesh.primitive_topology);
-
-            let pipeline_id = pipelines.specialize(
-                &pipeline_cache,
-                &material2d_pipeline,
-                Material2dKey {
-                    mesh_key,
-                    bind_group_data: material2d.key.clone(),
+            let mut pipeline_id = None;
+            match cached_pipelines.get(visible_entity) {
+                Some(cached_view_pipelines) => match cached_view_pipelines.get(&view_entity) {
+                    Some(cached_view_pipeline) => {
+                        if cached_view_pipeline.view_key == *view_key {
+                            pipeline_id = cached_view_pipeline.pipeline;
+                        }
+                    }
+                    None => {}
                 },
-                &mesh.layout,
-            );
-
-            let pipeline_id = match pipeline_id {
-                Ok(id) => id,
-                Err(err) => {
-                    error!("{}", err);
-                    continue;
+                None => {
+                    cached_pipelines.insert(*visible_entity, CachedViewPipelines::default());
                 }
             };
+            if pipeline_id.is_none() {
+                let Some(mesh_asset_key) = mesh_instance.mesh_asset_key else {
+                    continue;
+                };
+                let Some(mesh) = render_meshes.get_with_key(mesh_asset_key) else {
+                    continue;
+                };
+                let mesh_key = view_key.0
+                    | Mesh2dPipelineKey::from_primitive_topology(mesh.primitive_topology);
+
+                let pipeline = pipelines.specialize(
+                    &pipeline_cache,
+                    &material2d_pipeline,
+                    Material2dKey {
+                        mesh_key,
+                        bind_group_data: material2d.key.clone(),
+                    },
+                    &mesh.layout,
+                );
+
+                pipeline_id = match pipeline {
+                    Ok(id) => Some(id),
+                    Err(err) => {
+                        error!("{}", err);
+                        continue;
+                    }
+                };
+            }
 
             mesh_instance.material_bind_group_id = material2d.get_bind_group_id();
 
@@ -496,7 +537,7 @@ pub fn queue_material2d_meshes<M: Material2d>(
             transparent_phase.add(Transparent2d {
                 entity: *visible_entity,
                 draw_function: draw_transparent_pbr,
-                pipeline: pipeline_id,
+                pipeline: pipeline_id.unwrap(),
                 // NOTE: Back-to-front ordering for transparent with ascending sort means far should have the
                 // lowest sort key and getting closer should increase. As we have
                 // -z in front of the camera, the largest distance is -far with values increasing toward the
