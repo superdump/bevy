@@ -5,6 +5,7 @@ use bevy_core_pipeline::{
     tonemapping::{DebandDither, Tonemapping},
 };
 use bevy_derive::{Deref, DerefMut};
+use bevy_ecs::entity::EntityHashMap;
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::SRes, SystemParamItem},
@@ -31,7 +32,7 @@ use bevy_render::{
 use bevy_transform::components::{GlobalTransform, Transform};
 use bevy_utils::{
     slotmap::{new_key_type, Key, SlotMap},
-    EntityHashMap, FloatOrd, HashMap, HashSet,
+    FloatOrd, HashMap, HashSet,
 };
 use crossbeam_channel::{Receiver, Sender};
 use std::hash::Hash;
@@ -100,9 +101,9 @@ use crate::{
 ///     color: vec4<f32>,
 /// }
 ///
-/// @group(1) @binding(0) var<uniform> material: CustomMaterial;
-/// @group(1) @binding(1) var color_texture: texture_2d<f32>;
-/// @group(1) @binding(2) var color_sampler: sampler;
+/// @group(2) @binding(0) var<uniform> material: CustomMaterial;
+/// @group(2) @binding(1) var color_texture: texture_2d<f32>;
+/// @group(2) @binding(2) var color_sampler: sampler;
 /// ```
 pub trait Material2d: AsBindGroup + Asset + Clone + Sized {
     /// Returns this material's vertex shader. If [`ShaderRef::Default`] is returned, the default mesh vertex shader
@@ -115,6 +116,12 @@ pub trait Material2d: AsBindGroup + Asset + Clone + Sized {
     /// will be used.
     fn fragment_shader() -> ShaderRef {
         ShaderRef::Default
+    }
+
+    /// Add a bias to the view depth of the mesh which can be used to force a specific render order.
+    #[inline]
+    fn depth_bias(&self) -> f32 {
+        0.0
     }
 
     /// Customizes the default [`RenderPipelineDescriptor`].
@@ -194,9 +201,7 @@ pub struct RenderMaterial2dInstance<M: Material2d> {
 }
 
 #[derive(Resource, Deref, DerefMut)]
-pub struct RenderMaterial2dInstances<M: Material2d>(
-    EntityHashMap<Entity, RenderMaterial2dInstance<M>>,
-);
+pub struct RenderMaterial2dInstances<M: Material2d>(EntityHashMap<RenderMaterial2dInstance<M>>);
 
 impl<M: Material2d> Default for RenderMaterial2dInstances<M> {
     fn default() -> Self {
@@ -314,8 +319,8 @@ where
         }
         descriptor.layout = vec![
             self.mesh2d_pipeline.view_layout.clone(),
-            self.material2d_layout.clone(),
             self.mesh2d_pipeline.mesh_layout.clone(),
+            self.material2d_layout.clone(),
         ];
 
         M::specialize(&mut descriptor, layout, key)?;
@@ -350,8 +355,8 @@ impl<M: Material2d> FromWorld for Material2dPipeline<M> {
 type DrawMaterial2d<M> = (
     SetItemPipeline,
     SetMesh2dViewBindGroup<0>,
-    SetMaterial2dBindGroup<M, 1>,
-    SetMesh2dBindGroup<2>,
+    SetMesh2dBindGroup<1>,
+    SetMaterial2dBindGroup<M, 2>,
     DrawMesh2d,
 );
 
@@ -363,14 +368,14 @@ impl<P: PhaseItem, M: Material2d, const I: usize> RenderCommand<P>
         SRes<RenderMaterials2d<M>>,
         SRes<RenderMaterial2dInstances<M>>,
     );
-    type ViewWorldQuery = ();
-    type ItemWorldQuery = ();
+    type ViewQuery = ();
+    type ItemQuery = ();
 
     #[inline]
     fn render<'w>(
         item: &P,
         _view: (),
-        _item_query: (),
+        _item_query: Option<()>,
         (materials, material_instances): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -390,7 +395,7 @@ impl<P: PhaseItem, M: Material2d, const I: usize> RenderCommand<P>
     }
 }
 
-const fn tonemapping_pipeline_key(tonemapping: Tonemapping) -> Mesh2dPipelineKey {
+pub const fn tonemapping_pipeline_key(tonemapping: Tonemapping) -> Mesh2dPipelineKey {
     match tonemapping {
         Tonemapping::None => Mesh2dPipelineKey::TONEMAP_METHOD_NONE,
         Tonemapping::Reinhard => Mesh2dPipelineKey::TONEMAP_METHOD_REINHARD,
@@ -508,7 +513,7 @@ pub fn queue_material2d_meshes<M: Material2d>(
             //     // lowest sort key and getting closer should increase. As we have
             //     // -z in front of the camera, the largest distance is -far with values increasing toward the
             //     // camera. As such we can just use mesh_z as the distance
-            //     sort_key: FloatOrd(mesh_z),
+            //     sort_key: FloatOrd(mesh_z + material2d.depth_bias),
             //     // Batching is done in batch_and_prepare_render_phase
             //     batch_range: 0..1,
             //     dynamic_offset: None,
@@ -522,9 +527,10 @@ pub struct Material2dBindGroupId(Option<BindGroupId>);
 
 /// Data prepared for a [`Material2d`] instance.
 pub struct PreparedMaterial2d<T: Material2d> {
-    pub bindings: Vec<OwnedBindingResource>,
+    pub bindings: Vec<(u32, OwnedBindingResource)>,
     pub bind_group: BindGroup,
     pub key: T::Data,
+    pub depth_bias: f32,
 }
 
 impl<T: Material2d> PreparedMaterial2d<T> {
@@ -682,6 +688,7 @@ pub fn extract_materials_2d<M: Material2d>(
     let mut changed_assets = HashSet::default();
     let mut removed = Vec::new();
     for event in events.read() {
+        #[allow(clippy::match_same_arms)]
         match event {
             AssetEvent::Added { id } | AssetEvent::Modified { id } => {
                 changed_assets.insert(*id);
@@ -690,7 +697,7 @@ pub fn extract_materials_2d<M: Material2d>(
                 changed_assets.remove(id);
                 removed.push(*id);
             }
-
+            AssetEvent::Unused { .. } => {}
             AssetEvent::LoadedWithDependencies { .. } => {
                 // TODO: handle this
             }
@@ -842,6 +849,7 @@ fn prepare_material2d<M: Material2d>(
         bindings: prepared.bindings,
         bind_group: prepared.bind_group,
         key: prepared.data,
+        depth_bias: material.depth_bias(),
     })
 }
 
