@@ -40,7 +40,6 @@ pub const CORE_3D_DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
 use std::ops::Range;
 
-use bevy_asset::AssetId;
 use bevy_color::LinearRgba;
 pub use camera_3d::*;
 pub use main_opaque_pass_3d_node::*;
@@ -51,8 +50,8 @@ use bevy_ecs::prelude::*;
 use bevy_render::{
     camera::{Camera, ExtractedCamera},
     extract_component::ExtractComponentPlugin,
-    mesh::Mesh,
     prelude::Msaa,
+    render_asset::RenderAssetKey,
     render_graph::{EmptyNode, RenderGraphApp, ViewNodeRunner},
     render_phase::{
         sort_phase_system, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions, PhaseItem,
@@ -181,7 +180,7 @@ impl Plugin for Core3dPlugin {
 }
 
 pub struct Opaque3d {
-    pub asset_id: AssetId<Mesh>,
+    pub asset_key: RenderAssetKey,
     pub pipeline: CachedRenderPipelineId,
     pub entity: Entity,
     pub draw_function: DrawFunctionId,
@@ -190,7 +189,7 @@ pub struct Opaque3d {
 }
 
 impl PhaseItem for Opaque3d {
-    type SortKey = (usize, AssetId<Mesh>);
+    type SortKey = (usize, RenderAssetKey);
 
     #[inline]
     fn entity(&self) -> Entity {
@@ -200,7 +199,7 @@ impl PhaseItem for Opaque3d {
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
         // Sort by pipeline, then by mesh to massively decrease drawcall counts in real scenes.
-        (self.pipeline.id(), self.asset_id)
+        (self.pipeline.id(), self.asset_key)
     }
 
     #[inline]
@@ -242,7 +241,7 @@ impl CachedRenderPipelinePhaseItem for Opaque3d {
 }
 
 pub struct AlphaMask3d {
-    pub asset_id: AssetId<Mesh>,
+    pub asset_key: RenderAssetKey,
     pub pipeline: CachedRenderPipelineId,
     pub entity: Entity,
     pub draw_function: DrawFunctionId,
@@ -251,7 +250,7 @@ pub struct AlphaMask3d {
 }
 
 impl PhaseItem for AlphaMask3d {
-    type SortKey = (usize, AssetId<Mesh>);
+    type SortKey = (usize, RenderAssetKey);
 
     #[inline]
     fn entity(&self) -> Entity {
@@ -261,7 +260,7 @@ impl PhaseItem for AlphaMask3d {
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
         // Sort by pipeline, then by mesh to massively decrease drawcall counts in real scenes.
-        (self.pipeline.id(), self.asset_id)
+        (self.pipeline.id(), self.asset_key)
     }
 
     #[inline]

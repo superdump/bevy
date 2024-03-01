@@ -12,7 +12,11 @@ use bevy_reflect::{
     FromReflect, Reflect, ReflectKind, ReflectMut, ReflectOwned, ReflectRef, TypeInfo, TypePath,
     Typed, ValueInfo,
 };
-use bevy_utils::{thiserror::Error, HashMap, HashSet};
+use bevy_utils::{
+    slotmap::{new_key_type, SlotMap},
+    thiserror::Error,
+    HashMap, HashSet,
+};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
@@ -252,44 +256,83 @@ impl<A: RenderAsset> Default for ExtractedAssets<A> {
     }
 }
 
+new_key_type! {
+    pub struct RenderAssetKey;
+}
+
 /// Stores all GPU representations ([`RenderAsset::PreparedAssets`](RenderAsset::PreparedAsset))
 /// of [`RenderAssets`](RenderAsset) as long as they exist.
 #[derive(Resource)]
-pub struct RenderAssets<A: RenderAsset>(HashMap<AssetId<A>, A::PreparedAsset>);
+pub struct RenderAssets<A: RenderAsset> {
+    slot_key_to_prepared_asset: SlotMap<RenderAssetKey, A::PreparedAsset>,
+    asset_id_to_slot_key: HashMap<AssetId<A>, RenderAssetKey>,
+}
 
 impl<A: RenderAsset> Default for RenderAssets<A> {
     fn default() -> Self {
-        Self(Default::default())
+        Self {
+            slot_key_to_prepared_asset: Default::default(),
+            asset_id_to_slot_key: Default::default(),
+        }
     }
 }
 
 impl<A: RenderAsset> RenderAssets<A> {
+    #[inline]
     pub fn get(&self, id: impl Into<AssetId<A>>) -> Option<&A::PreparedAsset> {
-        self.0.get(&id.into())
+        let key = *self.asset_id_to_slot_key.get(&id.into())?;
+        self.get_with_key(key)
     }
 
+    #[inline]
     pub fn get_mut(&mut self, id: impl Into<AssetId<A>>) -> Option<&mut A::PreparedAsset> {
-        self.0.get_mut(&id.into())
+        let key = *self.asset_id_to_slot_key.get(&id.into())?;
+        self.get_with_key_mut(key)
     }
 
+    #[inline]
+    pub fn get_key(&self, id: impl Into<AssetId<A>>) -> Option<RenderAssetKey> {
+        self.asset_id_to_slot_key.get(&id.into()).copied()
+    }
+
+    #[inline]
+    pub fn get_with_key(&self, key: RenderAssetKey) -> Option<&A::PreparedAsset> {
+        self.slot_key_to_prepared_asset.get(key)
+    }
+
+    #[inline]
+    pub fn get_with_key_mut(&mut self, key: RenderAssetKey) -> Option<&mut A::PreparedAsset> {
+        self.slot_key_to_prepared_asset.get_mut(key)
+    }
+
+    #[inline]
     pub fn insert(
         &mut self,
         id: impl Into<AssetId<A>>,
         value: A::PreparedAsset,
-    ) -> Option<A::PreparedAsset> {
-        self.0.insert(id.into(), value)
+    ) -> (RenderAssetKey, Option<A::PreparedAsset>) {
+        let id = id.into();
+        let old = self.remove(id);
+        let key = self.slot_key_to_prepared_asset.insert(value);
+        self.asset_id_to_slot_key.insert(id, key);
+        (key, old)
     }
 
+    #[inline]
     pub fn remove(&mut self, id: impl Into<AssetId<A>>) -> Option<A::PreparedAsset> {
-        self.0.remove(&id.into())
+        self.asset_id_to_slot_key
+            .remove(&id.into())
+            .and_then(|key| self.slot_key_to_prepared_asset.remove(key))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (AssetId<A>, &A::PreparedAsset)> {
-        self.0.iter().map(|(k, v)| (*k, v))
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = (RenderAssetKey, &A::PreparedAsset)> {
+        self.slot_key_to_prepared_asset.iter()
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (AssetId<A>, &mut A::PreparedAsset)> {
-        self.0.iter_mut().map(|(k, v)| (*k, v))
+    #[inline]
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (RenderAssetKey, &mut A::PreparedAsset)> {
+        self.slot_key_to_prepared_asset.iter_mut()
     }
 }
 

@@ -158,7 +158,7 @@ fn extract_lightmaps(
             || images.get(&lightmap.image).is_none()
             || !render_mesh_instances
                 .get(&entity)
-                .and_then(|mesh_instance| meshes.get(mesh_instance.mesh_asset_id))
+                .and_then(|mesh_instance| meshes.get_with_key(mesh_instance.mesh_asset_key))
                 .is_some_and(|mesh| mesh.layout.contains(Mesh::ATTRIBUTE_UV_1.id))
         {
             continue;

@@ -33,6 +33,7 @@ pub use float_ord::*;
 pub use hashbrown;
 pub use parallel_queue::*;
 pub use petgraph;
+pub use slotmap;
 pub use smallvec;
 pub use thiserror;
 pub use tracing;

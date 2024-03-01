@@ -593,7 +593,7 @@ pub fn queue_material_meshes<M: Material>(
             let Some(mesh_instance) = render_mesh_instances.get(visible_entity) else {
                 continue;
             };
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(mesh) = render_meshes.get_with_key(mesh_instance.mesh_asset_key) else {
                 continue;
             };
             let Some(material) = render_materials.get(material_asset_id) else {
@@ -667,7 +667,7 @@ pub fn queue_material_meshes<M: Material>(
                             entity: *visible_entity,
                             draw_function: draw_opaque_pbr,
                             pipeline: pipeline_id,
-                            asset_id: mesh_instance.mesh_asset_id,
+                            asset_key: mesh_instance.mesh_asset_key,
                             batch_range: 0..1,
                             dynamic_offset: None,
                         });
@@ -691,7 +691,7 @@ pub fn queue_material_meshes<M: Material>(
                             entity: *visible_entity,
                             draw_function: draw_alpha_mask_pbr,
                             pipeline: pipeline_id,
-                            asset_id: mesh_instance.mesh_asset_id,
+                            asset_key: mesh_instance.mesh_asset_key,
                             batch_range: 0..1,
                             dynamic_offset: None,
                         });

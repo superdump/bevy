@@ -3,10 +3,9 @@ pub mod node;
 
 use std::ops::Range;
 
-use bevy_asset::AssetId;
 use bevy_ecs::prelude::*;
 use bevy_render::{
-    mesh::Mesh,
+    render_asset::RenderAssetKey,
     render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, PhaseItem},
     render_resource::{CachedRenderPipelineId, TextureFormat},
 };
@@ -23,7 +22,7 @@ pub const DEFERRED_LIGHTING_PASS_ID_DEPTH_FORMAT: TextureFormat = TextureFormat:
 /// Used to render all 3D meshes with materials that have no transparency.
 pub struct Opaque3dDeferred {
     pub entity: Entity,
-    pub asset_id: AssetId<Mesh>,
+    pub asset_key: RenderAssetKey,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
     pub batch_range: Range<u32>,
@@ -31,7 +30,7 @@ pub struct Opaque3dDeferred {
 }
 
 impl PhaseItem for Opaque3dDeferred {
-    type SortKey = (usize, AssetId<Mesh>);
+    type SortKey = (usize, RenderAssetKey);
 
     #[inline]
     fn entity(&self) -> Entity {
@@ -41,7 +40,7 @@ impl PhaseItem for Opaque3dDeferred {
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
         // Sort by pipeline, then by mesh to massively decrease drawcall counts in real scenes.
-        (self.pipeline_id.id(), self.asset_id)
+        (self.pipeline_id.id(), self.asset_key)
     }
 
     #[inline]
@@ -88,7 +87,7 @@ impl CachedRenderPipelinePhaseItem for Opaque3dDeferred {
 ///
 /// Used to render all meshes with a material with an alpha mask.
 pub struct AlphaMask3dDeferred {
-    pub asset_id: AssetId<Mesh>,
+    pub asset_key: RenderAssetKey,
     pub entity: Entity,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
@@ -97,7 +96,7 @@ pub struct AlphaMask3dDeferred {
 }
 
 impl PhaseItem for AlphaMask3dDeferred {
-    type SortKey = (usize, AssetId<Mesh>);
+    type SortKey = (usize, RenderAssetKey);
 
     #[inline]
     fn entity(&self) -> Entity {
@@ -107,7 +106,7 @@ impl PhaseItem for AlphaMask3dDeferred {
     #[inline]
     fn sort_key(&self) -> Self::SortKey {
         // Sort by pipeline, then by mesh to massively decrease drawcall counts in real scenes.
-        (self.pipeline_id.id(), self.asset_id)
+        (self.pipeline_id.id(), self.asset_key)
     }
 
     #[inline]

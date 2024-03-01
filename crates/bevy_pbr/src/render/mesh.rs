@@ -17,7 +17,7 @@ use bevy_render::{
         NoAutomaticBatching,
     },
     mesh::*,
-    render_asset::RenderAssets,
+    render_asset::{RenderAssetKey, RenderAssets},
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
@@ -111,6 +111,7 @@ impl Plugin for MeshRenderPlugin {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<RenderMeshInstances>()
+                .init_resource::<PendingMeshAssetKeys>()
                 .init_resource::<MeshBindGroups>()
                 .init_resource::<SkinUniform>()
                 .init_resource::<SkinIndices>()
@@ -140,6 +141,9 @@ impl Plugin for MeshRenderPlugin {
                         prepare_morphs.in_set(RenderSet::PrepareResources),
                         prepare_mesh_bind_group.in_set(RenderSet::PrepareBindGroups),
                         prepare_mesh_view_bind_groups.in_set(RenderSet::PrepareBindGroups),
+                        update_mesh_asset_keys
+                            .in_set(RenderSet::PrepareAssets)
+                            .after(prepare_assets::<Mesh>),
                     ),
                 );
         }
@@ -239,7 +243,7 @@ bitflags::bitflags! {
 
 pub struct RenderMeshInstance {
     pub transforms: MeshTransforms,
-    pub mesh_asset_id: AssetId<Mesh>,
+    pub mesh_asset_key: RenderAssetKey,
     pub material_bind_group_id: AtomicMaterialBindGroupId,
     pub shadow_caster: bool,
     pub automatic_batching: bool,
@@ -252,11 +256,17 @@ impl RenderMeshInstance {
 }
 
 #[derive(Default, Resource, Deref, DerefMut)]
+pub struct PendingMeshAssetKeys(Vec<(Entity, AssetId<Mesh>)>);
+
+#[derive(Default, Resource, Deref, DerefMut)]
 pub struct RenderMeshInstances(EntityHashMap<RenderMeshInstance>);
 
 pub fn extract_meshes(
     mut render_mesh_instances: ResMut<RenderMeshInstances>,
     mut thread_local_queues: Local<Parallel<Vec<(Entity, RenderMeshInstance)>>>,
+    render_meshes: Res<RenderAssets<Mesh>>,
+    mut pending_mesh_asset_keys: ResMut<PendingMeshAssetKeys>,
+    mut thread_local_pending_queues: Local<Parallel<Vec<(Entity, AssetId<Mesh>)>>>,
     meshes_query: Extract<
         Query<(
             Entity,
@@ -304,11 +314,17 @@ pub fn extract_meshes(
                 previous_transform: (&previous_transform).into(),
                 flags: flags.bits(),
             };
+            let mesh_asset_key = if let Some(key) = render_meshes.get_key(handle.id()) {
+                key
+            } else {
+                thread_local_pending_queues.scope(|queue| queue.push((entity, handle.id())));
+                RenderAssetKey::default()
+            };
             thread_local_queues.scope(|queue| {
                 queue.push((
                     entity,
                     RenderMeshInstance {
-                        mesh_asset_id: handle.id(),
+                        mesh_asset_key,
                         transforms,
                         shadow_caster: !not_shadow_caster,
                         material_bind_group_id: AtomicMaterialBindGroupId::default(),
@@ -322,6 +338,25 @@ pub fn extract_meshes(
     render_mesh_instances.clear();
     for queue in thread_local_queues.iter_mut() {
         render_mesh_instances.extend(queue.drain(..));
+    }
+    for queue in thread_local_pending_queues.iter_mut() {
+        pending_mesh_asset_keys.extend(queue.drain(..));
+    }
+}
+
+pub fn update_mesh_asset_keys(
+    mut pending_mesh_asset_keys: ResMut<PendingMeshAssetKeys>,
+    render_meshes: Res<RenderAssets<Mesh>>,
+    mut render_mesh_instances: ResMut<RenderMeshInstances>,
+) {
+    for (entity, asset_id) in pending_mesh_asset_keys.drain(..) {
+        let Some(mesh_asset_key) = render_meshes.get_key(asset_id) else {
+            continue;
+        };
+        let Some(render_mesh_instance) = render_mesh_instances.get_mut(&entity) else {
+            continue;
+        };
+        render_mesh_instance.mesh_asset_key = mesh_asset_key;
     }
 }
 
@@ -446,7 +481,7 @@ impl GetBatchData for MeshPipeline {
     type Param = (SRes<RenderMeshInstances>, SRes<RenderLightmaps>);
     // The material bind group ID, the mesh ID, and the lightmap ID,
     // respectively.
-    type CompareData = (MaterialBindGroupId, AssetId<Mesh>, Option<AssetId<Image>>);
+    type CompareData = (MaterialBindGroupId, RenderAssetKey, Option<AssetId<Image>>);
 
     type BufferData = MeshUniform;
 
@@ -464,7 +499,7 @@ impl GetBatchData for MeshPipeline {
             ),
             mesh_instance.should_batch().then_some((
                 mesh_instance.material_bind_group_id.get(),
-                mesh_instance.mesh_asset_id,
+                mesh_instance.mesh_asset_key,
                 maybe_lightmap.map(|lightmap| lightmap.image),
             )),
         ))
@@ -946,7 +981,7 @@ impl SpecializedMeshPipeline for MeshPipeline {
 pub struct MeshBindGroups {
     model_only: Option<BindGroup>,
     skinned: Option<BindGroup>,
-    morph_targets: HashMap<AssetId<Mesh>, BindGroup>,
+    morph_targets: HashMap<RenderAssetKey, BindGroup>,
     lightmaps: HashMap<AssetId<Image>, BindGroup>,
 }
 impl MeshBindGroups {
@@ -960,13 +995,13 @@ impl MeshBindGroups {
     /// key `lightmap`.
     pub fn get(
         &self,
-        asset_id: AssetId<Mesh>,
+        asset_key: RenderAssetKey,
         lightmap: Option<AssetId<Image>>,
         is_skinned: bool,
         morph: bool,
     ) -> Option<&BindGroup> {
         match (is_skinned, morph, lightmap) {
-            (_, true, _) => self.morph_targets.get(&asset_id),
+            (_, true, _) => self.morph_targets.get(&asset_key),
             (true, false, _) => self.skinned.as_ref(),
             (false, false, Some(lightmap)) => self.lightmaps.get(&lightmap),
             (false, false, None) => self.model_only.as_ref(),
@@ -999,14 +1034,14 @@ pub fn prepare_mesh_bind_group(
     }
 
     if let Some(weights) = weights_uniform.buffer.buffer() {
-        for (id, gpu_mesh) in meshes.iter() {
+        for (asset_key, gpu_mesh) in meshes.iter() {
             if let Some(targets) = gpu_mesh.morph_targets.as_ref() {
                 let group = if let Some(skin) = skin.filter(|_| is_skinned(&gpu_mesh.layout)) {
                     layouts.morphed_skinned(&render_device, &model, skin, weights, targets)
                 } else {
                     layouts.morphed(&render_device, &model, weights, targets)
                 };
-                groups.morph_targets.insert(id, group);
+                groups.morph_targets.insert(asset_key, group);
             }
         }
     }
@@ -1105,7 +1140,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
             .map(|render_lightmap| render_lightmap.image);
 
         let Some(bind_group) =
-            bind_groups.get(mesh.mesh_asset_id, lightmap, is_skinned, is_morphed)
+            bind_groups.get(mesh.mesh_asset_key, lightmap, is_skinned, is_morphed)
         else {
             error!(
                 "The MeshBindGroups resource wasn't set in the render phase. \
@@ -1154,7 +1189,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
         let Some(mesh_instance) = mesh_instances.get(&item.entity()) else {
             return RenderCommandResult::Failure;
         };
-        let Some(gpu_mesh) = meshes.get(mesh_instance.mesh_asset_id) else {
+        let Some(gpu_mesh) = meshes.get_with_key(mesh_instance.mesh_asset_key) else {
             return RenderCommandResult::Failure;
         };
 

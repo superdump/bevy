@@ -766,7 +766,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
             let Some(material) = render_materials.get(material_asset_id) else {
                 continue;
             };
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(mesh) = render_meshes.get_with_key(mesh_instance.mesh_asset_key) else {
                 continue;
             };
 
@@ -842,7 +842,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
                                 entity: *visible_entity,
                                 draw_function: opaque_draw_deferred,
                                 pipeline_id,
-                                asset_id: mesh_instance.mesh_asset_id,
+                                asset_key: mesh_instance.mesh_asset_key,
                                 batch_range: 0..1,
                                 dynamic_offset: None,
                             });
@@ -851,7 +851,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
                             entity: *visible_entity,
                             draw_function: opaque_draw_prepass,
                             pipeline_id,
-                            asset_id: mesh_instance.mesh_asset_id,
+                            asset_key: mesh_instance.mesh_asset_key,
                             batch_range: 0..1,
                             dynamic_offset: None,
                         });
@@ -866,7 +866,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
                                 entity: *visible_entity,
                                 draw_function: alpha_mask_draw_deferred,
                                 pipeline_id,
-                                asset_id: mesh_instance.mesh_asset_id,
+                                asset_key: mesh_instance.mesh_asset_key,
                                 batch_range: 0..1,
                                 dynamic_offset: None,
                             });
@@ -875,7 +875,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
                             entity: *visible_entity,
                             draw_function: alpha_mask_draw_prepass,
                             pipeline_id,
-                            asset_id: mesh_instance.mesh_asset_id,
+                            asset_key: mesh_instance.mesh_asset_key,
                             batch_range: 0..1,
                             dynamic_offset: None,
                         });
