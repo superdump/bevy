@@ -314,12 +314,10 @@ pub fn extract_meshes(
                 previous_transform: (&previous_transform).into(),
                 flags: flags.bits(),
             };
-            let mesh_asset_key = if let Some(key) = render_meshes.get_key(handle.id()) {
-                key
-            } else {
+            let mesh_asset_key = render_meshes.get_key(handle.id()).unwrap_or_else(|| {
                 thread_local_pending_queues.scope(|queue| queue.push((entity, handle.id())));
                 RenderAssetKey::default()
-            };
+            });
             thread_local_queues.scope(|queue| {
                 queue.push((
                     entity,
