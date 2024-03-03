@@ -10,13 +10,14 @@ use bevy_core_pipeline::{
 };
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
+    entity::{EntityHashMap, EntityHashSet},
     prelude::*,
     system::{lifetimeless::SRes, SystemParamItem},
 };
 use bevy_reflect::Reflect;
 use bevy_render::{
     camera::TemporalJitter,
-    extract_instances::{ExtractInstancesPlugin, ExtractedInstances},
+    extract_instances::ExtractedInstances,
     extract_resource::ExtractResource,
     mesh::{Mesh, MeshVertexBufferLayoutRef},
     render_asset::RenderAssets,
@@ -24,7 +25,7 @@ use bevy_render::{
     render_resource::*,
     renderer::RenderDevice,
     texture::FallbackImage,
-    view::{ExtractedView, Msaa, VisibleEntities},
+    view::{ExtractedView, Msaa, ViewVisibility, VisibleEntities},
     Extract,
 };
 use bevy_utils::{tracing::error, HashMap, HashSet};
@@ -210,8 +211,7 @@ where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     fn build(&self, app: &mut App) {
-        app.init_asset::<M>()
-            .add_plugins(ExtractInstancesPlugin::<AssetId<M>>::extract_visible());
+        app.init_asset::<M>();
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -222,21 +222,40 @@ where
                 .add_render_command::<Opaque3d, DrawMaterial<M>>()
                 .add_render_command::<AlphaMask3d, DrawMaterial<M>>()
                 .init_resource::<ExtractedMaterials<M>>()
+                .init_resource::<ExtractedInstances<AssetId<M>>>()
+                .init_resource::<ChangedMaterialHandles<M>>()
+                .init_resource::<ChangedMaterials<M>>()
                 .init_resource::<RenderMaterials<M>>()
                 .init_resource::<SpecializedMeshPipelines<MaterialPipeline<M>>>()
-                .add_systems(ExtractSchedule, extract_materials::<M>)
+                .init_resource::<SpecializedPipelineCache<M>>()
+                .init_resource::<ViewKeyCache>()
+                .init_resource::<DirtyViews>()
+                .add_systems(
+                    ExtractSchedule,
+                    (extract_material_meshes::<M>, extract_materials::<M>),
+                )
                 .add_systems(
                     Render,
                     (
+                        check_view_keys::<M>.in_set(RenderSet::PrepareAssets),
                         prepare_materials::<M>
                             .in_set(RenderSet::PrepareAssets)
                             .after(prepare_assets::<Image>),
+                        gather_entities_for_specialization::<M>
+                            .in_set(RenderSet::PrepareAssets)
+                            .after(prepare_materials::<M>),
+                        specialize_pipelines::<M>
+                            .in_set(RenderSet::PrepareAssets)
+                            .after(check_view_keys::<M>)
+                            .after(gather_mesh_entities_for_specialization)
+                            .after(gather_entities_for_specialization::<M>)
+                            .after(prepare_assets::<Mesh>),
                         queue_shadows::<M>
                             .in_set(RenderSet::QueueMeshes)
-                            .after(prepare_materials::<M>),
+                            .after(specialize_pipelines::<M>),
                         queue_material_meshes::<M>
                             .in_set(RenderSet::QueueMeshes)
-                            .after(prepare_materials::<M>),
+                            .after(specialize_pipelines::<M>),
                     ),
                 );
         }
@@ -252,6 +271,185 @@ where
     fn finish(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.init_resource::<MaterialPipeline<M>>();
+        }
+    }
+}
+
+#[derive(Default, Resource, Deref, DerefMut)]
+pub struct ViewKeyCache(EntityHashMap<MeshPipelineKey>);
+
+#[derive(Default, Resource, Deref, DerefMut)]
+pub struct DirtyViews(EntityHashSet);
+
+pub fn check_view_keys<M: Material>(
+    msaa: Res<Msaa>,
+    mut view_key_cache: ResMut<ViewKeyCache>,
+    mut dirty_views: ResMut<DirtyViews>,
+    views: Query<
+        (
+            Entity,
+            &ExtractedView,
+            Option<&Tonemapping>,
+            Option<&DebandDither>,
+            Option<&ShadowFilteringMethod>,
+            Has<ScreenSpaceAmbientOcclusionSettings>,
+            (
+                Has<NormalPrepass>,
+                Has<DepthPrepass>,
+                Has<MotionVectorPrepass>,
+                Has<DeferredPrepass>,
+            ),
+            Option<&Camera3d>,
+            Has<TemporalJitter>,
+            Option<&Projection>,
+            (
+                Has<RenderViewLightProbes<EnvironmentMapLight>>,
+                Has<RenderViewLightProbes<IrradianceVolume>>,
+            ),
+        ),
+        (
+            With<RenderPhase<Opaque3d>>,
+            With<RenderPhase<AlphaMask3d>>,
+            With<RenderPhase<Transmissive3d>>,
+            With<RenderPhase<Transparent3d>>,
+        ),
+    >,
+) where
+    M::Data: PartialEq + Eq + Hash + Clone,
+{
+    dirty_views.0.clear();
+
+    for (
+        view_entity,
+        view,
+        tonemapping,
+        dither,
+        shadow_filter_method,
+        ssao,
+        (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
+        camera_3d,
+        temporal_jitter,
+        projection,
+        (has_environment_maps, has_irradiance_volumes),
+    ) in &views
+    {
+        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
+            | MeshPipelineKey::from_hdr(view.hdr);
+
+        if normal_prepass {
+            view_key |= MeshPipelineKey::NORMAL_PREPASS;
+        }
+
+        if depth_prepass {
+            view_key |= MeshPipelineKey::DEPTH_PREPASS;
+        }
+
+        if motion_vector_prepass {
+            view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
+        }
+
+        if deferred_prepass {
+            view_key |= MeshPipelineKey::DEFERRED_PREPASS;
+        }
+
+        if temporal_jitter {
+            view_key |= MeshPipelineKey::TEMPORAL_JITTER;
+        }
+
+        if has_environment_maps {
+            view_key |= MeshPipelineKey::ENVIRONMENT_MAP;
+        }
+
+        if has_irradiance_volumes {
+            view_key |= MeshPipelineKey::IRRADIANCE_VOLUME;
+        }
+
+        if let Some(projection) = projection {
+            view_key |= match projection {
+                Projection::Perspective(_) => MeshPipelineKey::VIEW_PROJECTION_PERSPECTIVE,
+                Projection::Orthographic(_) => MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC,
+            };
+        }
+
+        match shadow_filter_method.unwrap_or(&ShadowFilteringMethod::default()) {
+            ShadowFilteringMethod::Hardware2x2 => {
+                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_HARDWARE_2X2;
+            }
+            ShadowFilteringMethod::Castano13 => {
+                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_CASTANO_13;
+            }
+            ShadowFilteringMethod::Jimenez14 => {
+                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_JIMENEZ_14;
+            }
+        }
+
+        if !view.hdr {
+            if let Some(tonemapping) = tonemapping {
+                view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
+                view_key |= tonemapping_pipeline_key(*tonemapping);
+            }
+            if let Some(DebandDither::Enabled) = dither {
+                view_key |= MeshPipelineKey::DEBAND_DITHER;
+            }
+        }
+        if ssao {
+            view_key |= MeshPipelineKey::SCREEN_SPACE_AMBIENT_OCCLUSION;
+        }
+        if let Some(camera_3d) = camera_3d {
+            view_key |= screen_space_specular_transmission_pipeline_key(
+                camera_3d.screen_space_specular_transmission_quality,
+            );
+        }
+
+        if let Some(current_key) = view_key_cache.get_mut(&view_entity) {
+            if *current_key != view_key {
+                *current_key = view_key;
+                dirty_views.insert(view_entity);
+            }
+        } else {
+            view_key_cache.insert(view_entity, view_key);
+            dirty_views.insert(view_entity);
+        }
+    }
+}
+
+#[derive(Resource)]
+struct ChangedMaterialHandles<M: Material> {
+    set: EntityHashSet,
+    map: HashMap<AssetId<M>, EntityHashSet>,
+    marker: PhantomData<M>,
+}
+
+impl<M: Material> Default for ChangedMaterialHandles<M> {
+    fn default() -> Self {
+        Self {
+            set: Default::default(),
+            map: Default::default(),
+            marker: Default::default(),
+        }
+    }
+}
+
+fn extract_material_meshes<M: Material>(
+    mut extracted_instances: ResMut<ExtractedInstances<AssetId<M>>>,
+    mut changed_material_handles: ResMut<ChangedMaterialHandles<M>>,
+    query: Extract<Query<(Entity, &ViewVisibility, Ref<Handle<M>>)>>,
+) {
+    extracted_instances.clear();
+    // changed_material_handles.set.clear();
+    changed_material_handles.map.clear();
+
+    for (entity, view_visibility, handle) in &query {
+        if view_visibility.get() {
+            extracted_instances.insert(entity, handle.id());
+            if handle.is_changed() {
+                changed_material_handles.set.insert(entity);
+                changed_material_handles
+                    .map
+                    .entry(handle.id())
+                    .or_default()
+                    .insert(entity);
+            }
         }
     }
 }
@@ -452,6 +650,30 @@ pub const fn screen_space_specular_transmission_pipeline_key(
     }
 }
 
+// struct MeshKey(MeshPipelineKey);
+// #[derive(Resource, Deref, DerefMut)]
+// struct MeshKeyCache(EntityHashMap<MeshKey>);
+
+// struct MaterialKey<M: Material>(<M as AsBindGroup>::Data);
+// #[derive(Resource, Deref, DerefMut)]
+// struct MaterialKeyCache<M: Material>(EntityHashMap<MaterialKey<M>>);
+
+pub struct SpecializedPipeline<M: Material> {
+    pipeline_id: CachedRenderPipelineId,
+    view_key: MeshPipelineKey,
+    mesh_key: MeshPipelineKey,
+    material_key: <M as AsBindGroup>::Data,
+    forward: bool,
+}
+#[derive(Resource, Deref, DerefMut)]
+pub struct SpecializedPipelineCache<M: Material>(HashMap<(Entity, Entity), SpecializedPipeline<M>>);
+
+impl<M: Material> Default for SpecializedPipelineCache<M> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn queue_material_meshes<M: Material>(
     opaque_draw_functions: Res<DrawFunctions<Opaque3d>>,
@@ -459,6 +681,7 @@ pub fn queue_material_meshes<M: Material>(
     transmissive_draw_functions: Res<DrawFunctions<Transmissive3d>>,
     transparent_draw_functions: Res<DrawFunctions<Transparent3d>>,
     material_pipeline: Res<MaterialPipeline<M>>,
+    specialized_pipeline_cache: Res<SpecializedPipelineCache<M>>,
     mut pipelines: ResMut<SpecializedMeshPipelines<MaterialPipeline<M>>>,
     pipeline_cache: Res<PipelineCache>,
     msaa: Res<Msaa>,
@@ -467,9 +690,10 @@ pub fn queue_material_meshes<M: Material>(
     render_mesh_instances: Res<RenderMeshInstances>,
     render_material_instances: Res<RenderMaterialInstances<M>>,
     render_lightmaps: Res<RenderLightmaps>,
+    view_key_cache: Res<ViewKeyCache>,
     mut views: Query<(
-        &ExtractedView,
-        &VisibleEntities,
+        Entity,
+        (&ExtractedView, &VisibleEntities),
         Option<&Tonemapping>,
         Option<&DebandDither>,
         Option<&ShadowFilteringMethod>,
@@ -495,9 +719,17 @@ pub fn queue_material_meshes<M: Material>(
 ) where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
+    let draw_opaque_pbr = opaque_draw_functions.read().id::<DrawMaterial<M>>();
+    let draw_alpha_mask_pbr = alpha_mask_draw_functions.read().id::<DrawMaterial<M>>();
+    let draw_transmissive_pbr = transmissive_draw_functions.read().id::<DrawMaterial<M>>();
+    let draw_transparent_pbr = transparent_draw_functions.read().id::<DrawMaterial<M>>();
+
+    let mut inline = 0;
+    let mut cached = 0;
+
     for (
-        view,
-        visible_entities,
+        view_entity,
+        (view, visible_entities),
         tonemapping,
         dither,
         shadow_filter_method,
@@ -513,78 +745,9 @@ pub fn queue_material_meshes<M: Material>(
         (has_environment_maps, has_irradiance_volumes),
     ) in &mut views
     {
-        let draw_opaque_pbr = opaque_draw_functions.read().id::<DrawMaterial<M>>();
-        let draw_alpha_mask_pbr = alpha_mask_draw_functions.read().id::<DrawMaterial<M>>();
-        let draw_transmissive_pbr = transmissive_draw_functions.read().id::<DrawMaterial<M>>();
-        let draw_transparent_pbr = transparent_draw_functions.read().id::<DrawMaterial<M>>();
-
-        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
-            | MeshPipelineKey::from_hdr(view.hdr);
-
-        if normal_prepass {
-            view_key |= MeshPipelineKey::NORMAL_PREPASS;
-        }
-
-        if depth_prepass {
-            view_key |= MeshPipelineKey::DEPTH_PREPASS;
-        }
-
-        if motion_vector_prepass {
-            view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
-        }
-
-        if deferred_prepass {
-            view_key |= MeshPipelineKey::DEFERRED_PREPASS;
-        }
-
-        if temporal_jitter {
-            view_key |= MeshPipelineKey::TEMPORAL_JITTER;
-        }
-
-        if has_environment_maps {
-            view_key |= MeshPipelineKey::ENVIRONMENT_MAP;
-        }
-
-        if has_irradiance_volumes {
-            view_key |= MeshPipelineKey::IRRADIANCE_VOLUME;
-        }
-
-        if let Some(projection) = projection {
-            view_key |= match projection {
-                Projection::Perspective(_) => MeshPipelineKey::VIEW_PROJECTION_PERSPECTIVE,
-                Projection::Orthographic(_) => MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC,
-            };
-        }
-
-        match shadow_filter_method.unwrap_or(&ShadowFilteringMethod::default()) {
-            ShadowFilteringMethod::Hardware2x2 => {
-                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_HARDWARE_2X2;
-            }
-            ShadowFilteringMethod::Castano13 => {
-                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_CASTANO_13;
-            }
-            ShadowFilteringMethod::Jimenez14 => {
-                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_JIMENEZ_14;
-            }
-        }
-
-        if !view.hdr {
-            if let Some(tonemapping) = tonemapping {
-                view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
-                view_key |= tonemapping_pipeline_key(*tonemapping);
-            }
-            if let Some(DebandDither::Enabled) = dither {
-                view_key |= MeshPipelineKey::DEBAND_DITHER;
-            }
-        }
-        if ssao {
-            view_key |= MeshPipelineKey::SCREEN_SPACE_AMBIENT_OCCLUSION;
-        }
-        if let Some(camera_3d) = camera_3d {
-            view_key |= screen_space_specular_transmission_pipeline_key(
-                camera_3d.screen_space_specular_transmission_quality,
-            );
-        }
+        let Some(view_key) = view_key_cache.get(&view_entity).copied() else {
+            continue;
+        };
 
         let rangefinder = view.rangefinder3d();
         for visible_entity in &visible_entities.entities {
@@ -594,55 +757,64 @@ pub fn queue_material_meshes<M: Material>(
             let Some(mesh_instance) = render_mesh_instances.get(visible_entity) else {
                 continue;
             };
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
-                continue;
-            };
             let Some(material) = render_materials.get(material_asset_id) else {
                 continue;
             };
-
-            let forward = match material.properties.render_method {
-                OpaqueRendererMethod::Forward => true,
-                OpaqueRendererMethod::Deferred => false,
-                OpaqueRendererMethod::Auto => unreachable!(),
-            };
-
-            let mut mesh_key = view_key;
-
-            mesh_key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
-
-            if mesh.morph_targets.is_some() {
-                mesh_key |= MeshPipelineKey::MORPH_TARGETS;
-            }
-
-            if material.properties.reads_view_transmission_texture {
-                mesh_key |= MeshPipelineKey::READS_VIEW_TRANSMISSION_TEXTURE;
-            }
-
-            mesh_key |= alpha_mode_pipeline_key(material.properties.alpha_mode);
-
-            if render_lightmaps
-                .render_lightmaps
-                .contains_key(visible_entity)
+            let (forward, pipeline_id) = if let Some(cached_pipeline) =
+                specialized_pipeline_cache.get(&(view_entity, *visible_entity))
             {
-                mesh_key |= MeshPipelineKey::LIGHTMAPPED;
-            }
-
-            let pipeline_id = pipelines.specialize(
-                &pipeline_cache,
-                &material_pipeline,
-                MaterialPipelineKey {
-                    mesh_key,
-                    bind_group_data: material.key.clone(),
-                },
-                &mesh.layout,
-            );
-            let pipeline_id = match pipeline_id {
-                Ok(id) => id,
-                Err(err) => {
-                    error!("{}", err);
+                cached += 1;
+                (cached_pipeline.forward, cached_pipeline.pipeline_id)
+            } else {
+                inline += 1;
+                let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
                     continue;
+                };
+
+                let forward = match material.properties.render_method {
+                    OpaqueRendererMethod::Forward => true,
+                    OpaqueRendererMethod::Deferred => false,
+                    OpaqueRendererMethod::Auto => unreachable!(),
+                };
+
+                let mut mesh_key = view_key;
+
+                mesh_key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+
+                if mesh.morph_targets.is_some() {
+                    mesh_key |= MeshPipelineKey::MORPH_TARGETS;
                 }
+
+                if material.properties.reads_view_transmission_texture {
+                    mesh_key |= MeshPipelineKey::READS_VIEW_TRANSMISSION_TEXTURE;
+                }
+
+                mesh_key |= alpha_mode_pipeline_key(material.properties.alpha_mode);
+
+                if render_lightmaps
+                    .render_lightmaps
+                    .contains_key(visible_entity)
+                {
+                    mesh_key |= MeshPipelineKey::LIGHTMAPPED;
+                }
+
+                let pipeline_id = pipelines.specialize(
+                    &pipeline_cache,
+                    &material_pipeline,
+                    MaterialPipelineKey {
+                        mesh_key,
+                        bind_group_data: material.key.clone(),
+                    },
+                    &mesh.layout,
+                );
+                let pipeline_id = match pipeline_id {
+                    Ok(id) => id,
+                    Err(err) => {
+                        error!("{}", err);
+                        continue;
+                    }
+                };
+                (forward, pipeline_id)
             };
 
             mesh_instance
@@ -717,6 +889,7 @@ pub fn queue_material_meshes<M: Material>(
             }
         }
     }
+    // println!("{inline} inline, {cached} cached");
 }
 
 /// Default render method used for opaque materials.
@@ -867,11 +1040,21 @@ impl<T: Material> Default for RenderMaterials<T> {
     }
 }
 
+#[derive(Resource, Deref, DerefMut)]
+pub struct ChangedMaterials<M: Material>(HashSet<AssetId<M>>);
+
+impl<M: Material> Default for ChangedMaterials<M> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
 /// This system extracts all created or modified assets of the corresponding [`Material`] type
 /// into the "render world".
 pub fn extract_materials<M: Material>(
     mut commands: Commands,
     mut events: Extract<EventReader<AssetEvent<M>>>,
+    mut changed_materials: ResMut<ChangedMaterials<M>>,
     assets: Extract<Res<Assets<M>>>,
 ) {
     let mut changed_assets = HashSet::default();
@@ -892,6 +1075,7 @@ pub fn extract_materials<M: Material>(
             }
         }
     }
+    changed_materials.0 = changed_assets.clone();
 
     let mut extracted_assets = Vec::new();
     for id in changed_assets.drain() {
@@ -1004,4 +1188,224 @@ fn prepare_material<M: Material>(
             render_method: method,
         },
     })
+}
+
+fn gather_entities_for_specialization<M: Material>(
+    mut changed_material_handles: ResMut<ChangedMaterialHandles<M>>,
+    mut changed_materials: ResMut<ChangedMaterials<M>>,
+) {
+    for asset_id in changed_materials.drain() {
+        let Some(entities) = changed_material_handles.map.get(&asset_id) else {
+            continue;
+        };
+        let mut entities = entities.iter().copied().collect::<Vec<_>>();
+        changed_material_handles.set.extend(entities.drain(..));
+    }
+}
+
+fn specialize_pipelines<M: Material>(
+    dirty_views: Res<DirtyViews>,
+    mut changed_material_handles: ResMut<ChangedMaterialHandles<M>>,
+    mut changed_mesh_handles: ResMut<ChangedMeshHandles>,
+    render_material_instances: Res<RenderMaterialInstances<M>>,
+    render_materials: Res<RenderMaterials<M>>,
+    render_mesh_instances: Res<RenderMeshInstances>,
+    render_meshes: Res<RenderAssets<Mesh>>,
+    render_lightmaps: Res<RenderLightmaps>,
+    view_key_cache: Res<ViewKeyCache>,
+    material_pipeline: Res<MaterialPipeline<M>>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<MaterialPipeline<M>>>,
+    pipeline_cache: Res<PipelineCache>,
+    mut specialized_pipeline_cache: ResMut<SpecializedPipelineCache<M>>,
+    views: Query<
+        (Entity, &VisibleEntities),
+        (
+            With<RenderPhase<Opaque3d>>,
+            With<RenderPhase<AlphaMask3d>>,
+            With<RenderPhase<Transparent3d>>,
+            With<RenderPhase<Transmissive3d>>,
+        ),
+    >,
+) where
+    M::Data: PartialEq + Eq + Hash + Clone,
+{
+    let mut need_specialization = EntityHashSet::default();
+    need_specialization.extend(changed_mesh_handles.set.iter().copied());
+    need_specialization.extend(changed_material_handles.set.iter().copied());
+
+    for (view_entity, visible_entities) in &views {
+        if dirty_views.contains(&view_entity) {
+            // FIXME: Did not
+            // println!("{view_entity:?} is dirty");
+            for visible_entity in &visible_entities.entities {
+                let Some(material_asset_id) = render_material_instances.get(visible_entity) else {
+                    // println!("No material_asset_id");
+                    continue;
+                };
+                let Some(mesh_instance) = render_mesh_instances.get(visible_entity) else {
+                    // println!("No mesh_instance");
+                    continue;
+                };
+                let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+                    // println!("No mesh");
+                    continue;
+                };
+                let Some(material) = render_materials.get(material_asset_id) else {
+                    // println!("No material");
+                    continue;
+                };
+                let Some(view_key) = view_key_cache.get(&view_entity).copied() else {
+                    // println!("No view_key");
+                    continue;
+                };
+
+                let mut mesh_key = MeshPipelineKey::NONE;
+
+                mesh_key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+
+                if mesh.morph_targets.is_some() {
+                    mesh_key |= MeshPipelineKey::MORPH_TARGETS;
+                }
+
+                if material.properties.reads_view_transmission_texture {
+                    mesh_key |= MeshPipelineKey::READS_VIEW_TRANSMISSION_TEXTURE;
+                }
+
+                mesh_key |= alpha_mode_pipeline_key(material.properties.alpha_mode);
+
+                if render_lightmaps
+                    .render_lightmaps
+                    .contains_key(visible_entity)
+                {
+                    mesh_key |= MeshPipelineKey::LIGHTMAPPED;
+                }
+
+                let pipeline_id = pipelines.specialize(
+                    &pipeline_cache,
+                    &material_pipeline,
+                    MaterialPipelineKey {
+                        mesh_key: view_key | mesh_key,
+                        bind_group_data: material.key.clone(),
+                    },
+                    &mesh.layout,
+                );
+                let pipeline_id = match pipeline_id {
+                    Ok(id) => id,
+                    Err(err) => {
+                        error!("{}", err);
+                        continue;
+                    }
+                };
+
+                let forward = match material.properties.render_method {
+                    OpaqueRendererMethod::Forward => true,
+                    OpaqueRendererMethod::Deferred => false,
+                    OpaqueRendererMethod::Auto => unreachable!(),
+                };
+
+                // println!("Inserting due to view change {view_entity:?} {visible_entity:?}");
+                changed_mesh_handles.set.remove(visible_entity);
+                changed_material_handles.set.remove(visible_entity);
+                specialized_pipeline_cache.insert(
+                    (view_entity, *visible_entity),
+                    SpecializedPipeline {
+                        pipeline_id,
+                        view_key,
+                        mesh_key,
+                        material_key: material.key.clone(),
+                        forward,
+                    },
+                );
+            }
+        } else if !need_specialization.is_empty() {
+            let visible_entities = visible_entities.iter().copied().collect::<EntityHashSet>();
+            // println!(
+            //     "need_specialization.len(): {}",
+            //     need_specialization.intersection(&visible_entities).count()
+            // );
+            let need_specialization = need_specialization.intersection(&visible_entities);
+            for visible_entity in need_specialization {
+                let Some(material_asset_id) = render_material_instances.get(visible_entity) else {
+                    // println!("No material_asset_id");
+                    continue;
+                };
+                let Some(mesh_instance) = render_mesh_instances.get(visible_entity) else {
+                    // println!("No mesh_instance");
+                    continue;
+                };
+                let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+                    // println!("No mesh");
+                    continue;
+                };
+                let Some(material) = render_materials.get(material_asset_id) else {
+                    // println!("No material");
+                    continue;
+                };
+                let Some(view_key) = view_key_cache.get(&view_entity).copied() else {
+                    // println!("No view_key");
+                    continue;
+                };
+
+                let mut mesh_key = MeshPipelineKey::NONE;
+
+                mesh_key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+
+                if mesh.morph_targets.is_some() {
+                    mesh_key |= MeshPipelineKey::MORPH_TARGETS;
+                }
+
+                if material.properties.reads_view_transmission_texture {
+                    mesh_key |= MeshPipelineKey::READS_VIEW_TRANSMISSION_TEXTURE;
+                }
+
+                mesh_key |= alpha_mode_pipeline_key(material.properties.alpha_mode);
+
+                if render_lightmaps
+                    .render_lightmaps
+                    .contains_key(visible_entity)
+                {
+                    mesh_key |= MeshPipelineKey::LIGHTMAPPED;
+                }
+
+                let pipeline_id = pipelines.specialize(
+                    &pipeline_cache,
+                    &material_pipeline,
+                    MaterialPipelineKey {
+                        mesh_key: view_key | mesh_key,
+                        bind_group_data: material.key.clone(),
+                    },
+                    &mesh.layout,
+                );
+                let pipeline_id = match pipeline_id {
+                    Ok(id) => id,
+                    Err(err) => {
+                        error!("{}", err);
+                        continue;
+                    }
+                };
+
+                let forward = match material.properties.render_method {
+                    OpaqueRendererMethod::Forward => true,
+                    OpaqueRendererMethod::Deferred => false,
+                    OpaqueRendererMethod::Auto => unreachable!(),
+                };
+
+                // println!(
+                //     "Inserting due to needing specialization {view_entity:?} {visible_entity:?}"
+                // );
+                changed_mesh_handles.set.remove(visible_entity);
+                changed_material_handles.set.remove(visible_entity);
+                specialized_pipeline_cache.insert(
+                    (view_entity, *visible_entity),
+                    SpecializedPipeline {
+                        pipeline_id,
+                        view_key,
+                        mesh_key,
+                        material_key: material.key.clone(),
+                        forward,
+                    },
+                );
+            }
+        }
+    }
 }

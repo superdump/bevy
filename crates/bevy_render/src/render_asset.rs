@@ -1,6 +1,7 @@
 use crate::{ExtractSchedule, MainWorld, Render, RenderApp, RenderSet};
 use bevy_app::{App, Plugin};
 use bevy_asset::{Asset, AssetEvent, AssetId, Assets};
+use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Commands, EventReader, IntoSystemConfigs, ResMut, Resource},
     schedule::SystemConfigs,
@@ -208,6 +209,7 @@ impl<A: RenderAsset, AFTER: RenderAssetDependency + 'static> Plugin
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<ExtractedAssets<A>>()
+                .init_resource::<ChangedAssets<A>>()
                 .init_resource::<RenderAssets<A>>()
                 .init_resource::<PrepareNextFrameAssets<A>>()
                 .add_systems(ExtractSchedule, extract_render_asset::<A>);
@@ -309,9 +311,22 @@ impl<A: RenderAsset> FromWorld for CachedExtractRenderAssetSystemState<A> {
     }
 }
 
+#[derive(Resource, Deref, DerefMut)]
+pub struct ChangedAssets<A: RenderAsset>(HashSet<AssetId<A>>);
+
+impl<A: RenderAsset> Default for ChangedAssets<A> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
 /// This system extracts all created or modified assets of the corresponding [`RenderAsset`] type
 /// into the "render world".
-fn extract_render_asset<A: RenderAsset>(mut commands: Commands, mut main_world: ResMut<MainWorld>) {
+fn extract_render_asset<A: RenderAsset>(
+    mut commands: Commands,
+    mut assets_that_changed: ResMut<ChangedAssets<A>>,
+    mut main_world: ResMut<MainWorld>,
+) {
     main_world.resource_scope(
         |world, mut cached_state: Mut<CachedExtractRenderAssetSystemState<A>>| {
             let (mut events, mut assets) = cached_state.state.get_mut(world);
@@ -335,6 +350,8 @@ fn extract_render_asset<A: RenderAsset>(mut commands: Commands, mut main_world: 
                     }
                 }
             }
+
+            assets_that_changed.0 = changed_assets.clone();
 
             let mut extracted_assets = Vec::new();
             for id in changed_assets.drain() {

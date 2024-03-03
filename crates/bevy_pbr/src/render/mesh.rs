@@ -4,7 +4,7 @@ use bevy_core_pipeline::{
     deferred::{AlphaMask3dDeferred, Opaque3dDeferred},
 };
 use bevy_derive::{Deref, DerefMut};
-use bevy_ecs::entity::EntityHashMap;
+use bevy_ecs::entity::{EntityHashMap, EntityHashSet};
 use bevy_ecs::{
     prelude::*,
     query::ROQueryItem,
@@ -17,7 +17,7 @@ use bevy_render::{
         NoAutomaticBatching,
     },
     mesh::*,
-    render_asset::RenderAssets,
+    render_asset::{ChangedAssets, RenderAssets},
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
@@ -111,6 +111,9 @@ impl Plugin for MeshRenderPlugin {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<RenderMeshInstances>()
+                .init_resource::<ChangedMeshHandles>()
+                .init_resource::<ViewKeyCache>()
+                .init_resource::<DirtyViews>()
                 .init_resource::<MeshBindGroups>()
                 .init_resource::<SkinUniform>()
                 .init_resource::<SkinIndices>()
@@ -124,6 +127,9 @@ impl Plugin for MeshRenderPlugin {
                 .add_systems(
                     Render,
                     (
+                        gather_mesh_entities_for_specialization
+                            .in_set(RenderSet::PrepareAssets)
+                            .after(prepare_assets::<Mesh>),
                         (
                             batch_and_prepare_render_phase::<Opaque3d, MeshPipeline>,
                             batch_and_prepare_render_phase::<Transmissive3d, MeshPipeline>,
@@ -254,16 +260,27 @@ impl RenderMeshInstance {
 #[derive(Default, Resource, Deref, DerefMut)]
 pub struct RenderMeshInstances(EntityHashMap<RenderMeshInstance>);
 
+#[derive(Default, Resource, Deref, DerefMut)]
+pub struct EntitiesToSpecialize(EntityHashSet);
+
+#[derive(Default, Resource)]
+pub struct ChangedMeshHandles {
+    pub set: EntityHashSet,
+    map: HashMap<AssetId<Mesh>, EntityHashSet>,
+}
+
 pub fn extract_meshes(
     mut render_mesh_instances: ResMut<RenderMeshInstances>,
+    mut changed_mesh_handles: ResMut<ChangedMeshHandles>,
     mut thread_local_queues: Local<Parallel<Vec<(Entity, RenderMeshInstance)>>>,
+    mut thread_local_mesh_handle_changed_queues: Local<Parallel<Vec<(Entity, AssetId<Mesh>)>>>,
     meshes_query: Extract<
         Query<(
             Entity,
             &ViewVisibility,
             &GlobalTransform,
             Option<&PreviousGlobalTransform>,
-            &Handle<Mesh>,
+            Ref<Handle<Mesh>>,
             Has<NotShadowReceiver>,
             Has<TransmittedShadowReceiver>,
             Has<NotShadowCaster>,
@@ -304,6 +321,10 @@ pub fn extract_meshes(
                 previous_transform: (&previous_transform).into(),
                 flags: flags.bits(),
             };
+            if handle.is_changed() {
+                thread_local_mesh_handle_changed_queues
+                    .scope(|queue| queue.push((entity, handle.id())));
+            }
             thread_local_queues.scope(|queue| {
                 queue.push((
                     entity,
@@ -323,6 +344,32 @@ pub fn extract_meshes(
     for queue in thread_local_queues.iter_mut() {
         render_mesh_instances.extend(queue.drain(..));
     }
+    // changed_mesh_handles.set.clear();
+    changed_mesh_handles.map.clear();
+    for queue in thread_local_mesh_handle_changed_queues.iter_mut() {
+        for (entity, asset_id) in queue.drain(..) {
+            changed_mesh_handles.set.insert(entity);
+            changed_mesh_handles
+                .map
+                .entry(asset_id)
+                .or_default()
+                .insert(entity);
+        }
+    }
+}
+
+pub fn gather_mesh_entities_for_specialization(
+    mut changed_mesh_handles: ResMut<ChangedMeshHandles>,
+    mut changed_meshes: ResMut<ChangedAssets<Mesh>>,
+) {
+    for asset_id in changed_meshes.drain() {
+        let Some(entities) = changed_mesh_handles.map.get(&asset_id) else {
+            continue;
+        };
+        let mut entities = entities.iter().copied().collect::<Vec<_>>();
+        changed_mesh_handles.set.extend(entities.drain(..));
+    }
+    changed_mesh_handles.map.clear();
 }
 
 #[derive(Resource, Clone)]
