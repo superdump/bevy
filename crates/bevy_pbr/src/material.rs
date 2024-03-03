@@ -29,9 +29,9 @@ use bevy_render::{
     Extract,
 };
 use bevy_utils::{tracing::error, HashMap, HashSet};
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{hash::Hash, num::NonZeroU32};
-use std::{marker::PhantomData, mem};
 
 use self::{irradiance_volume::IrradianceVolume, prelude::EnvironmentMapLight};
 
@@ -421,7 +421,7 @@ pub fn check_view_keys<M: Material>(
 struct ChangedMaterialHandles<M: Material> {
     set: EntityHashSet,
     map: HashMap<AssetId<M>, EntityHashSet>,
-    visible: HashMap<AssetId<M>, EntityHashSet>,
+    seen: HashMap<AssetId<M>, EntityHashSet>,
     marker: PhantomData<M>,
 }
 
@@ -430,7 +430,7 @@ impl<M: Material> Default for ChangedMaterialHandles<M> {
         Self {
             set: Default::default(),
             map: Default::default(),
-            visible: Default::default(),
+            seen: Default::default(),
             marker: Default::default(),
         }
     }
@@ -443,22 +443,17 @@ fn extract_material_meshes<M: Material>(
 ) {
     changed_material_handles.set.clear();
     changed_material_handles.map.clear();
-    let last_visible = std::mem::take(&mut changed_material_handles.visible);
 
     for (entity, view_visibility, handle) in &query {
         if view_visibility.get() {
             let handle_id = handle.id();
             extracted_instances.insert(entity, handle_id);
-            changed_material_handles
-                .visible
-                .entry(handle_id)
-                .or_default()
-                .insert(entity);
             if handle.is_changed()
-                || !last_visible
-                    .get(&handle_id)
-                    .and_then(|set| Some(set.contains(&entity)))
-                    .unwrap_or(false)
+                || changed_material_handles
+                    .seen
+                    .entry(handle_id)
+                    .or_default()
+                    .insert(entity)
             {
                 changed_material_handles.set.insert(entity);
                 changed_material_handles
@@ -675,19 +670,40 @@ pub const fn screen_space_specular_transmission_pipeline_key(
 // #[derive(Resource, Deref, DerefMut)]
 // struct MaterialKeyCache<M: Material>(EntityHashMap<MaterialKey<M>>);
 
-pub struct SpecializedPipeline<M: Material> {
-    pipeline_id: CachedRenderPipelineId,
-    view_key: MeshPipelineKey,
-    mesh_key: MeshPipelineKey,
-    material_key: <M as AsBindGroup>::Data,
-    forward: bool,
+// pub struct SpecializedPipeline<M: Material> {
+//     pipeline_id: CachedRenderPipelineId,
+//     view_key: MeshPipelineKey,
+//     mesh_key: MeshPipelineKey,
+//     material_key: <M as AsBindGroup>::Data,
+// }
+#[derive(Resource)]
+pub struct SpecializedPipelineCache<M: Material> {
+    map: HashMap<(Entity, Entity), CachedRenderPipelineId>,
+    marker: PhantomData<M>,
 }
-#[derive(Resource, Deref, DerefMut)]
-pub struct SpecializedPipelineCache<M: Material>(HashMap<(Entity, Entity), SpecializedPipeline<M>>);
 
 impl<M: Material> Default for SpecializedPipelineCache<M> {
     fn default() -> Self {
-        Self(Default::default())
+        Self {
+            map: Default::default(),
+            marker: Default::default(),
+        }
+    }
+}
+
+impl<M: Material> SpecializedPipelineCache<M> {
+    #[inline]
+    pub fn get(&self, key: &(Entity, Entity)) -> Option<CachedRenderPipelineId> {
+        self.map.get(key).copied()
+    }
+
+    #[inline]
+    pub fn insert(
+        &mut self,
+        key: (Entity, Entity),
+        value: CachedRenderPipelineId,
+    ) -> Option<CachedRenderPipelineId> {
+        self.map.insert(key, value)
     }
 }
 
@@ -713,7 +729,7 @@ fn update_mesh_material_instances<M: Material>(
     let draw_transmissive_pbr = transmissive_draw_functions.read().id::<DrawMaterial<M>>();
     let draw_transparent_pbr = transparent_draw_functions.read().id::<DrawMaterial<M>>();
 
-    for (asset_id, entities) in &changed_material_handles.visible {
+    for (asset_id, entities) in &changed_material_handles.seen {
         let Some(material) = render_materials.get(asset_id) else {
             dbg!("No material");
             continue;
@@ -806,8 +822,7 @@ pub fn queue_material_meshes<M: Material>(
                 // dbg!("Invalid draw function");
                 continue;
             }
-            let Some(cached_pipeline) =
-                specialized_pipeline_cache.get(&(view_entity, *visible_entity))
+            let Some(pipeline) = specialized_pipeline_cache.get(&(view_entity, *visible_entity))
             else {
                 dbg!("No cached pipeline");
                 continue;
@@ -818,7 +833,7 @@ pub fn queue_material_meshes<M: Material>(
                     opaque_phase.add(Opaque3d {
                         entity: *visible_entity,
                         draw_function: mesh_instance.draw_function_id,
-                        pipeline: cached_pipeline.pipeline_id,
+                        pipeline,
                         asset_id: mesh_instance.mesh_asset_id,
                         batch_range: 0..1,
                         dynamic_offset: None,
@@ -828,7 +843,7 @@ pub fn queue_material_meshes<M: Material>(
                     alpha_mask_phase.add(AlphaMask3d {
                         entity: *visible_entity,
                         draw_function: mesh_instance.draw_function_id,
-                        pipeline: cached_pipeline.pipeline_id,
+                        pipeline,
                         asset_id: mesh_instance.mesh_asset_id,
                         batch_range: 0..1,
                         dynamic_offset: None,
@@ -841,7 +856,7 @@ pub fn queue_material_meshes<M: Material>(
                     transmissive_phase.add(Transmissive3d {
                         entity: *visible_entity,
                         draw_function: mesh_instance.draw_function_id,
-                        pipeline: cached_pipeline.pipeline_id,
+                        pipeline,
                         distance,
                         batch_range: 0..1,
                         dynamic_offset: None,
@@ -854,7 +869,7 @@ pub fn queue_material_meshes<M: Material>(
                     transparent_phase.add(Transparent3d {
                         entity: *visible_entity,
                         draw_function: mesh_instance.draw_function_id,
-                        pipeline: cached_pipeline.pipeline_id,
+                        pipeline,
                         distance,
                         batch_range: 0..1,
                         dynamic_offset: None,
@@ -1281,13 +1296,12 @@ fn specialize_pipelines<M: Material>(
                 changed_material_handles.set.remove(visible_entity);
                 specialized_pipeline_cache.insert(
                     (view_entity, *visible_entity),
-                    SpecializedPipeline {
-                        pipeline_id,
-                        view_key,
-                        mesh_key,
-                        material_key: material.key.clone(),
-                        forward,
-                    },
+                    // SpecializedPipeline {
+                    pipeline_id,
+                    //     view_key,
+                    //     mesh_key,
+                    //     material_key: material.key.clone(),
+                    // },
                 );
             }
         } else if !need_specialization.is_empty() {
@@ -1370,13 +1384,12 @@ fn specialize_pipelines<M: Material>(
                 changed_material_handles.set.remove(visible_entity);
                 specialized_pipeline_cache.insert(
                     (view_entity, *visible_entity),
-                    SpecializedPipeline {
-                        pipeline_id,
-                        view_key,
-                        mesh_key,
-                        material_key: material.key.clone(),
-                        forward,
-                    },
+                    // SpecializedPipeline {
+                    pipeline_id,
+                    //     view_key,
+                    //     mesh_key,
+                    //     material_key: material.key.clone(),
+                    // },
                 );
             }
         }
