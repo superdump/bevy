@@ -28,6 +28,7 @@ pub use crate::uuid::Uuid;
 pub use ahash::{AHasher, RandomState};
 pub use bevy_utils_proc_macros::*;
 pub use cow_arc::*;
+pub use crossbeam_channel;
 pub use default::default;
 pub use float_ord::*;
 pub use hashbrown;

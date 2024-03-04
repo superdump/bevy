@@ -1,7 +1,11 @@
-use bevy_asset::{load_internal_asset, AssetId};
+use bevy_asset::{load_internal_asset, Asset, AssetEvent, AssetId};
 use bevy_core_pipeline::{
-    core_3d::{AlphaMask3d, Opaque3d, Transmissive3d, Transparent3d, CORE_3D_DEPTH_FORMAT},
+    core_3d::{
+        AlphaMask3d, Camera3d, Opaque3d, Transmissive3d, Transparent3d, CORE_3D_DEPTH_FORMAT,
+    },
     deferred::{AlphaMask3dDeferred, Opaque3dDeferred},
+    prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
+    tonemapping::{DebandDither, Tonemapping},
 };
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::entity::{EntityHashMap, EntityHashSet};
@@ -16,19 +20,25 @@ use bevy_render::{
         batch_and_prepare_render_phase, write_batched_instance_buffer, GetBatchData,
         NoAutomaticBatching,
     },
+    camera::{Camera, TemporalJitter},
+    extract_resource::ExtractResource,
     mesh::*,
-    render_asset::{ChangedAssets, RenderAssets},
+    render_asset::{ChangedAssets, RenderAsset, RenderAssets},
     render_phase::{
         DrawFunctionId, PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass,
     },
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
     texture::{BevyDefault, DefaultImageSampler, GpuImage, ImageSampler, TextureFormatPixelInfo},
-    view::{ViewTarget, ViewUniformOffset, ViewVisibility},
+    view::{Msaa, ViewTarget, ViewUniformOffset, ViewVisibility, VisibleEntities},
     Extract,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::{tracing::error, Entry, HashMap, Parallel};
+use bevy_utils::{
+    crossbeam_channel::{self, Receiver, Sender},
+    tracing::error,
+    Entry, HashMap, HashSet, Parallel,
+};
 
 #[cfg(debug_assertions)]
 use bevy_utils::warn_once;
@@ -41,7 +51,10 @@ use crate::render::{
 };
 use crate::*;
 
-use self::irradiance_volume::IRRADIANCE_VOLUMES_ARE_USABLE;
+use self::{
+    environment_map::EnvironmentMapLight,
+    irradiance_volume::{IrradianceVolume, IRRADIANCE_VOLUMES_ARE_USABLE},
+};
 
 use super::skin::SkinIndices;
 
@@ -105,17 +118,29 @@ impl Plugin for MeshRenderPlugin {
         load_internal_asset!(app, SKINNING_HANDLE, "skinning.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, MORPH_HANDLE, "morph.wgsl", Shader::from_wgsl);
 
-        app.add_systems(
-            PostUpdate,
-            (no_automatic_skin_batching, no_automatic_morph_batching),
-        );
+        let (entity_specialized_sender, entity_specialized_receiver) =
+            create_entity_specialized_channel();
+        app.add_plugins(ExtractResourcePlugin::<ViewKeyCache>::default())
+            .insert_resource(entity_specialized_receiver)
+            .init_resource::<ChangedAssets<Mesh>>()
+            .init_resource::<AssetEntityMap<Mesh>>()
+            .init_resource::<ViewKeyCache>()
+            .add_systems(
+                PostUpdate,
+                (
+                    apply_entity_specialized,
+                    check_views_need_specialization.after(apply_entity_specialized),
+                    maintain_changed_assets::<Mesh>,
+                    maintain_asset_entity_map::<Mesh>.after(maintain_changed_assets::<Mesh>),
+                    no_automatic_skin_batching,
+                    no_automatic_morph_batching,
+                ),
+            );
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
+                .insert_resource(entity_specialized_sender)
                 .init_resource::<RenderMeshInstances>()
-                .init_resource::<ChangedMeshHandles>()
-                .init_resource::<ViewKeyCache>()
-                .init_resource::<DirtyViews>()
                 .init_resource::<MeshBindGroups>()
                 .init_resource::<SkinUniform>()
                 .init_resource::<SkinIndices>()
@@ -129,9 +154,6 @@ impl Plugin for MeshRenderPlugin {
                 .add_systems(
                     Render,
                     (
-                        gather_mesh_entities_for_specialization
-                            .in_set(RenderSet::PrepareAssets)
-                            .after(prepare_assets::<Mesh>),
                         (
                             batch_and_prepare_render_phase::<Opaque3d, MeshPipeline>,
                             batch_and_prepare_render_phase::<Transmissive3d, MeshPipeline>,
@@ -182,6 +204,153 @@ impl Plugin for MeshRenderPlugin {
             Shader::from_wgsl_with_defs,
             mesh_bindings_shader_defs
         );
+    }
+}
+
+#[derive(Default, Resource, Deref, DerefMut, ExtractResource, Clone)]
+pub struct ViewKeyCache(EntityHashMap<MeshPipelineKey>);
+
+#[derive(Default, Resource, Deref, DerefMut)]
+pub struct DirtyViews(EntityHashSet);
+
+pub fn check_views_need_specialization(
+    mut commands: Commands,
+    msaa: Res<Msaa>,
+    mut view_key_cache: ResMut<ViewKeyCache>,
+    views: Query<
+        (
+            Entity,
+            &VisibleEntities,
+            &Camera,
+            Option<&Tonemapping>,
+            Option<&DebandDither>,
+            Option<&ShadowFilteringMethod>,
+            Has<ScreenSpaceAmbientOcclusionSettings>,
+            (
+                Has<NormalPrepass>,
+                Has<DepthPrepass>,
+                Has<MotionVectorPrepass>,
+                Has<DeferredPrepass>,
+            ),
+            Option<&Camera3d>,
+            Has<TemporalJitter>,
+            Option<&Projection>,
+            (
+                Has<RenderViewLightProbes<EnvironmentMapLight>>,
+                Has<RenderViewLightProbes<IrradianceVolume>>,
+            ),
+        ),
+        With<Camera3d>,
+    >,
+) {
+    for (
+        view_entity,
+        visible_entities,
+        camera,
+        tonemapping,
+        dither,
+        shadow_filter_method,
+        ssao,
+        (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
+        camera_3d,
+        temporal_jitter,
+        projection,
+        (has_environment_maps, has_irradiance_volumes),
+    ) in &views
+    {
+        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
+            | MeshPipelineKey::from_hdr(camera.hdr);
+
+        if normal_prepass {
+            view_key |= MeshPipelineKey::NORMAL_PREPASS;
+        }
+
+        if depth_prepass {
+            view_key |= MeshPipelineKey::DEPTH_PREPASS;
+        }
+
+        if motion_vector_prepass {
+            view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
+        }
+
+        if deferred_prepass {
+            view_key |= MeshPipelineKey::DEFERRED_PREPASS;
+        }
+
+        if temporal_jitter {
+            view_key |= MeshPipelineKey::TEMPORAL_JITTER;
+        }
+
+        if has_environment_maps {
+            view_key |= MeshPipelineKey::ENVIRONMENT_MAP;
+        }
+
+        if has_irradiance_volumes {
+            view_key |= MeshPipelineKey::IRRADIANCE_VOLUME;
+        }
+
+        if let Some(projection) = projection {
+            view_key |= match projection {
+                Projection::Perspective(_) => MeshPipelineKey::VIEW_PROJECTION_PERSPECTIVE,
+                Projection::Orthographic(_) => MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC,
+            };
+        }
+
+        match shadow_filter_method.unwrap_or(&ShadowFilteringMethod::default()) {
+            ShadowFilteringMethod::Hardware2x2 => {
+                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_HARDWARE_2X2;
+            }
+            ShadowFilteringMethod::Castano13 => {
+                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_CASTANO_13;
+            }
+            ShadowFilteringMethod::Jimenez14 => {
+                view_key |= MeshPipelineKey::SHADOW_FILTER_METHOD_JIMENEZ_14;
+            }
+        }
+
+        if !camera.hdr {
+            if let Some(tonemapping) = tonemapping {
+                view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
+                view_key |= tonemapping_pipeline_key(*tonemapping);
+            }
+            if let Some(DebandDither::Enabled) = dither {
+                view_key |= MeshPipelineKey::DEBAND_DITHER;
+            }
+        }
+        if ssao {
+            view_key |= MeshPipelineKey::SCREEN_SPACE_AMBIENT_OCCLUSION;
+        }
+        if let Some(camera_3d) = camera_3d {
+            view_key |= screen_space_specular_transmission_pipeline_key(
+                camera_3d.screen_space_specular_transmission_quality,
+            );
+        }
+
+        if let Some(current_key) = view_key_cache.get_mut(&view_entity) {
+            if *current_key != view_key {
+                dbg!(view_entity);
+                dbg!(view_key);
+                *current_key = view_key;
+                let batch = visible_entities
+                    .entities
+                    .iter()
+                    .copied()
+                    .map(|entity| (entity, NeedsSpecialization))
+                    .collect::<Vec<_>>();
+                commands.insert_or_spawn_batch(batch);
+            }
+        } else {
+            view_key_cache.insert(view_entity, view_key);
+            dbg!(view_entity);
+            dbg!(view_key);
+            let batch = visible_entities
+                .entities
+                .iter()
+                .copied()
+                .map(|entity| (entity, NeedsSpecialization))
+                .collect::<Vec<_>>();
+            commands.insert_or_spawn_batch(batch);
+        }
     }
 }
 
@@ -265,27 +434,95 @@ impl RenderMeshInstance {
 #[derive(Default, Resource, Deref, DerefMut)]
 pub struct RenderMeshInstances(EntityHashMap<RenderMeshInstance>);
 
-#[derive(Default, Resource, Deref, DerefMut)]
-pub struct EntitiesToSpecialize(EntityHashSet);
+#[derive(Resource, Deref, DerefMut)]
+pub struct EntitySpecializedSender(Sender<Vec<Entity>>);
 
-#[derive(Default, Resource)]
-pub struct ChangedMeshHandles {
-    pub set: EntityHashSet,
-    map: HashMap<AssetId<Mesh>, EntityHashSet>,
+#[derive(Resource, Deref, DerefMut)]
+pub struct EntitySpecializedReceiver(Receiver<Vec<Entity>>);
+
+pub fn create_entity_specialized_channel() -> (EntitySpecializedSender, EntitySpecializedReceiver) {
+    let (s, r) = crossbeam_channel::unbounded::<Vec<Entity>>();
+    (EntitySpecializedSender(s), EntitySpecializedReceiver(r))
 }
+
+pub fn apply_entity_specialized(
+    mut commands: Commands,
+    entity_specialized_receiver: Res<EntitySpecializedReceiver>,
+) {
+    while let Ok(entities) = entity_specialized_receiver.try_recv() {
+        for entity in entities {
+            // FIXME - batch component removal?
+            commands.entity(entity).remove::<NeedsSpecialization>();
+        }
+    }
+}
+
+pub fn maintain_changed_assets<A: RenderAsset>(
+    mut events: EventReader<AssetEvent<A>>,
+    mut changed_assets: ResMut<ChangedAssets<A>>,
+    mut asset_entity_map: ResMut<AssetEntityMap<A>>,
+) {
+    changed_assets.clear();
+    let mut removed = HashSet::new();
+
+    for event in events.read() {
+        #[allow(clippy::match_same_arms)]
+        match event {
+            AssetEvent::Added { id } | AssetEvent::Modified { id } => {
+                changed_assets.insert(*id);
+                removed.remove(id);
+            }
+            AssetEvent::Removed { id } => {
+                changed_assets.remove(id);
+                removed.insert(*id);
+            }
+            AssetEvent::Unused { .. } => {}
+            AssetEvent::LoadedWithDependencies { .. } => {
+                // TODO: handle this
+            }
+        }
+    }
+
+    for asset in removed.drain() {
+        asset_entity_map.remove(&asset);
+    }
+}
+
+#[derive(Resource, Deref, DerefMut)]
+pub struct AssetEntityMap<A: Asset>(HashMap<AssetId<A>, EntityHashSet>);
+
+impl<A: Asset> Default for AssetEntityMap<A> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+pub fn maintain_asset_entity_map<A: Asset>(
+    mut asset_entity_map: ResMut<AssetEntityMap<A>>,
+    query: Query<(Entity, &Handle<A>), Changed<Handle<A>>>,
+) {
+    // FIXME - handle removals somehow
+    for (entity, handle) in &query {
+        asset_entity_map
+            .entry(handle.id())
+            .or_default()
+            .insert(entity);
+    }
+}
+
+#[derive(Component)]
+pub struct NeedsSpecialization;
 
 pub fn extract_meshes(
     mut render_mesh_instances: ResMut<RenderMeshInstances>,
-    mut changed_mesh_handles: ResMut<ChangedMeshHandles>,
     mut thread_local_queues: Local<Parallel<Vec<(Entity, RenderMeshInstance)>>>,
-    mut thread_local_mesh_handle_changed_queues: Local<Parallel<Vec<(Entity, AssetId<Mesh>)>>>,
     meshes_query: Extract<
         Query<(
             Entity,
             &ViewVisibility,
             &GlobalTransform,
             Option<&PreviousGlobalTransform>,
-            Ref<Handle<Mesh>>,
+            &Handle<Mesh>,
             Has<NotShadowReceiver>,
             Has<TransmittedShadowReceiver>,
             Has<NotShadowCaster>,
@@ -326,10 +563,6 @@ pub fn extract_meshes(
                 previous_transform: (&previous_transform).into(),
                 flags: flags.bits(),
             };
-            if handle.is_changed() {
-                thread_local_mesh_handle_changed_queues
-                    .scope(|queue| queue.push((entity, handle.id())));
-            }
             thread_local_queues.scope(|queue| {
                 queue.push((
                     entity,
@@ -352,32 +585,6 @@ pub fn extract_meshes(
     for queue in thread_local_queues.iter_mut() {
         render_mesh_instances.extend(queue.drain(..));
     }
-    // changed_mesh_handles.set.clear();
-    changed_mesh_handles.map.clear();
-    for queue in thread_local_mesh_handle_changed_queues.iter_mut() {
-        for (entity, asset_id) in queue.drain(..) {
-            changed_mesh_handles.set.insert(entity);
-            changed_mesh_handles
-                .map
-                .entry(asset_id)
-                .or_default()
-                .insert(entity);
-        }
-    }
-}
-
-pub fn gather_mesh_entities_for_specialization(
-    mut changed_mesh_handles: ResMut<ChangedMeshHandles>,
-    mut changed_meshes: ResMut<ChangedAssets<Mesh>>,
-) {
-    for asset_id in changed_meshes.drain() {
-        let Some(entities) = changed_mesh_handles.map.get(&asset_id) else {
-            continue;
-        };
-        let mut entities = entities.iter().copied().collect::<Vec<_>>();
-        changed_mesh_handles.set.extend(entities.drain(..));
-    }
-    changed_mesh_handles.map.clear();
 }
 
 #[derive(Resource, Clone)]
