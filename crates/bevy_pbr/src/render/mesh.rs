@@ -18,7 +18,9 @@ use bevy_render::{
     },
     mesh::*,
     render_asset::{ChangedAssets, RenderAssets},
-    render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
+    render_phase::{
+        DrawFunctionId, PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass,
+    },
     render_resource::*,
     renderer::{RenderDevice, RenderQueue},
     texture::{BevyDefault, DefaultImageSampler, GpuImage, ImageSampler, TextureFormatPixelInfo},
@@ -249,6 +251,9 @@ pub struct RenderMeshInstance {
     pub material_bind_group_id: AtomicMaterialBindGroupId,
     pub shadow_caster: bool,
     pub automatic_batching: bool,
+    pub render_phase_type: RenderPhaseType,
+    pub depth_bias: f32,
+    pub draw_function_id: DrawFunctionId,
 }
 
 impl RenderMeshInstance {
@@ -334,6 +339,9 @@ pub fn extract_meshes(
                         shadow_caster: !not_shadow_caster,
                         material_bind_group_id: AtomicMaterialBindGroupId::default(),
                         automatic_batching: !no_automatic_batching,
+                        render_phase_type: RenderPhaseType::Opaque,
+                        depth_bias: 0.0,
+                        draw_function_id: DrawFunctionId::INVALID,
                     },
                 ));
             });

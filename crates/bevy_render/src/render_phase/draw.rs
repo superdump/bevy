@@ -42,6 +42,10 @@ pub trait Draw<P: PhaseItem>: Send + Sync + 'static {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DrawFunctionId(u32);
 
+impl DrawFunctionId {
+    pub const INVALID: Self = Self(u32::MAX);
+}
+
 /// Stores all [`Draw`] functions for the [`PhaseItem`] type.
 ///
 /// For retrieval, the [`Draw`] functions are mapped to their respective [`TypeId`]s.
