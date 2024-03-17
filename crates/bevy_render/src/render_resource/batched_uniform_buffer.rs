@@ -30,6 +30,37 @@ const MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE: u32 = 1 << 20;
 #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
 const MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE: u32 = 1 << 12;
 
+pub struct BatchedUniformOffsetCalculator {
+    index: u32,
+    offset: u32,
+    stride: u32,
+}
+
+impl BatchedUniformOffsetCalculator {
+    pub fn new(stride: u32) -> Self {
+        Self {
+            index: 0,
+            offset: 0,
+            stride,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.index = 0;
+        self.offset = 0;
+    }
+
+    #[inline]
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
+
+    #[inline]
+    pub fn next_offset(&mut self) {
+        self.offset += self.stride;
+    }
+}
+
 /// Similar to [`DynamicUniformBuffer`], except every N elements (depending on size)
 /// are grouped into a batch as an `array<T, N>` in WGSL.
 ///
@@ -44,8 +75,7 @@ pub struct BatchedUniformBuffer<T: GpuArrayBufferable> {
     // then it is written into the `DynamicUniformBuffer`, cleared, and new T
     // are gathered here, and so on for each batch.
     temp: MaxCapacityArray<Vec<T>>,
-    current_offset: u32,
-    dynamic_offset_alignment: u32,
+    offset_calculator: BatchedUniformOffsetCalculator,
 }
 
 impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
@@ -60,11 +90,16 @@ impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
         let capacity = Self::batch_size(limits);
         let alignment = limits.min_uniform_buffer_offset_alignment;
 
+        let temp = MaxCapacityArray(Vec::with_capacity(capacity), capacity);
+        let temp_stride = temp.size().get();
+
         Self {
             uniforms: DynamicUniformBuffer::new_with_alignment(alignment as u64),
-            temp: MaxCapacityArray(Vec::with_capacity(capacity), capacity),
-            current_offset: 0,
-            dynamic_offset_alignment: alignment,
+            temp,
+            offset_calculator: BatchedUniformOffsetCalculator::new(align_to_next(
+                temp_stride,
+                alignment as u64,
+            ) as u32),
         }
     }
 
@@ -75,14 +110,14 @@ impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
 
     pub fn clear(&mut self) {
         self.uniforms.clear();
-        self.current_offset = 0;
+        self.offset_calculator.clear();
         self.temp.0.clear();
     }
 
     pub fn push(&mut self, component: T) -> GpuArrayBufferIndex<T> {
         let result = GpuArrayBufferIndex {
             index: self.temp.0.len() as u32,
-            dynamic_offset: NonMaxU32::new(self.current_offset),
+            dynamic_offset: NonMaxU32::new(self.offset_calculator.offset()),
             element_type: PhantomData,
         };
         self.temp.0.push(component);
@@ -95,8 +130,7 @@ impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
     pub fn flush(&mut self) {
         self.uniforms.push(&self.temp);
 
-        self.current_offset +=
-            align_to_next(self.temp.size().get(), self.dynamic_offset_alignment as u64) as u32;
+        self.offset_calculator.next_offset();
 
         self.temp.0.clear();
     }
