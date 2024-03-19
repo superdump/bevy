@@ -15,6 +15,7 @@ mod storage_buffer;
 mod texture;
 mod uniform_buffer;
 
+pub use batched_uniform_buffer::*;
 pub use bind_group::*;
 pub use bind_group_entries::*;
 pub use bind_group_layout::*;

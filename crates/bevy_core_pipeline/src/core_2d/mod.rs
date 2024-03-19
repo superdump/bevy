@@ -24,14 +24,13 @@ pub mod graph {
     }
 }
 
-use std::ops::Range;
-
 pub use camera_2d::*;
 pub use main_pass_2d_node::*;
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
 use bevy_render::{
+    batching::{PhaseItemOffsets, PhaseItemRanges},
     camera::Camera,
     extract_component::ExtractComponentPlugin,
     render_graph::{EmptyNode, RenderGraphApp, ViewNodeRunner},
@@ -43,7 +42,6 @@ use bevy_render::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_utils::FloatOrd;
-use nonmax::NonMaxU32;
 
 use crate::{tonemapping::TonemappingNode, upscaling::UpscalingNode};
 
@@ -91,8 +89,6 @@ pub struct Transparent2d {
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
-    pub batch_range: Range<u32>,
-    pub dynamic_offset: Option<NonMaxU32>,
 }
 
 impl PhaseItem for Transparent2d {
@@ -118,26 +114,6 @@ impl PhaseItem for Transparent2d {
         // radsort is a stable radix sort that performed better than `slice::sort_by_key` or `slice::sort_unstable_by_key`.
         radsort::sort_by_key(items, |item| item.sort_key().0);
     }
-
-    #[inline]
-    fn batch_range(&self) -> &Range<u32> {
-        &self.batch_range
-    }
-
-    #[inline]
-    fn batch_range_mut(&mut self) -> &mut Range<u32> {
-        &mut self.batch_range
-    }
-
-    #[inline]
-    fn dynamic_offset(&self) -> Option<NonMaxU32> {
-        self.dynamic_offset
-    }
-
-    #[inline]
-    fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
-        &mut self.dynamic_offset
-    }
 }
 
 impl CachedRenderPipelinePhaseItem for Transparent2d {
@@ -153,9 +129,11 @@ pub fn extract_core_2d_camera_phases(
 ) {
     for (entity, camera) in &cameras_2d {
         if camera.is_active {
-            commands
-                .get_or_spawn(entity)
-                .insert(RenderPhase::<Transparent2d>::default());
+            commands.get_or_spawn(entity).insert((
+                RenderPhase::<Transparent2d>::default(),
+                PhaseItemRanges::<Transparent2d>::default(),
+                PhaseItemOffsets::<Transparent2d>::default(),
+            ));
         }
     }
 }

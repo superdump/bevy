@@ -1,14 +1,19 @@
+use std::{marker::PhantomData, ops::Range};
+
 use bevy_ecs::{
     component::Component,
-    entity::Entity,
+    entity::{Entity, EntityHashMap},
     prelude::Res,
-    system::{Query, ResMut, StaticSystemParam, SystemParam, SystemParamItem},
+    system::{Query, StaticSystemParam, SystemParam, SystemParamItem},
 };
 use nonmax::NonMaxU32;
+use wgpu::Limits;
 
 use crate::{
-    render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, RenderPhase},
-    render_resource::{CachedRenderPipelineId, GpuArrayBuffer, GpuArrayBufferable},
+    render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, PhaseItem, RenderPhase},
+    render_resource::{
+        CachedRenderPipelineId, DynamicOffsetCalculator, GpuArrayBuffer, GpuArrayBufferable,
+    },
     renderer::{RenderDevice, RenderQueue},
 };
 
@@ -43,12 +48,68 @@ struct BatchMeta<T: PartialEq> {
 }
 
 impl<T: PartialEq> BatchMeta<T> {
-    fn new(item: &impl CachedRenderPipelinePhaseItem, user_data: T) -> Self {
+    fn new(
+        item: &impl CachedRenderPipelinePhaseItem,
+        dynamic_offset: Option<NonMaxU32>,
+        user_data: T,
+    ) -> Self {
         BatchMeta {
             pipeline_id: item.cached_pipeline(),
             draw_function_id: item.draw_function(),
-            dynamic_offset: item.dynamic_offset(),
+            dynamic_offset,
             user_data,
+        }
+    }
+}
+
+pub trait GetPerInstanceData {
+    type Param: SystemParam + 'static;
+    /// The per-instance data to be inserted into the [`GpuArrayBuffer`]
+    /// containing these data for all instances.
+    type InstanceData: GpuArrayBufferable + Sync + Send + 'static;
+    /// Get the per-instance data to be inserted into the [`GpuArrayBuffer`].
+    fn get_instance_data(
+        param: &SystemParamItem<Self::Param>,
+        query_item: Entity,
+    ) -> Option<Self::InstanceData>;
+}
+
+#[derive(Component)]
+pub struct PhaseItemOffsets<I: PhaseItem> {
+    pub offsets: EntityHashMap<u32>,
+    marker: PhantomData<I>,
+}
+
+impl<I: PhaseItem> Default for PhaseItemOffsets<I> {
+    fn default() -> Self {
+        Self {
+            offsets: Default::default(),
+            marker: Default::default(),
+        }
+    }
+}
+
+pub fn prepare_render_phase<I: CachedRenderPipelinePhaseItem, F: GetPerInstanceData>(
+    mut views: Query<(
+        &RenderPhase<I>,
+        &mut PhaseItemOffsets<I>,
+        &mut GpuArrayBuffer<F::InstanceData>,
+    )>,
+    param: StaticSystemParam<F::Param>,
+) {
+    let system_param_item = param.into_inner();
+    for (phase, mut offsets, mut gpu_array_buffer) in &mut views {
+        offsets.offsets.clear();
+        let offsets = &mut offsets.offsets;
+        for item in &phase.items {
+            let Some(instance_data) = F::get_instance_data(&system_param_item, item.entity())
+            else {
+                continue;
+            };
+            let buffer_index = gpu_array_buffer.push(instance_data);
+            if let Some(dynamic_offset) = buffer_index.dynamic_offset {
+                offsets.insert(item.entity(), dynamic_offset.get());
+            }
         }
     }
 }
@@ -60,67 +121,115 @@ pub trait GetBatchData {
     /// Data used for comparison between phase items. If the pipeline id, draw
     /// function id, per-instance data buffer dynamic offset and this data
     /// matches, the draws can be batched.
-    type CompareData: PartialEq;
-    /// The per-instance data to be inserted into the [`GpuArrayBuffer`]
-    /// containing these data for all instances.
-    type BufferData: GpuArrayBufferable + Sync + Send + 'static;
-    /// Get the per-instance data to be inserted into the [`GpuArrayBuffer`].
-    /// If the instance can be batched, also return the data used for
+    type BatchData: PartialEq;
+    /// If the instance can be batched, return the data used for
     /// comparison when deciding whether draws can be batched, else return None
     /// for the `CompareData`.
     fn get_batch_data(
         param: &SystemParamItem<Self::Param>,
         query_item: Entity,
-    ) -> Option<(Self::BufferData, Option<Self::CompareData>)>;
+    ) -> Option<Self::BatchData>;
+}
+
+#[derive(Component)]
+pub struct PhaseItemRanges<I: PhaseItem> {
+    pub ranges: EntityHashMap<Range<u32>>,
+    marker: PhantomData<I>,
+}
+
+impl<I: PhaseItem> Default for PhaseItemRanges<I> {
+    fn default() -> Self {
+        Self {
+            ranges: Default::default(),
+            marker: Default::default(),
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct PhaseItemOffsetCalculator<T: GpuArrayBufferable, I: PhaseItem> {
+    calculator: DynamicOffsetCalculator<T>,
+    marker: PhantomData<I>,
+}
+
+impl<T: GpuArrayBufferable, I: PhaseItem> PhaseItemOffsetCalculator<T, I> {
+    pub fn new(limits: &Limits) -> Self {
+        Self {
+            calculator: DynamicOffsetCalculator::<T>::new(limits),
+            marker: PhantomData,
+        }
+    }
 }
 
 /// Batch the items in a render phase. This means comparing metadata needed to draw each phase item
 /// and trying to combine the draws into a batch.
-pub fn batch_and_prepare_render_phase<I: CachedRenderPipelinePhaseItem, F: GetBatchData>(
-    gpu_array_buffer: ResMut<GpuArrayBuffer<F::BufferData>>,
-    mut views: Query<&mut RenderPhase<I>>,
-    param: StaticSystemParam<F::Param>,
+pub fn batch_render_phase<
+    I: CachedRenderPipelinePhaseItem,
+    F: GetBatchData + GetPerInstanceData,
+>(
+    mut views: Query<(
+        &RenderPhase<I>,
+        &mut PhaseItemRanges<I>,
+        &mut PhaseItemOffsetCalculator<F::InstanceData, I>,
+    )>,
+    param: StaticSystemParam<<F as GetBatchData>::Param>,
 ) {
-    let gpu_array_buffer = gpu_array_buffer.into_inner();
     let system_param_item = param.into_inner();
 
-    let mut process_item = |item: &mut I| {
-        let (buffer_data, compare_data) = F::get_batch_data(&system_param_item, item.entity())?;
-        let buffer_index = gpu_array_buffer.push(buffer_data);
+    let process_item =
+        |calc: &mut DynamicOffsetCalculator<F::InstanceData>, range: &mut Range<u32>, item: &I| {
+            let compare_data = F::get_batch_data(&system_param_item, item.entity());
 
-        let index = buffer_index.index;
-        *item.batch_range_mut() = index..index + 1;
-        *item.dynamic_offset_mut() = buffer_index.dynamic_offset;
+            let (index, dynamic_offset) = calc.indices();
+            calc.increment();
+            *range = index..index + 1;
 
-        if I::AUTOMATIC_BATCHING {
-            compare_data.map(|compare_data| BatchMeta::new(item, compare_data))
-        } else {
-            None
-        }
-    };
-
-    for mut phase in &mut views {
-        let items = phase.items.iter_mut().map(|item| {
-            let batch_data = process_item(item);
-            (item.batch_range_mut(), batch_data)
-        });
-        items.reduce(|(start_range, prev_batch_meta), (range, batch_meta)| {
-            if batch_meta.is_some() && prev_batch_meta == batch_meta {
-                start_range.end = range.end;
-                (start_range, prev_batch_meta)
+            if I::AUTOMATIC_BATCHING {
+                compare_data.map(|compare_data| BatchMeta::new(item, dynamic_offset, compare_data))
             } else {
-                (range, batch_meta)
+                None
             }
+        };
+
+    for (phase, mut ranges, mut offset_calculator) in &mut views {
+        ranges.ranges.clear();
+        let ranges = &mut ranges.ranges;
+
+        offset_calculator.calculator.clear();
+        let calc = &mut offset_calculator.calculator;
+
+        let items = phase.items.iter().map(|item| {
+            let mut range = 0..1;
+            let batch_data = process_item(calc, &mut range, item);
+            (item.entity(), range, batch_data)
         });
+        items.reduce(
+            |(start_entity, mut start_range, prev_batch_meta), (entity, range, batch_meta)| {
+                if batch_meta.is_some() && prev_batch_meta == batch_meta {
+                    start_range.end = range.end;
+                    *ranges.entry(start_entity).or_default() = start_range.clone();
+                    (start_entity, start_range, prev_batch_meta)
+                } else {
+                    *ranges.entry(start_entity).or_default() = start_range.clone();
+                    *ranges.entry(entity).or_default() = range.clone();
+                    (entity, range, batch_meta)
+                }
+            },
+        );
+        for item in &phase.items {
+            dbg!(item.entity());
+            dbg!(ranges.get(&item.entity()));
+        }
     }
 }
 
-pub fn write_batched_instance_buffer<F: GetBatchData>(
+pub fn write_batched_instance_buffer<F: GetPerInstanceData>(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    gpu_array_buffer: ResMut<GpuArrayBuffer<F::BufferData>>,
+    mut gpu_array_buffers: Query<&mut GpuArrayBuffer<F::InstanceData>>,
 ) {
-    let gpu_array_buffer = gpu_array_buffer.into_inner();
-    gpu_array_buffer.write_buffer(&render_device, &render_queue);
-    gpu_array_buffer.clear();
+    for mut gpu_array_buffer in &mut gpu_array_buffers {
+        gpu_array_buffer.write_buffer(&render_device, &render_queue);
+        gpu_array_buffer.clear();
+    }
 }

@@ -1,5 +1,6 @@
 mod prepass_bindings;
 
+use bevy_render::batching::prepare_render_phase;
 use bevy_render::mesh::MeshVertexBufferLayoutRef;
 use bevy_render::render_resource::binding_types::uniform_buffer;
 pub use prepass_bindings::*;
@@ -16,7 +17,7 @@ use bevy_ecs::{
 };
 use bevy_math::{Affine3A, Mat4};
 use bevy_render::{
-    batching::batch_and_prepare_render_phase,
+    batching::batch_render_phase,
     globals::{GlobalsBuffer, GlobalsUniform},
     prelude::{Camera, Mesh},
     render_asset::RenderAssets,
@@ -152,8 +153,10 @@ where
                     Render,
                     (
                         prepare_previous_view_projection_uniforms,
-                        batch_and_prepare_render_phase::<Opaque3dPrepass, MeshPipeline>,
-                        batch_and_prepare_render_phase::<AlphaMask3dPrepass, MeshPipeline>,
+                        prepare_render_phase::<Opaque3dPrepass, MeshPipeline>,
+                        batch_render_phase::<Opaque3dPrepass, MeshPipeline>,
+                        prepare_render_phase::<AlphaMask3dPrepass, MeshPipeline>,
+                        batch_render_phase::<AlphaMask3dPrepass, MeshPipeline>,
                     )
                         .in_set(RenderSet::PrepareResources),
                 );
@@ -843,8 +846,6 @@ pub fn queue_prepass_material_meshes<M: Material>(
                                 draw_function: opaque_draw_deferred,
                                 pipeline_id,
                                 asset_id: mesh_instance.mesh_asset_id,
-                                batch_range: 0..1,
-                                dynamic_offset: None,
                             });
                     } else if let Some(opaque_phase) = opaque_phase.as_mut() {
                         opaque_phase.add(Opaque3dPrepass {
@@ -852,8 +853,6 @@ pub fn queue_prepass_material_meshes<M: Material>(
                             draw_function: opaque_draw_prepass,
                             pipeline_id,
                             asset_id: mesh_instance.mesh_asset_id,
-                            batch_range: 0..1,
-                            dynamic_offset: None,
                         });
                     }
                 }
@@ -867,8 +866,6 @@ pub fn queue_prepass_material_meshes<M: Material>(
                                 draw_function: alpha_mask_draw_deferred,
                                 pipeline_id,
                                 asset_id: mesh_instance.mesh_asset_id,
-                                batch_range: 0..1,
-                                dynamic_offset: None,
                             });
                     } else if let Some(alpha_mask_phase) = alpha_mask_phase.as_mut() {
                         alpha_mask_phase.add(AlphaMask3dPrepass {
@@ -876,8 +873,6 @@ pub fn queue_prepass_material_meshes<M: Material>(
                             draw_function: alpha_mask_draw_prepass,
                             pipeline_id,
                             asset_id: mesh_instance.mesh_asset_id,
-                            batch_range: 0..1,
-                            dynamic_offset: None,
                         });
                     }
                 }

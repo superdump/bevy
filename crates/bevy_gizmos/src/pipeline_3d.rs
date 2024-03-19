@@ -337,8 +337,6 @@ fn queue_line_gizmos_3d(
                 draw_function,
                 pipeline,
                 distance: 0.,
-                batch_range: 0..1,
-                dynamic_offset: None,
             });
         }
     }
@@ -426,8 +424,6 @@ fn queue_line_joint_gizmos_3d(
                 draw_function,
                 pipeline,
                 distance: 0.,
-                batch_range: 0..1,
-                dynamic_offset: None,
             });
         }
     }

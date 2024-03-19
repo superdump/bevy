@@ -31,15 +31,17 @@ mod rangefinder;
 
 pub use draw::*;
 pub use draw_state::*;
-use nonmax::NonMaxU32;
 pub use rangefinder::*;
 
-use crate::render_resource::{CachedRenderPipelineId, PipelineCache};
+use crate::{
+    batching::PhaseItemRanges,
+    render_resource::{CachedRenderPipelineId, PipelineCache},
+};
 use bevy_ecs::{
     prelude::*,
     system::{lifetimeless::SRes, SystemParamItem},
 };
-use std::{ops::Range, slice::SliceIndex};
+use std::slice::SliceIndex;
 
 /// A collection of all rendering instructions, that will be executed by the GPU, for a
 /// single render phase for a single view.
@@ -107,10 +109,16 @@ impl<I: PhaseItem> RenderPhase<I> {
         let mut draw_functions = draw_functions.write();
         draw_functions.prepare(world);
 
+        let ranges = &world
+            .entity(view)
+            .get::<PhaseItemRanges<I>>()
+            .expect("Failed to get phase item batch ranges")
+            .ranges;
+
         let mut index = 0;
         while index < items.len() {
             let item = &items[index];
-            let batch_range = item.batch_range();
+            let batch_range = ranges.get(&item.entity()).unwrap_or(&(0..1));
             if batch_range.is_empty() {
                 index += 1;
             } else {
@@ -170,15 +178,6 @@ pub trait PhaseItem: Sized + Send + Sync + 'static {
     fn sort(items: &mut [Self]) {
         items.sort_unstable_by_key(|item| item.sort_key());
     }
-
-    /// The range of instances that the batch covers. After doing a batched draw, batch range
-    /// length phase items will be skipped. This design is to avoid having to restructure the
-    /// render phase unnecessarily.
-    fn batch_range(&self) -> &Range<u32>;
-    fn batch_range_mut(&mut self) -> &mut Range<u32>;
-
-    fn dynamic_offset(&self) -> Option<NonMaxU32>;
-    fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32>;
 }
 
 /// A [`PhaseItem`] item, that automatically sets the appropriate render pipeline,

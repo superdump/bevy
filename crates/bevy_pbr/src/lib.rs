@@ -364,7 +364,7 @@ impl Plugin for PbrPlugin {
         render_app.ignore_ambiguity(
             bevy_render::Render,
             bevy_core_pipeline::core_3d::prepare_core_3d_transmission_textures,
-            bevy_render::batching::batch_and_prepare_render_phase::<
+            bevy_render::batching::batch_render_phase::<
                 bevy_core_pipeline::core_3d::Transmissive3d,
                 MeshPipeline,
             >,

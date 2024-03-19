@@ -3,6 +3,7 @@ use bevy_ecs::entity::EntityHashMap;
 use bevy_ecs::prelude::*;
 use bevy_math::{Mat4, UVec3, UVec4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 use bevy_render::{
+    batching::{PhaseItemOffsetCalculator, PhaseItemOffsets, PhaseItemRanges},
     camera::Camera,
     diagnostic::RecordDiagnostics,
     mesh::Mesh,
@@ -20,8 +21,7 @@ use bevy_transform::{components::GlobalTransform, prelude::Transform};
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::info_span;
 use bevy_utils::tracing::{error, warn};
-use nonmax::NonMaxU32;
-use std::{hash::Hash, num::NonZeroU64, ops::Range};
+use std::{hash::Hash, num::NonZeroU64};
 
 use crate::*;
 
@@ -698,6 +698,7 @@ pub fn prepare_lights(
     )>,
     directional_lights: Query<(Entity, &ExtractedDirectionalLight)>,
 ) {
+    let limits = render_device.limits();
     let views_iter = views.iter();
     let views_count = views_iter.len();
     let Some(mut view_gpu_lights_writer) =
@@ -1058,6 +1059,9 @@ pub fn prepare_lights(
                         },
                         *frustum,
                         RenderPhase::<Shadow>::default(),
+                        PhaseItemRanges::<Shadow>::default(),
+                        PhaseItemOffsets::<Shadow>::default(),
+                        PhaseItemOffsetCalculator::<MeshUniform, Shadow>::new(&limits),
                         LightEntity::Point {
                             light_entity,
                             face_index,
@@ -1713,8 +1717,6 @@ pub fn queue_shadows<M: Material>(
                     pipeline: pipeline_id,
                     entity,
                     distance: 0.0, // TODO: sort front-to-back
-                    batch_range: 0..1,
-                    dynamic_offset: None,
                 });
             }
         }
@@ -1726,8 +1728,6 @@ pub struct Shadow {
     pub entity: Entity,
     pub pipeline: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
-    pub batch_range: Range<u32>,
-    pub dynamic_offset: Option<NonMaxU32>,
 }
 
 impl PhaseItem for Shadow {
@@ -1754,26 +1754,6 @@ impl PhaseItem for Shadow {
         // Grouping all draw commands using the same pipeline together performs
         // better than rebinding everything at a high rate.
         radsort::sort_by_key(items, |item| item.sort_key());
-    }
-
-    #[inline]
-    fn batch_range(&self) -> &Range<u32> {
-        &self.batch_range
-    }
-
-    #[inline]
-    fn batch_range_mut(&mut self) -> &mut Range<u32> {
-        &mut self.batch_range
-    }
-
-    #[inline]
-    fn dynamic_offset(&self) -> Option<NonMaxU32> {
-        self.dynamic_offset
-    }
-
-    #[inline]
-    fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
-        &mut self.dynamic_offset
     }
 }
 

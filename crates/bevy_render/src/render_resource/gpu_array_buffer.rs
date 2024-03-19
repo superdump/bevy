@@ -29,7 +29,7 @@ impl<T: ShaderType + ShaderSize + WriteInto + Clone> GpuArrayBufferable for T {}
 /// * [`DynamicUniformBuffer`](crate::render_resource::DynamicUniformBuffer)
 /// * [`BufferVec`](crate::render_resource::BufferVec)
 /// * [`Texture`](crate::render_resource::Texture)
-#[derive(Resource)]
+#[derive(Component, Resource)]
 pub enum GpuArrayBuffer<T: GpuArrayBufferable> {
     Uniform(BatchedUniformBuffer<T>),
     Storage(StorageBuffer<Vec<T>>),

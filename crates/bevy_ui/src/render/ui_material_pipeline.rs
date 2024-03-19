@@ -11,6 +11,7 @@ use bevy_ecs::{
 };
 use bevy_math::{Mat4, Rect, Vec2, Vec4Swizzles};
 use bevy_render::{
+    batching::PhaseItemRanges,
     extract_component::ExtractComponentPlugin,
     globals::{GlobalsBuffer, GlobalsUniform},
     render_asset::RenderAssets,
@@ -460,7 +461,10 @@ pub fn prepare_uimaterial_nodes<M: UiMaterial>(
     view_uniforms: Res<ViewUniforms>,
     globals_buffer: Res<GlobalsBuffer>,
     ui_material_pipeline: Res<UiMaterialPipeline<M>>,
-    mut phases: Query<&mut RenderPhase<TransparentUi>>,
+    mut phases: Query<(
+        &RenderPhase<TransparentUi>,
+        &mut PhaseItemRanges<TransparentUi>,
+    )>,
     mut previous_len: Local<usize>,
 ) {
     if let (Some(view_binding), Some(globals_binding)) = (
@@ -477,19 +481,19 @@ pub fn prepare_uimaterial_nodes<M: UiMaterial>(
         ));
         let mut index = 0;
 
-        for mut ui_phase in &mut phases {
-            let mut batch_item_index = 0;
+        for (ui_phase, mut ranges) in &mut phases {
+            let mut batch_item_entity = None;
             let mut batch_shader_handle = AssetId::invalid();
 
             for item_index in 0..ui_phase.items.len() {
-                let item = &mut ui_phase.items[item_index];
+                let item = &ui_phase.items[item_index];
                 if let Some(extracted_uinode) = extracted_uinodes.uinodes.get(item.entity) {
                     let mut existing_batch = batches
                         .last_mut()
                         .filter(|_| batch_shader_handle == extracted_uinode.material);
 
                     if existing_batch.is_none() {
-                        batch_item_index = item_index;
+                        batch_item_entity = Some(item.entity);
                         batch_shader_handle = extracted_uinode.material;
 
                         let new_batch = UiMaterialBatch {
@@ -588,7 +592,11 @@ pub fn prepare_uimaterial_nodes<M: UiMaterial>(
 
                     index += QUAD_INDICES.len() as u32;
                     existing_batch.unwrap().1.range.end = index;
-                    ui_phase.items[batch_item_index].batch_range_mut().end += 1;
+                    ranges
+                        .ranges
+                        .entry(batch_item_entity.expect("No batch item entity"))
+                        .or_default()
+                        .end += 1;
                 } else {
                     batch_shader_handle = AssetId::invalid();
                 }
@@ -791,8 +799,6 @@ pub fn queue_ui_material_nodes<M: UiMaterial>(
                 FloatOrd(extracted_uinode.stack_index as f32),
                 entity.index(),
             ),
-            batch_range: 0..0,
-            dynamic_offset: None,
         });
     }
 }

@@ -17,6 +17,7 @@ use bevy_ecs::{
 };
 use bevy_math::{Affine3A, Quat, Rect, Vec2, Vec4};
 use bevy_render::{
+    batching::PhaseItemRanges,
     render_asset::RenderAssets,
     render_phase::{
         DrawFunctions, PhaseItem, RenderCommand, RenderCommandResult, RenderPhase, SetItemPipeline,
@@ -530,9 +531,6 @@ pub fn queue_sprites(
                     pipeline: colored_pipeline,
                     entity: *entity,
                     sort_key,
-                    // batch_range and dynamic_offset will be calculated in prepare_sprites
-                    batch_range: 0..0,
-                    dynamic_offset: None,
                 });
             } else {
                 transparent_phase.add(Transparent2d {
@@ -540,9 +538,6 @@ pub fn queue_sprites(
                     pipeline,
                     entity: *entity,
                     sort_key,
-                    // batch_range and dynamic_offset will be calculated in prepare_sprites
-                    batch_range: 0..0,
-                    dynamic_offset: None,
                 });
             }
         }
@@ -561,7 +556,10 @@ pub fn prepare_sprites(
     mut image_bind_groups: ResMut<ImageBindGroups>,
     gpu_images: Res<RenderAssets<Image>>,
     extracted_sprites: Res<ExtractedSprites>,
-    mut phases: Query<&mut RenderPhase<Transparent2d>>,
+    mut phases: Query<(
+        &RenderPhase<Transparent2d>,
+        &mut PhaseItemRanges<Transparent2d>,
+    )>,
     events: Res<SpriteAssetEvents>,
 ) {
     // If an image has changed, the GpuImage has (probably) changed
@@ -594,8 +592,8 @@ pub fn prepare_sprites(
 
         let image_bind_groups = &mut *image_bind_groups;
 
-        for mut transparent_phase in &mut phases {
-            let mut batch_item_index = 0;
+        for (transparent_phase, mut ranges) in &mut phases {
+            let mut batch_item_entity = None;
             let mut batch_image_size = Vec2::ZERO;
             let mut batch_image_handle = AssetId::invalid();
 
@@ -603,8 +601,8 @@ pub fn prepare_sprites(
             // Spawn an entity with a `SpriteBatch` component for each possible batch.
             // Compatible items share the same entity.
             for item_index in 0..transparent_phase.items.len() {
-                let item = &transparent_phase.items[item_index];
-                let Some(extracted_sprite) = extracted_sprites.sprites.get(&item.entity) else {
+                let entity = transparent_phase.items[item_index].entity();
+                let Some(extracted_sprite) = extracted_sprites.sprites.get(&entity) else {
                     // If there is a phase item that is not a sprite, then we must start a new
                     // batch to draw the other phase item(s) and to respect draw order. This can be
                     // done by invalidating the batch_image_handle
@@ -685,10 +683,10 @@ pub fn prepare_sprites(
                     ));
 
                 if batch_image_changed {
-                    batch_item_index = item_index;
+                    batch_item_entity = Some(entity);
 
                     batches.push((
-                        item.entity,
+                        entity,
                         SpriteBatch {
                             image_handle_id: batch_image_handle,
                             range: index..index,
@@ -696,8 +694,10 @@ pub fn prepare_sprites(
                     ));
                 }
 
-                transparent_phase.items[batch_item_index]
-                    .batch_range_mut()
+                ranges
+                    .ranges
+                    .entry(batch_item_entity.expect("batch item entity not found"))
+                    .or_insert(0..0)
                     .end += 1;
                 batches.last_mut().unwrap().1.range.end += 1;
                 index += 1;

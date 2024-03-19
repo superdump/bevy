@@ -1,8 +1,6 @@
 pub mod copy_lighting_id;
 pub mod node;
 
-use std::ops::Range;
-
 use bevy_asset::AssetId;
 use bevy_ecs::prelude::*;
 use bevy_render::{
@@ -10,7 +8,6 @@ use bevy_render::{
     render_phase::{CachedRenderPipelinePhaseItem, DrawFunctionId, PhaseItem},
     render_resource::{CachedRenderPipelineId, TextureFormat},
 };
-use nonmax::NonMaxU32;
 
 pub const DEFERRED_PREPASS_FORMAT: TextureFormat = TextureFormat::Rgba32Uint;
 pub const DEFERRED_LIGHTING_PASS_ID_FORMAT: TextureFormat = TextureFormat::R8Uint;
@@ -26,8 +23,6 @@ pub struct Opaque3dDeferred {
     pub asset_id: AssetId<Mesh>,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
-    pub batch_range: Range<u32>,
-    pub dynamic_offset: Option<NonMaxU32>,
 }
 
 impl PhaseItem for Opaque3dDeferred {
@@ -53,26 +48,6 @@ impl PhaseItem for Opaque3dDeferred {
     fn sort(items: &mut [Self]) {
         items.sort_unstable_by_key(Self::sort_key);
     }
-
-    #[inline]
-    fn batch_range(&self) -> &Range<u32> {
-        &self.batch_range
-    }
-
-    #[inline]
-    fn batch_range_mut(&mut self) -> &mut Range<u32> {
-        &mut self.batch_range
-    }
-
-    #[inline]
-    fn dynamic_offset(&self) -> Option<NonMaxU32> {
-        self.dynamic_offset
-    }
-
-    #[inline]
-    fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
-        &mut self.dynamic_offset
-    }
 }
 
 impl CachedRenderPipelinePhaseItem for Opaque3dDeferred {
@@ -92,8 +67,6 @@ pub struct AlphaMask3dDeferred {
     pub entity: Entity,
     pub pipeline_id: CachedRenderPipelineId,
     pub draw_function: DrawFunctionId,
-    pub batch_range: Range<u32>,
-    pub dynamic_offset: Option<NonMaxU32>,
 }
 
 impl PhaseItem for AlphaMask3dDeferred {
@@ -118,26 +91,6 @@ impl PhaseItem for AlphaMask3dDeferred {
     #[inline]
     fn sort(items: &mut [Self]) {
         items.sort_unstable_by_key(Self::sort_key);
-    }
-
-    #[inline]
-    fn batch_range(&self) -> &Range<u32> {
-        &self.batch_range
-    }
-
-    #[inline]
-    fn batch_range_mut(&mut self) -> &mut Range<u32> {
-        &mut self.batch_range
-    }
-
-    #[inline]
-    fn dynamic_offset(&self) -> Option<NonMaxU32> {
-        self.dynamic_offset
-    }
-
-    #[inline]
-    fn dynamic_offset_mut(&mut self) -> &mut Option<NonMaxU32> {
-        &mut self.dynamic_offset
     }
 }
 

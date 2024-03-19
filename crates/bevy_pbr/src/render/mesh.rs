@@ -1,6 +1,8 @@
 use bevy_asset::{load_internal_asset, AssetId};
 use bevy_core_pipeline::{
-    core_3d::{AlphaMask3d, Opaque3d, Transmissive3d, Transparent3d, CORE_3D_DEPTH_FORMAT},
+    core_3d::{
+        AlphaMask3d, Camera3d, Opaque3d, Transmissive3d, Transparent3d, CORE_3D_DEPTH_FORMAT,
+    },
     deferred::{AlphaMask3dDeferred, Opaque3dDeferred},
 };
 use bevy_derive::{Deref, DerefMut};
@@ -13,9 +15,11 @@ use bevy_ecs::{
 use bevy_math::{Affine3, Rect, UVec2, Vec4};
 use bevy_render::{
     batching::{
-        batch_and_prepare_render_phase, write_batched_instance_buffer, GetBatchData,
-        NoAutomaticBatching,
+        batch_render_phase, prepare_render_phase, write_batched_instance_buffer, GetBatchData,
+        GetPerInstanceData, NoAutomaticBatching, PhaseItemOffsetCalculator, PhaseItemOffsets,
+        PhaseItemRanges,
     },
+    camera::Camera,
     mesh::*,
     render_asset::RenderAssets,
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
@@ -119,19 +123,31 @@ impl Plugin for MeshRenderPlugin {
                 .allow_ambiguous_resource::<GpuArrayBuffer<MeshUniform>>()
                 .add_systems(
                     ExtractSchedule,
-                    (extract_meshes, extract_skins, extract_morphs),
+                    (
+                        extract_meshes,
+                        extract_skins,
+                        extract_morphs,
+                        extract_mesh_uniform_camera_phases,
+                    ),
                 )
                 .add_systems(
                     Render,
                     (
                         (
-                            batch_and_prepare_render_phase::<Opaque3d, MeshPipeline>,
-                            batch_and_prepare_render_phase::<Transmissive3d, MeshPipeline>,
-                            batch_and_prepare_render_phase::<Transparent3d, MeshPipeline>,
-                            batch_and_prepare_render_phase::<AlphaMask3d, MeshPipeline>,
-                            batch_and_prepare_render_phase::<Shadow, MeshPipeline>,
-                            batch_and_prepare_render_phase::<Opaque3dDeferred, MeshPipeline>,
-                            batch_and_prepare_render_phase::<AlphaMask3dDeferred, MeshPipeline>,
+                            prepare_render_phase::<Opaque3d, MeshPipeline>,
+                            batch_render_phase::<Opaque3d, MeshPipeline>,
+                            prepare_render_phase::<Transmissive3d, MeshPipeline>,
+                            batch_render_phase::<Transmissive3d, MeshPipeline>,
+                            prepare_render_phase::<Transparent3d, MeshPipeline>,
+                            batch_render_phase::<Transparent3d, MeshPipeline>,
+                            prepare_render_phase::<AlphaMask3d, MeshPipeline>,
+                            batch_render_phase::<AlphaMask3d, MeshPipeline>,
+                            prepare_render_phase::<Shadow, MeshPipeline>,
+                            batch_render_phase::<Shadow, MeshPipeline>,
+                            prepare_render_phase::<Opaque3dDeferred, MeshPipeline>,
+                            batch_render_phase::<Opaque3dDeferred, MeshPipeline>,
+                            prepare_render_phase::<AlphaMask3dDeferred, MeshPipeline>,
+                            batch_render_phase::<AlphaMask3dDeferred, MeshPipeline>,
                         )
                             .in_set(RenderSet::PrepareResources),
                         write_batched_instance_buffer::<MeshPipeline>
@@ -174,6 +190,29 @@ impl Plugin for MeshRenderPlugin {
             Shader::from_wgsl_with_defs,
             mesh_bindings_shader_defs
         );
+    }
+}
+
+pub fn extract_mesh_uniform_camera_phases(
+    mut commands: Commands,
+    cameras_3d: Extract<Query<(Entity, &Camera), With<Camera3d>>>,
+    device: Res<RenderDevice>,
+) {
+    let device = device.into_inner();
+    let limits = device.limits();
+    for (entity, camera) in &cameras_3d {
+        if camera.is_active {
+            commands.get_or_spawn(entity).insert((
+                PhaseItemOffsetCalculator::<MeshUniform, Opaque3d>::new(&limits),
+                GpuArrayBuffer::<MeshUniform>::new(device),
+                PhaseItemOffsetCalculator::<MeshUniform, AlphaMask3d>::new(&limits),
+                GpuArrayBuffer::<MeshUniform>::new(device),
+                PhaseItemOffsetCalculator::<MeshUniform, Transmissive3d>::new(&limits),
+                GpuArrayBuffer::<MeshUniform>::new(device),
+                PhaseItemOffsetCalculator::<MeshUniform, Transparent3d>::new(&limits),
+                GpuArrayBuffer::<MeshUniform>::new(device),
+            ));
+        }
     }
 }
 
@@ -442,31 +481,42 @@ impl MeshPipeline {
     }
 }
 
+impl GetPerInstanceData for MeshPipeline {
+    type Param = (SRes<RenderMeshInstances>, SRes<RenderLightmaps>);
+
+    type InstanceData = MeshUniform;
+
+    fn get_instance_data(
+        (mesh_instances, lightmaps): &SystemParamItem<Self::Param>,
+        entity: Entity,
+    ) -> Option<Self::InstanceData> {
+        let mesh_instance = mesh_instances.get(&entity)?;
+        let maybe_lightmap = lightmaps.render_lightmaps.get(&entity);
+
+        Some(MeshUniform::new(
+            &mesh_instance.transforms,
+            maybe_lightmap.map(|lightmap| lightmap.uv_rect),
+        ))
+    }
+}
+
 impl GetBatchData for MeshPipeline {
     type Param = (SRes<RenderMeshInstances>, SRes<RenderLightmaps>);
     // The material bind group ID, the mesh ID, and the lightmap ID,
     // respectively.
-    type CompareData = (MaterialBindGroupId, AssetId<Mesh>, Option<AssetId<Image>>);
-
-    type BufferData = MeshUniform;
+    type BatchData = (MaterialBindGroupId, AssetId<Mesh>, Option<AssetId<Image>>);
 
     fn get_batch_data(
         (mesh_instances, lightmaps): &SystemParamItem<Self::Param>,
         entity: Entity,
-    ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
+    ) -> Option<Self::BatchData> {
         let mesh_instance = mesh_instances.get(&entity)?;
         let maybe_lightmap = lightmaps.render_lightmaps.get(&entity);
 
-        Some((
-            MeshUniform::new(
-                &mesh_instance.transforms,
-                maybe_lightmap.map(|lightmap| lightmap.uv_rect),
-            ),
-            mesh_instance.should_batch().then_some((
-                mesh_instance.material_bind_group_id.get(),
-                mesh_instance.mesh_asset_id,
-                maybe_lightmap.map(|lightmap| lightmap.image),
-            )),
+        mesh_instance.should_batch().then_some((
+            mesh_instance.material_bind_group_id.get(),
+            mesh_instance.mesh_asset_id,
+            maybe_lightmap.map(|lightmap| lightmap.image),
         ))
     }
 }
@@ -1069,13 +1119,13 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
         SRes<MorphIndices>,
         SRes<RenderLightmaps>,
     );
-    type ViewQuery = ();
+    type ViewQuery = Read<PhaseItemOffsets<P>>;
     type ItemQuery = ();
 
     #[inline]
     fn render<'w>(
         item: &P,
-        _view: (),
+        offsets: ROQueryItem<'w, Self::ViewQuery>,
         _item_query: Option<()>,
         (bind_groups, mesh_instances, skin_indices, morph_indices, lightmaps): SystemParamItem<
             'w,
@@ -1118,8 +1168,8 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
 
         let mut dynamic_offsets: [u32; 3] = Default::default();
         let mut offset_count = 0;
-        if let Some(dynamic_offset) = item.dynamic_offset() {
-            dynamic_offsets[offset_count] = dynamic_offset.get();
+        if let Some(dynamic_offset) = offsets.offsets.get(&item.entity()).copied() {
+            dynamic_offsets[offset_count] = dynamic_offset;
             offset_count += 1;
         }
         if let Some(skin_index) = skin_index {
@@ -1139,12 +1189,12 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
 pub struct DrawMesh;
 impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
     type Param = (SRes<RenderAssets<Mesh>>, SRes<RenderMeshInstances>);
-    type ViewQuery = ();
+    type ViewQuery = Read<PhaseItemRanges<P>>;
     type ItemQuery = ();
     #[inline]
     fn render<'w>(
         item: &P,
-        _view: (),
+        batch_ranges: ROQueryItem<'w, Self::ViewQuery>,
         _item_query: Option<()>,
         (meshes, mesh_instances): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
@@ -1161,7 +1211,10 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
 
         pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
 
-        let batch_range = item.batch_range();
+        let batch_range = batch_ranges
+            .ranges
+            .get(&item.entity())
+            .expect("No batch range");
         #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
         pass.set_push_constants(
             ShaderStages::VERTEX,

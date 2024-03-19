@@ -7,8 +7,9 @@ use bevy_core_pipeline::core_2d::graph::{Core2d, Node2d};
 use bevy_core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy_core_pipeline::{core_2d::Camera2d, core_3d::Camera3d};
 use bevy_hierarchy::Parent;
-use bevy_render::{render_phase::PhaseItem, view::ViewVisibility, ExtractSchedule, Render};
-use bevy_sprite::{SpriteAssetEvents, TextureAtlas};
+use bevy_render::batching::{PhaseItemOffsetCalculator, PhaseItemOffsets, PhaseItemRanges};
+use bevy_render::{view::ViewVisibility, ExtractSchedule, Render};
+use bevy_sprite::{Mesh2dUniform, SpriteAssetEvents, TextureAtlas};
 pub use pipeline::*;
 pub use render_pass::*;
 pub use ui_material_pipeline::*;
@@ -535,7 +536,9 @@ pub fn extract_default_ui_camera_view<T: Component>(
     mut commands: Commands,
     ui_scale: Extract<Res<UiScale>>,
     query: Extract<Query<(Entity, &Camera), With<T>>>,
+    device: Res<RenderDevice>,
 ) {
+    let limits = device.limits();
     let scale = ui_scale.0.recip();
     for (entity, camera) in &query {
         // ignore inactive cameras
@@ -586,6 +589,9 @@ pub fn extract_default_ui_camera_view<T: Component>(
             commands.get_or_spawn(entity).insert((
                 DefaultCameraView(default_camera_view),
                 RenderPhase::<TransparentUi>::default(),
+                PhaseItemRanges::<TransparentUi>::default(),
+                PhaseItemOffsets::<TransparentUi>::default(),
+                PhaseItemOffsetCalculator::<Mesh2dUniform, TransparentUi>::new(&limits),
             ));
         }
     }
@@ -758,9 +764,6 @@ pub fn queue_uinodes(
                 FloatOrd(extracted_uinode.stack_index as f32),
                 entity.index(),
             ),
-            // batch_range will be calculated in prepare_uinodes
-            batch_range: 0..0,
-            dynamic_offset: None,
         });
     }
 }
@@ -781,7 +784,10 @@ pub fn prepare_uinodes(
     ui_pipeline: Res<UiPipeline>,
     mut image_bind_groups: ResMut<UiImageBindGroups>,
     gpu_images: Res<RenderAssets<Image>>,
-    mut phases: Query<&mut RenderPhase<TransparentUi>>,
+    mut phases: Query<(
+        &RenderPhase<TransparentUi>,
+        &mut PhaseItemRanges<TransparentUi>,
+    )>,
     events: Res<SpriteAssetEvents>,
     mut previous_len: Local<usize>,
 ) {
@@ -810,12 +816,12 @@ pub fn prepare_uinodes(
 
         // Vertex buffer index
         let mut index = 0;
-        for mut ui_phase in &mut phases {
-            let mut batch_item_index = 0;
+        for (ui_phase, mut ranges) in &mut phases {
+            let mut batch_item_entity = None;
             let mut batch_image_handle = AssetId::invalid();
 
             for item_index in 0..ui_phase.items.len() {
-                let item = &mut ui_phase.items[item_index];
+                let item = &ui_phase.items[item_index];
                 if let Some(extracted_uinode) = extracted_uinodes.uinodes.get(&item.entity) {
                     let mut existing_batch = batches.last_mut();
 
@@ -828,7 +834,7 @@ pub fn prepare_uinodes(
                             != Some(extracted_uinode.camera_entity)
                     {
                         if let Some(gpu_image) = gpu_images.get(extracted_uinode.image) {
-                            batch_item_index = item_index;
+                            batch_item_entity = Some(item.entity);
                             batch_image_handle = extracted_uinode.image;
 
                             let new_batch = UiBatch {
@@ -996,7 +1002,11 @@ pub fn prepare_uinodes(
                     }
                     index += QUAD_INDICES.len() as u32;
                     existing_batch.unwrap().1.range.end = index;
-                    ui_phase.items[batch_item_index].batch_range_mut().end += 1;
+                    ranges
+                        .ranges
+                        .entry(batch_item_entity.expect("No batch item entity"))
+                        .or_default()
+                        .end += 1;
                 } else {
                     batch_image_handle = AssetId::invalid();
                 }

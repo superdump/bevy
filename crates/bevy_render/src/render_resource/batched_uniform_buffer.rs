@@ -30,34 +30,68 @@ const MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE: u32 = 1 << 20;
 #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
 const MAX_REASONABLE_UNIFORM_BUFFER_BINDING_SIZE: u32 = 1 << 12;
 
-pub struct BatchedUniformOffsetCalculator {
+pub struct DynamicOffsetCalculator<T: GpuArrayBufferable> {
     index: u32,
+    /// capacity 0 means not batched
+    capacity: u32,
     offset: u32,
     stride: u32,
+    marker: PhantomData<T>,
 }
 
-impl BatchedUniformOffsetCalculator {
-    pub fn new(stride: u32) -> Self {
+impl<T: GpuArrayBufferable> DynamicOffsetCalculator<T> {
+    pub fn new(limits: &Limits) -> Self {
+        let capacity = if limits.max_storage_buffers_per_shader_stage == 0 {
+            BatchedUniformBuffer::<T>::batch_size(limits)
+        } else {
+            0
+        };
+        let alignment = limits.min_uniform_buffer_offset_alignment;
+
         Self {
             index: 0,
+            capacity: capacity as u32,
             offset: 0,
-            stride,
+            stride: align_to_next(
+                MaxCapacityArray::<Vec<T>>(Vec::new(), capacity)
+                    .size()
+                    .get(),
+                alignment as u64,
+            ) as u32,
+            marker: PhantomData,
         }
     }
 
+    #[inline]
     pub fn clear(&mut self) {
         self.index = 0;
         self.offset = 0;
     }
 
     #[inline]
-    pub fn offset(&self) -> u32 {
-        self.offset
+    pub fn increment(&mut self) {
+        self.index += 1;
+        if self.capacity > 0 && self.index % self.capacity == 0 {
+            self.flush();
+        }
     }
 
     #[inline]
-    pub fn next_offset(&mut self) {
+    pub fn flush(&mut self) {
+        self.index = 0;
         self.offset += self.stride;
+    }
+
+    #[inline]
+    pub fn indices(&self) -> (u32, Option<NonMaxU32>) {
+        (
+            self.index,
+            if self.capacity == 0 {
+                None
+            } else {
+                NonMaxU32::new(self.offset)
+            },
+        )
     }
 }
 
@@ -75,7 +109,7 @@ pub struct BatchedUniformBuffer<T: GpuArrayBufferable> {
     // then it is written into the `DynamicUniformBuffer`, cleared, and new T
     // are gathered here, and so on for each batch.
     temp: MaxCapacityArray<Vec<T>>,
-    offset_calculator: BatchedUniformOffsetCalculator,
+    offset_calculator: DynamicOffsetCalculator<T>,
 }
 
 impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
@@ -91,15 +125,11 @@ impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
         let alignment = limits.min_uniform_buffer_offset_alignment;
 
         let temp = MaxCapacityArray(Vec::with_capacity(capacity), capacity);
-        let temp_stride = temp.size().get();
 
         Self {
             uniforms: DynamicUniformBuffer::new_with_alignment(alignment as u64),
             temp,
-            offset_calculator: BatchedUniformOffsetCalculator::new(align_to_next(
-                temp_stride,
-                alignment as u64,
-            ) as u32),
+            offset_calculator: DynamicOffsetCalculator::<T>::new(&limits),
         }
     }
 
@@ -115,12 +145,14 @@ impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
     }
 
     pub fn push(&mut self, component: T) -> GpuArrayBufferIndex<T> {
+        let (index, dynamic_offset) = self.offset_calculator.indices();
         let result = GpuArrayBufferIndex {
-            index: self.temp.0.len() as u32,
-            dynamic_offset: NonMaxU32::new(self.offset_calculator.offset()),
+            index,
+            dynamic_offset,
             element_type: PhantomData,
         };
         self.temp.0.push(component);
+        self.offset_calculator.increment();
         if self.temp.0.len() == self.temp.1 {
             self.flush();
         }
@@ -130,7 +162,7 @@ impl<T: GpuArrayBufferable> BatchedUniformBuffer<T> {
     pub fn flush(&mut self) {
         self.uniforms.push(&self.temp);
 
-        self.offset_calculator.next_offset();
+        self.offset_calculator.flush();
 
         self.temp.0.clear();
     }

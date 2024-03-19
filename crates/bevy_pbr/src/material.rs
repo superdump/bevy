@@ -660,8 +660,6 @@ pub fn queue_material_meshes<M: Material>(
                             draw_function: draw_transmissive_pbr,
                             pipeline: pipeline_id,
                             distance,
-                            batch_range: 0..1,
-                            dynamic_offset: None,
                         });
                     } else if forward {
                         opaque_phase.add(Opaque3d {
@@ -669,8 +667,6 @@ pub fn queue_material_meshes<M: Material>(
                             draw_function: draw_opaque_pbr,
                             pipeline: pipeline_id,
                             asset_id: mesh_instance.mesh_asset_id,
-                            batch_range: 0..1,
-                            dynamic_offset: None,
                         });
                     }
                 }
@@ -684,8 +680,6 @@ pub fn queue_material_meshes<M: Material>(
                             draw_function: draw_transmissive_pbr,
                             pipeline: pipeline_id,
                             distance,
-                            batch_range: 0..1,
-                            dynamic_offset: None,
                         });
                     } else if forward {
                         alpha_mask_phase.add(AlphaMask3d {
@@ -693,8 +687,6 @@ pub fn queue_material_meshes<M: Material>(
                             draw_function: draw_alpha_mask_pbr,
                             pipeline: pipeline_id,
                             asset_id: mesh_instance.mesh_asset_id,
-                            batch_range: 0..1,
-                            dynamic_offset: None,
                         });
                     }
                 }
@@ -710,8 +702,6 @@ pub fn queue_material_meshes<M: Material>(
                         draw_function: draw_transparent_pbr,
                         pipeline: pipeline_id,
                         distance,
-                        batch_range: 0..1,
-                        dynamic_offset: None,
                     });
                 }
             }

@@ -1,7 +1,7 @@
 use bevy_app::Plugin;
 use bevy_asset::{load_internal_asset, AssetId, Handle};
 
-use bevy_core_pipeline::core_2d::Transparent2d;
+use bevy_core_pipeline::core_2d::{Camera2d, Transparent2d};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::entity::EntityHashMap;
 use bevy_ecs::{
@@ -11,11 +11,15 @@ use bevy_ecs::{
 };
 use bevy_math::{Affine3, Vec4};
 use bevy_reflect::{std_traits::ReflectDefault, Reflect};
+use bevy_render::batching::{
+    prepare_render_phase, GetPerInstanceData, PhaseItemOffsetCalculator, PhaseItemOffsets,
+    PhaseItemRanges,
+};
+use bevy_render::camera::Camera;
 use bevy_render::mesh::MeshVertexBufferLayoutRef;
 use bevy_render::{
     batching::{
-        batch_and_prepare_render_phase, write_batched_instance_buffer, GetBatchData,
-        NoAutomaticBatching,
+        batch_render_phase, write_batched_instance_buffer, GetBatchData, NoAutomaticBatching,
     },
     globals::{GlobalsBuffer, GlobalsUniform},
     mesh::{GpuBufferInfo, Mesh},
@@ -97,11 +101,17 @@ impl Plugin for Mesh2dRenderPlugin {
             render_app
                 .init_resource::<RenderMesh2dInstances>()
                 .init_resource::<SpecializedMeshPipelines<Mesh2dPipeline>>()
-                .add_systems(ExtractSchedule, extract_mesh2d)
+                .add_systems(
+                    ExtractSchedule,
+                    (extract_mesh2d, extract_mesh2d_uniform_camera_phases),
+                )
                 .add_systems(
                     Render,
                     (
-                        batch_and_prepare_render_phase::<Transparent2d, Mesh2dPipeline>
+                        (
+                            prepare_render_phase::<Transparent2d, Mesh2dPipeline>,
+                            batch_render_phase::<Transparent2d, Mesh2dPipeline>,
+                        )
                             .in_set(RenderSet::PrepareResources),
                         write_batched_instance_buffer::<Mesh2dPipeline>
                             .in_set(RenderSet::PrepareResourcesFlush),
@@ -141,6 +151,21 @@ impl Plugin for Mesh2dRenderPlugin {
             Shader::from_wgsl_with_defs,
             mesh_bindings_shader_defs
         );
+    }
+}
+
+pub fn extract_mesh2d_uniform_camera_phases(
+    mut commands: Commands,
+    cameras_2d: Extract<Query<(Entity, &Camera), With<Camera2d>>>,
+    device: Res<RenderDevice>,
+) {
+    let limits = device.limits();
+    for (entity, camera) in &cameras_2d {
+        if camera.is_active {
+            commands
+                .get_or_spawn(entity)
+                .insert(PhaseItemOffsetCalculator::<Mesh2dUniform, Transparent2d>::new(&limits));
+        }
     }
 }
 
@@ -338,22 +363,34 @@ impl Mesh2dPipeline {
     }
 }
 
+impl GetPerInstanceData for Mesh2dPipeline {
+    type Param = SRes<RenderMesh2dInstances>;
+
+    type InstanceData = Mesh2dUniform;
+
+    fn get_instance_data(
+        mesh_instances: &SystemParamItem<Self::Param>,
+        entity: Entity,
+    ) -> Option<Self::InstanceData> {
+        mesh_instances
+            .get(&entity)
+            .and_then(|mesh_instance| Some(Mesh2dUniform::from(&mesh_instance.transforms)))
+    }
+}
+
 impl GetBatchData for Mesh2dPipeline {
     type Param = SRes<RenderMesh2dInstances>;
-    type CompareData = (Material2dBindGroupId, AssetId<Mesh>);
-    type BufferData = Mesh2dUniform;
+
+    type BatchData = (Material2dBindGroupId, AssetId<Mesh>);
 
     fn get_batch_data(
         mesh_instances: &SystemParamItem<Self::Param>,
         entity: Entity,
-    ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
+    ) -> Option<Self::BatchData> {
         let mesh_instance = mesh_instances.get(&entity)?;
-        Some((
-            (&mesh_instance.transforms).into(),
-            mesh_instance.automatic_batching.then_some((
-                mesh_instance.material_bind_group_id,
-                mesh_instance.mesh_asset_id,
-            )),
+        mesh_instance.automatic_batching.then_some((
+            mesh_instance.material_bind_group_id,
+            mesh_instance.mesh_asset_id,
         ))
     }
 }
@@ -638,21 +675,21 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMesh2dViewBindGroup<I
 pub struct SetMesh2dBindGroup<const I: usize>;
 impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMesh2dBindGroup<I> {
     type Param = SRes<Mesh2dBindGroup>;
-    type ViewQuery = ();
+    type ViewQuery = Read<PhaseItemOffsets<P>>;
     type ItemQuery = ();
 
     #[inline]
     fn render<'w>(
         item: &P,
-        _view: (),
+        offsets: ROQueryItem<'w, Self::ViewQuery>,
         _item_query: Option<()>,
         mesh2d_bind_group: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let mut dynamic_offsets: [u32; 1] = Default::default();
         let mut offset_count = 0;
-        if let Some(dynamic_offset) = item.dynamic_offset() {
-            dynamic_offsets[offset_count] = dynamic_offset.get();
+        if let Some(dynamic_offset) = offsets.offsets.get(&item.entity()).copied() {
+            dynamic_offsets[offset_count] = dynamic_offset;
             offset_count += 1;
         }
         pass.set_bind_group(
@@ -667,13 +704,13 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMesh2dBindGroup<I> {
 pub struct DrawMesh2d;
 impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
     type Param = (SRes<RenderAssets<Mesh>>, SRes<RenderMesh2dInstances>);
-    type ViewQuery = ();
+    type ViewQuery = Read<PhaseItemRanges<P>>;
     type ItemQuery = ();
 
     #[inline]
     fn render<'w>(
         item: &P,
-        _view: (),
+        batches: ROQueryItem<'w, Self::ViewQuery>,
         _item_query: Option<()>,
         (meshes, render_mesh2d_instances): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
@@ -692,7 +729,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
 
         pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
 
-        let batch_range = item.batch_range();
+        let batch_range = batches.ranges.get(&item.entity()).expect("No batch range");
         #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
         pass.set_push_constants(
             ShaderStages::VERTEX,
