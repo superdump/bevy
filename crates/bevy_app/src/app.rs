@@ -6,12 +6,14 @@ use bevy_ecs::{
         common_conditions::run_once as run_once_condition, run_enter_schedule,
         InternedScheduleLabel, ScheduleBuildSettings, ScheduleLabel,
     },
+    system::SystemId,
 };
-use bevy_utils::{intern::Interned, thiserror::Error, tracing::debug, HashMap, HashSet};
+use bevy_utils::{intern::Interned, tracing::debug, HashMap, HashSet};
 use std::{
     fmt::Debug,
     panic::{catch_unwind, resume_unwind, AssertUnwindSafe},
 };
+use thiserror::Error;
 
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::info_span;
@@ -187,11 +189,6 @@ impl Default for App {
         app.add_plugins(MainSchedulePlugin);
 
         app.add_event::<AppExit>();
-
-        #[cfg(feature = "bevy_ci_testing")]
-        {
-            crate::ci_testing::setup_app(&mut app);
-        }
 
         app
     }
@@ -455,6 +452,22 @@ impl App {
         }
 
         self
+    }
+
+    /// Registers a system and returns a [`SystemId`] so it can later be called by [`World::run_system`].
+    ///
+    /// It's possible to register the same systems more than once, they'll be stored separately.
+    ///
+    /// This is different from adding systems to a [`Schedule`] with [`App::add_systems`],
+    /// because the [`SystemId`] that is returned can be used anywhere in the [`World`] to run the associated system.
+    /// This allows for running systems in a push-based fashion.
+    /// Using a [`Schedule`] is still preferred for most cases
+    /// due to its better performance and ability to run non-conflicting systems simultaneously.
+    pub fn register_system<I: 'static, O: 'static, M, S: IntoSystem<I, O, M> + 'static>(
+        &mut self,
+        system: S,
+    ) -> SystemId<I, O> {
+        self.world.register_system(system)
     }
 
     /// Configures a collection of system sets in the provided schedule, adding any sets that do not exist.

@@ -1,9 +1,16 @@
+#[cfg(feature = "meshlet")]
+use crate::meshlet::{
+    prepare_material_meshlet_meshes_main_opaque_pass, queue_material_meshlet_meshes,
+    MeshletGpuScene,
+};
 use crate::*;
 use bevy_asset::{Asset, AssetEvent, AssetId, AssetServer};
 use bevy_core_pipeline::{
     core_3d::{
-        AlphaMask3d, Opaque3d, ScreenSpaceTransmissionQuality, Transmissive3d, Transparent3d,
+        AlphaMask3d, Opaque3d, Opaque3dBinKey, ScreenSpaceTransmissionQuality, Transmissive3d,
+        Transparent3d,
     },
+    prepass::OpaqueNoLightmap3dBinKey,
     tonemapping::Tonemapping,
 };
 use bevy_derive::{Deref, DerefMut};
@@ -166,6 +173,36 @@ pub trait Material: Asset + AsBindGroup + Clone + Sized {
         ShaderRef::Default
     }
 
+    /// Returns this material's [`crate::meshlet::MeshletMesh`] fragment shader. If [`ShaderRef::Default`] is returned,
+    /// the default meshlet mesh fragment shader will be used.
+    ///
+    /// This is part of an experimental feature, and is unnecessary to implement unless you are using `MeshletMesh`'s.
+    #[allow(unused_variables)]
+    #[cfg(feature = "meshlet")]
+    fn meshlet_mesh_fragment_shader() -> ShaderRef {
+        ShaderRef::Default
+    }
+
+    /// Returns this material's [`crate::meshlet::MeshletMesh`] prepass fragment shader. If [`ShaderRef::Default`] is returned,
+    /// the default meshlet mesh prepass fragment shader will be used.
+    ///
+    /// This is part of an experimental feature, and is unnecessary to implement unless you are using `MeshletMesh`'s.
+    #[allow(unused_variables)]
+    #[cfg(feature = "meshlet")]
+    fn meshlet_mesh_prepass_fragment_shader() -> ShaderRef {
+        ShaderRef::Default
+    }
+
+    /// Returns this material's [`crate::meshlet::MeshletMesh`] deferred fragment shader. If [`ShaderRef::Default`] is returned,
+    /// the default meshlet mesh deferred fragment shader will be used.
+    ///
+    /// This is part of an experimental feature, and is unnecessary to implement unless you are using `MeshletMesh`'s.
+    #[allow(unused_variables)]
+    #[cfg(feature = "meshlet")]
+    fn meshlet_mesh_deferred_fragment_shader() -> ShaderRef {
+        ShaderRef::Default
+    }
+
     /// Customizes the default [`RenderPipelineDescriptor`] for a specific entity using the entity's
     /// [`MaterialPipelineKey`] and [`MeshVertexBufferLayoutRef`] as input.
     #[allow(unused_variables)]
@@ -189,6 +226,8 @@ pub struct MaterialPlugin<M: Material> {
     /// When it is enabled, it will automatically add the [`PrepassPlugin`]
     /// required to make the prepass work on this Material.
     pub prepass_enabled: bool,
+    /// Controls if shadows are enabled for the Material.
+    pub shadows_enabled: bool,
     pub _marker: PhantomData<M>,
 }
 
@@ -196,6 +235,7 @@ impl<M: Material> Default for MaterialPlugin<M> {
     fn default() -> Self {
         Self {
             prepass_enabled: true,
+            shadows_enabled: true,
             _marker: Default::default(),
         }
     }
@@ -257,10 +297,33 @@ where
                             .after(update_mesh_material_instances::<M>),
                     ),
                 );
+
+            if self.shadows_enabled {
+                render_app.add_systems(
+                    Render,
+                    (queue_shadows::<M>
+                        .in_set(RenderSet::QueueMeshes)
+                        .after(prepare_materials::<M>),),
+                );
+            }
+
+            #[cfg(feature = "meshlet")]
+            render_app.add_systems(
+                Render,
+                (
+                    prepare_material_meshlet_meshes_main_opaque_pass::<M>,
+                    queue_material_meshlet_meshes::<M>,
+                )
+                    .chain()
+                    .in_set(RenderSet::Queue)
+                    .run_if(resource_exists::<MeshletGpuScene>),
+            );
         }
 
-        // PrepassPipelinePlugin is required for shadow mapping and the optional PrepassPlugin
-        app.add_plugins(PrepassPipelinePlugin::<M>::default());
+        if self.shadows_enabled || self.prepass_enabled {
+            // PrepassPipelinePlugin is required for shadow mapping and the optional PrepassPlugin
+            app.add_plugins(PrepassPipelinePlugin::<M>::default());
+        }
 
         if self.prepass_enabled {
             app.add_plugins(PrepassPlugin::<M>::default());
@@ -695,10 +758,10 @@ pub fn queue_material_meshes<M: Material>(
         Entity,
         &ExtractedView,
         &VisibleEntities,
-        &mut RenderPhase<Opaque3d>,
-        &mut RenderPhase<AlphaMask3d>,
-        &mut RenderPhase<Transmissive3d>,
-        &mut RenderPhase<Transparent3d>,
+        &mut BinnedRenderPhase<Opaque3d>,
+        &mut BinnedRenderPhase<AlphaMask3d>,
+        &mut SortedRenderPhase<Transmissive3d>,
+        &mut SortedRenderPhase<Transparent3d>,
     )>,
 ) where
     M::Data: PartialEq + Eq + Hash + Clone,
@@ -735,24 +798,20 @@ pub fn queue_material_meshes<M: Material>(
 
             match mesh_instance.render_phase_type {
                 RenderPhaseType::Opaque => {
-                    opaque_phase.add(Opaque3d {
-                        entity: *visible_entity,
+                    let bin_key = Opaque3dBinKey {
                         draw_function: mesh_instance.draw_function_id,
                         pipeline,
-                        asset_id: mesh_instance.mesh_asset_id,
-                        batch_range: 0..1,
-                        dynamic_offset: None,
-                    });
+                        mesh_asset_id: mesh_instance.mesh_asset_id,
+                    };
+                    opaque_phase.add(bin_key, *visible_entity, mesh_instance.should_batch());
                 }
                 RenderPhaseType::AlphaMask => {
-                    alpha_mask_phase.add(AlphaMask3d {
-                        entity: *visible_entity,
+                    let bin_key = OpaqueNoLightmap3dBinKey {
                         draw_function: mesh_instance.draw_function_id,
                         pipeline,
-                        asset_id: mesh_instance.mesh_asset_id,
-                        batch_range: 0..1,
-                        dynamic_offset: None,
-                    });
+                        mesh_asset_id: mesh_instance.mesh_asset_id,
+                    };
+                    alpha_mask_phase.add(bin_key, *visible_entity, mesh_instance.should_batch());
                 }
                 RenderPhaseType::Transmissive => {
                     let distance = rangefinder
@@ -1021,6 +1080,10 @@ pub fn prepare_materials<M: Material>(
 ) {
     let queued_assets = std::mem::take(&mut prepare_next_frame.assets);
     for (id, material) in queued_assets.into_iter() {
+        if extracted_assets.removed.contains(&id) {
+            continue;
+        }
+
         match prepare_material(
             &material,
             &render_device,
@@ -1129,6 +1192,7 @@ pub fn check_entity_needs_specialization<M: Material>(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn specialize_pipelines<M: Material>(
     entities_to_specialize: Res<EntitiesToSpecialize<M>>,
     entity_specialized_sender: Res<EntitySpecializedSender>,
@@ -1145,10 +1209,10 @@ fn specialize_pipelines<M: Material>(
     views: Query<
         (Entity, &VisibleEntities),
         (
-            With<RenderPhase<Opaque3d>>,
-            With<RenderPhase<AlphaMask3d>>,
-            With<RenderPhase<Transparent3d>>,
-            With<RenderPhase<Transmissive3d>>,
+            With<BinnedRenderPhase<Opaque3d>>,
+            With<BinnedRenderPhase<AlphaMask3d>>,
+            With<SortedRenderPhase<Transparent3d>>,
+            With<SortedRenderPhase<Transmissive3d>>,
         ),
     >,
     mut specialized: Local<Vec<Entity>>,

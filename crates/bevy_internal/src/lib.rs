@@ -1,3 +1,10 @@
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![forbid(unsafe_code)]
+#![doc(
+    html_logo_url = "https://bevyengine.org/assets/icon.png",
+    html_favicon_url = "https://bevyengine.org/assets/icon.png"
+)]
+
 //! This module is separated into its own crate to enable simple dynamic linking for Bevy, and should not be used directly
 
 /// `use bevy::prelude::*;` to import common components, bundles, and plugins.
@@ -198,4 +205,10 @@ pub mod gizmos {
 pub mod dynamic_plugin {
     //! Dynamic linking of plugins
     pub use bevy_dynamic_plugin::*;
+}
+
+#[cfg(feature = "bevy_dev_tools")]
+pub mod dev_tools {
+    //! Collection of developer tools
+    pub use bevy_dev_tools::*;
 }
