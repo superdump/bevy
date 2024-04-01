@@ -260,7 +260,7 @@ where
                 ),
             );
 
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<DrawFunctions<Shadow>>()
                 .add_render_command::<Shadow, DrawPrepass<M>>()
@@ -331,7 +331,7 @@ where
     }
 
     fn finish(&self, app: &mut App) {
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.init_resource::<MaterialPipeline<M>>();
         }
     }
