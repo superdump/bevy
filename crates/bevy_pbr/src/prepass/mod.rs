@@ -1,5 +1,6 @@
 mod prepass_bindings;
 
+use bevy_asset::io::embedded::InternalAssets;
 use bevy_render::mesh::{GpuMesh, MeshVertexBufferLayoutRef};
 use bevy_render::render_resource::binding_types::uniform_buffer;
 use bevy_render::view::WithMesh;
@@ -37,14 +38,13 @@ use crate::*;
 
 use std::{hash::Hash, marker::PhantomData};
 
-pub const PREPASS_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(921124473254008983);
+pub const PREPASS_SHADER_UUID: Uuid = Uuid::from_u128(921124473254008983);
 
-pub const PREPASS_BINDINGS_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(5533152893177403494);
+pub const PREPASS_BINDINGS_SHADER_UUID: Uuid = Uuid::from_u128(5533152893177403494);
 
-pub const PREPASS_UTILS_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(4603948296044544);
+pub const PREPASS_UTILS_SHADER_UUID: Uuid = Uuid::from_u128(4603948296044544);
 
-pub const PREPASS_IO_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(81212356509530944);
+pub const PREPASS_IO_SHADER_UUID: Uuid = Uuid::from_u128(81212356509530944);
 
 /// Sets up everything required to use the prepass pipeline.
 ///
@@ -62,34 +62,6 @@ where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            PREPASS_SHADER_HANDLE,
-            "prepass.wgsl",
-            Shader::from_wgsl
-        );
-
-        load_internal_asset!(
-            app,
-            PREPASS_BINDINGS_SHADER_HANDLE,
-            "prepass_bindings.wgsl",
-            Shader::from_wgsl
-        );
-
-        load_internal_asset!(
-            app,
-            PREPASS_UTILS_SHADER_HANDLE,
-            "prepass_utils.wgsl",
-            Shader::from_wgsl
-        );
-
-        load_internal_asset!(
-            app,
-            PREPASS_IO_SHADER_HANDLE,
-            "prepass_io.wgsl",
-            Shader::from_wgsl
-        );
-
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -106,6 +78,29 @@ where
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(app, PREPASS_SHADER_UUID, "prepass.wgsl", Shader::from_wgsl);
+
+        load_internal_asset!(
+            app,
+            PREPASS_BINDINGS_SHADER_UUID,
+            "prepass_bindings.wgsl",
+            Shader::from_wgsl
+        );
+
+        load_internal_asset!(
+            app,
+            PREPASS_UTILS_SHADER_UUID,
+            "prepass_utils.wgsl",
+            Shader::from_wgsl
+        );
+
+        load_internal_asset!(
+            app,
+            PREPASS_IO_SHADER_UUID,
+            "prepass_io.wgsl",
+            Shader::from_wgsl
+        );
+
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -237,6 +232,7 @@ pub struct PrepassPipeline<M: Material> {
     pub view_layout_no_motion_vectors: BindGroupLayout,
     pub mesh_layouts: MeshLayouts,
     pub material_layout: BindGroupLayout,
+    pub prepass_shader_handle: Handle<Shader>,
     pub prepass_material_vertex_shader: Option<Handle<Shader>>,
     pub prepass_material_fragment_shader: Option<Handle<Shader>>,
     pub deferred_material_vertex_shader: Option<Handle<Shader>>,
@@ -280,29 +276,40 @@ impl<M: Material> FromWorld for PrepassPipeline<M> {
 
         let mesh_pipeline = world.resource::<MeshPipeline>();
 
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
+        let prepass_shader_handle = internal_assets
+            .get(&PREPASS_SHADER_UUID)
+            .expect("PREPASS_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         PrepassPipeline {
             view_layout_motion_vectors,
             view_layout_no_motion_vectors,
             mesh_layouts: mesh_pipeline.mesh_layouts.clone(),
+            prepass_shader_handle,
             prepass_material_vertex_shader: match M::prepass_vertex_shader() {
                 ShaderRef::Default => None,
                 ShaderRef::Handle(handle) => Some(handle),
                 ShaderRef::Path(path) => Some(asset_server.load(path)),
+                ShaderRef::InternalAsset(uuid) => internal_assets.get(&uuid).cloned(),
             },
             prepass_material_fragment_shader: match M::prepass_fragment_shader() {
                 ShaderRef::Default => None,
                 ShaderRef::Handle(handle) => Some(handle),
                 ShaderRef::Path(path) => Some(asset_server.load(path)),
+                ShaderRef::InternalAsset(uuid) => internal_assets.get(&uuid).cloned(),
             },
             deferred_material_vertex_shader: match M::deferred_vertex_shader() {
                 ShaderRef::Default => None,
                 ShaderRef::Handle(handle) => Some(handle),
                 ShaderRef::Path(path) => Some(asset_server.load(path)),
+                ShaderRef::InternalAsset(uuid) => internal_assets.get(&uuid).cloned(),
             },
             deferred_material_fragment_shader: match M::deferred_fragment_shader() {
                 ShaderRef::Default => None,
                 ShaderRef::Handle(handle) => Some(handle),
                 ShaderRef::Path(path) => Some(asset_server.load(path)),
+                ShaderRef::InternalAsset(uuid) => internal_assets.get(&uuid).cloned(),
             },
             material_layout: M::bind_group_layout(render_device),
             material_pipeline: world.resource::<MaterialPipeline<M>>().clone(),
@@ -502,15 +509,15 @@ where
         let fragment = fragment_required.then(|| {
             // Use the fragment shader from the material
             let frag_shader_handle = if key.mesh_key.contains(MeshPipelineKey::DEFERRED_PREPASS) {
-                match self.deferred_material_fragment_shader.clone() {
-                    Some(frag_shader_handle) => frag_shader_handle,
-                    _ => PREPASS_SHADER_HANDLE,
-                }
+                self.deferred_material_fragment_shader.as_ref().map_or_else(
+                    || self.prepass_shader_handle.clone_weak(),
+                    |handle| handle.clone_weak(),
+                )
             } else {
-                match self.prepass_material_fragment_shader.clone() {
-                    Some(frag_shader_handle) => frag_shader_handle,
-                    _ => PREPASS_SHADER_HANDLE,
-                }
+                self.prepass_material_fragment_shader.as_ref().map_or_else(
+                    || self.prepass_shader_handle.clone_weak(),
+                    |handle| handle.clone_weak(),
+                )
             };
 
             FragmentState {
@@ -523,15 +530,14 @@ where
 
         // Use the vertex shader from the material if present
         let vert_shader_handle = if key.mesh_key.contains(MeshPipelineKey::DEFERRED_PREPASS) {
-            if let Some(handle) = &self.deferred_material_vertex_shader {
-                handle.clone()
-            } else {
-                PREPASS_SHADER_HANDLE
-            }
+            self.deferred_material_vertex_shader.as_ref().map_or_else(
+                || self.prepass_shader_handle.clone_weak(),
+                |handle| handle.clone_weak(),
+            )
         } else if let Some(handle) = &self.prepass_material_vertex_shader {
-            handle.clone()
+            handle.clone_weak()
         } else {
-            PREPASS_SHADER_HANDLE
+            self.prepass_shader_handle.clone_weak()
         };
 
         let mut push_constant_ranges = Vec::with_capacity(1);
@@ -776,17 +782,17 @@ pub fn queue_prepass_material_meshes<M: Material>(
         }
 
         for visible_entity in visible_entities.iter::<WithMesh>() {
-            let Some(material_asset_id) = render_material_instances.get(visible_entity) else {
+            let Some(material_asset_index) = render_material_instances.get(visible_entity) else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(*visible_entity)
             else {
                 continue;
             };
-            let Some(material) = render_materials.get(*material_asset_id) else {
+            let Some(material) = render_materials.get(*material_asset_index) else {
                 continue;
             };
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_index) else {
                 continue;
             };
 
@@ -859,7 +865,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
                             OpaqueNoLightmap3dBinKey {
                                 draw_function: opaque_draw_deferred,
                                 pipeline: pipeline_id,
-                                asset_id: mesh_instance.mesh_asset_id,
+                                mesh_asset_index: mesh_instance.mesh_asset_index,
                                 material_bind_group_id: material.get_bind_group_id().0,
                             },
                             *visible_entity,
@@ -870,7 +876,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
                             OpaqueNoLightmap3dBinKey {
                                 draw_function: opaque_draw_prepass,
                                 pipeline: pipeline_id,
-                                asset_id: mesh_instance.mesh_asset_id,
+                                mesh_asset_index: mesh_instance.mesh_asset_index,
                                 material_bind_group_id: material.get_bind_group_id().0,
                             },
                             *visible_entity,
@@ -884,7 +890,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
                         let bin_key = OpaqueNoLightmap3dBinKey {
                             pipeline: pipeline_id,
                             draw_function: alpha_mask_draw_deferred,
-                            asset_id: mesh_instance.mesh_asset_id,
+                            mesh_asset_index: mesh_instance.mesh_asset_index,
                             material_bind_group_id: material.get_bind_group_id().0,
                         };
                         alpha_mask_deferred_phase.as_mut().unwrap().add(
@@ -896,7 +902,7 @@ pub fn queue_prepass_material_meshes<M: Material>(
                         let bin_key = OpaqueNoLightmap3dBinKey {
                             pipeline: pipeline_id,
                             draw_function: alpha_mask_draw_prepass,
-                            asset_id: mesh_instance.mesh_asset_id,
+                            mesh_asset_index: mesh_instance.mesh_asset_index,
                             material_bind_group_id: material.get_bind_group_id().0,
                         };
                         alpha_mask_phase.add(

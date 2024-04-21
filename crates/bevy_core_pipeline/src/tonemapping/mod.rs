@@ -1,6 +1,8 @@
-use crate::fullscreen_vertex_shader::fullscreen_shader_vertex_state;
+use crate::fullscreen_vertex_shader::{fullscreen_shader_vertex_state, FULLSCREEN_SHADER_UUID};
 use bevy_app::prelude::*;
-use bevy_asset::{load_internal_asset, Assets, Handle};
+use bevy_asset::io::embedded::InternalAssets;
+use bevy_asset::uuid::Uuid;
+use bevy_asset::{load_internal_asset, AssetIndex, Assets, Handle};
 use bevy_ecs::prelude::*;
 use bevy_reflect::Reflect;
 use bevy_render::extract_component::{ExtractComponent, ExtractComponentPlugin};
@@ -22,54 +24,55 @@ mod node;
 use bevy_utils::default;
 pub use node::TonemappingNode;
 
-const TONEMAPPING_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(17015368199668024512);
+const TONEMAPPING_SHADER_UUID: Uuid = Uuid::from_u128(17015368199668024512);
 
-const TONEMAPPING_SHARED_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(2499430578245347910);
+const TONEMAPPING_SHARED_SHADER_UUID: Uuid = Uuid::from_u128(2499430578245347910);
 
 /// 3D LUT (look up table) textures used for tonemapping
 #[derive(Resource, Clone, ExtractResource)]
+// The handles need to be strong to keep the LUT assets alive
+#[allow(dead_code)]
 pub struct TonemappingLuts {
     blender_filmic: Handle<Image>,
+    blender_filmic_index: AssetIndex,
     agx: Handle<Image>,
+    agx_index: AssetIndex,
     tony_mc_mapface: Handle<Image>,
+    tony_mc_mapface_index: AssetIndex,
 }
 
 pub struct TonemappingPlugin;
 
 impl Plugin for TonemappingPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            TONEMAPPING_SHADER_HANDLE,
-            "tonemapping.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            TONEMAPPING_SHARED_SHADER_HANDLE,
-            "tonemapping_shared.wgsl",
-            Shader::from_wgsl
-        );
-
         if !app.world().is_resource_added::<TonemappingLuts>() {
             let mut images = app.world_mut().resource_mut::<Assets<Image>>();
 
             #[cfg(feature = "tonemapping_luts")]
             let tonemapping_luts = {
+                let blender_filmic = images.add(setup_tonemapping_lut_image(
+                    include_bytes!("luts/Blender_-11_12.ktx2"),
+                    ImageType::Extension("ktx2"),
+                ));
+                let blender_filmic_index = blender_filmic.index();
+                let agx = images.add(setup_tonemapping_lut_image(
+                    include_bytes!("luts/AgX-default_contrast.ktx2"),
+                    ImageType::Extension("ktx2"),
+                ));
+                let agx_index = agx.index();
+                let tony_mc_mapface = images.add(setup_tonemapping_lut_image(
+                    include_bytes!("luts/tony_mc_mapface.ktx2"),
+                    ImageType::Extension("ktx2"),
+                ));
+                let tony_mc_mapface_index = tony_mc_mapface.index();
+
                 TonemappingLuts {
-                    blender_filmic: images.add(setup_tonemapping_lut_image(
-                        include_bytes!("luts/Blender_-11_12.ktx2"),
-                        ImageType::Extension("ktx2"),
-                    )),
-                    agx: images.add(setup_tonemapping_lut_image(
-                        include_bytes!("luts/AgX-default_contrast.ktx2"),
-                        ImageType::Extension("ktx2"),
-                    )),
-                    tony_mc_mapface: images.add(setup_tonemapping_lut_image(
-                        include_bytes!("luts/tony_mc_mapface.ktx2"),
-                        ImageType::Extension("ktx2"),
-                    )),
+                    blender_filmic,
+                    blender_filmic_index,
+                    agx,
+                    agx_index,
+                    tony_mc_mapface,
+                    tony_mc_mapface_index,
                 }
             };
 
@@ -108,6 +111,18 @@ impl Plugin for TonemappingPlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            TONEMAPPING_SHADER_UUID,
+            "tonemapping.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            TONEMAPPING_SHARED_SHADER_UUID,
+            "tonemapping_shared.wgsl",
+            Shader::from_wgsl
+        );
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -119,6 +134,8 @@ impl Plugin for TonemappingPlugin {
 pub struct TonemappingPipeline {
     texture_bind_group: BindGroupLayout,
     sampler: Sampler,
+    fullscreen_vertex_shader_handle: Handle<Shader>,
+    tonemapping_shader_handle: Handle<Shader>,
 }
 
 /// Optionally enables a tonemapping shader that attempts to map linear input stimulus into a perceptually uniform image for a given [`Camera`] entity.
@@ -235,9 +252,11 @@ impl SpecializedRenderPipeline for TonemappingPipeline {
         RenderPipelineDescriptor {
             label: Some("tonemapping pipeline".into()),
             layout: vec![self.texture_bind_group.clone()],
-            vertex: fullscreen_shader_vertex_state(),
+            vertex: fullscreen_shader_vertex_state(
+                self.fullscreen_vertex_shader_handle.clone_weak(),
+            ),
             fragment: Some(FragmentState {
-                shader: TONEMAPPING_SHADER_HANDLE,
+                shader: self.tonemapping_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
@@ -277,9 +296,21 @@ impl FromWorld for TonemappingPipeline {
 
         let sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
+        let internal_assets = render_world.resource::<InternalAssets<Shader>>();
+        let fullscreen_vertex_shader_handle = internal_assets
+            .get(&FULLSCREEN_SHADER_UUID)
+            .expect("FULLSCREEN_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let tonemapping_shader_handle = internal_assets
+            .get(&TONEMAPPING_SHADER_UUID)
+            .expect("TONEMAPPING_SHADER_UUID not present in InternalAssets")
+            .clone_weak();
+
         TonemappingPipeline {
             texture_bind_group: tonemap_texture_bind_group,
             sampler,
+            fullscreen_vertex_shader_handle,
+            tonemapping_shader_handle,
         }
     }
 }
@@ -331,9 +362,9 @@ pub fn get_lut_bindings<'a>(
         | Tonemapping::ReinhardLuminance
         | Tonemapping::AcesFitted
         | Tonemapping::AgX
-        | Tonemapping::SomewhatBoringDisplayTransform => &tonemapping_luts.agx,
-        Tonemapping::TonyMcMapface => &tonemapping_luts.tony_mc_mapface,
-        Tonemapping::BlenderFilmic => &tonemapping_luts.blender_filmic,
+        | Tonemapping::SomewhatBoringDisplayTransform => tonemapping_luts.agx_index,
+        Tonemapping::TonyMcMapface => tonemapping_luts.tony_mc_mapface_index,
+        Tonemapping::BlenderFilmic => tonemapping_luts.blender_filmic_index,
     };
     let lut_image = images.get(image).unwrap_or(&fallback_image.d3);
     (&lut_image.texture_view, &lut_image.sampler)

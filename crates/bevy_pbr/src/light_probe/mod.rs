@@ -1,7 +1,7 @@
 //! Light probes for baked global illumination.
 
 use bevy_app::{App, Plugin};
-use bevy_asset::{load_internal_asset, AssetId, Handle};
+use bevy_asset::{load_internal_asset, uuid::Uuid, AssetIndex};
 use bevy_core_pipeline::core_3d::Camera3d;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
@@ -21,7 +21,7 @@ use bevy_render::{
     render_resource::{DynamicUniformBuffer, Sampler, Shader, ShaderType, TextureView},
     renderer::{RenderDevice, RenderQueue},
     settings::WgpuFeatures,
-    texture::{FallbackImage, GpuImage, Image},
+    texture::{FallbackImage, GpuImage},
     view::ExtractedView,
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
@@ -32,15 +32,15 @@ use std::hash::Hash;
 use std::ops::Deref;
 
 use crate::{
-    irradiance_volume::IRRADIANCE_VOLUME_SHADER_HANDLE,
+    irradiance_volume::IRRADIANCE_VOLUME_SHADER_UUID,
     light_probe::environment_map::{
-        EnvironmentMapIds, EnvironmentMapLight, ENVIRONMENT_MAP_SHADER_HANDLE,
+        EnvironmentMapIds, EnvironmentMapLight, ENVIRONMENT_MAP_SHADER_UUID,
     },
 };
 
 use self::irradiance_volume::IrradianceVolume;
 
-pub const LIGHT_PROBE_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(8954249792581071582);
+pub const LIGHT_PROBE_SHADER_UUID: Uuid = Uuid::from_u128(8954249792581071582);
 
 pub mod environment_map;
 pub mod irradiance_volume;
@@ -270,7 +270,7 @@ pub trait LightProbeComponent: Send + Sync + Component + Sized {
 
     /// Returns the asset ID or asset IDs of the texture or textures referenced
     /// by this light probe.
-    fn id(&self, image_assets: &RenderAssets<GpuImage>) -> Option<Self::AssetId>;
+    fn id(&self, gpu_images: &RenderAssets<GpuImage>) -> Option<Self::AssetId>;
 
     /// Returns the intensity of this light probe.
     ///
@@ -284,7 +284,7 @@ pub trait LightProbeComponent: Send + Sync + Component + Sized {
     /// This is called for every light probe in view every frame.
     fn create_render_view_light_probes(
         view_component: Option<&Self>,
-        image_assets: &RenderAssets<GpuImage>,
+        gpu_images: &RenderAssets<GpuImage>,
     ) -> RenderViewLightProbes<Self>;
 }
 
@@ -298,31 +298,31 @@ impl LightProbe {
 
 impl Plugin for LightProbePlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            LIGHT_PROBE_SHADER_HANDLE,
-            "light_probe.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            ENVIRONMENT_MAP_SHADER_HANDLE,
-            "environment_map.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            IRRADIANCE_VOLUME_SHADER_HANDLE,
-            "irradiance_volume.wgsl",
-            Shader::from_wgsl
-        );
-
         app.register_type::<LightProbe>()
             .register_type::<EnvironmentMapLight>()
             .register_type::<IrradianceVolume>();
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            LIGHT_PROBE_SHADER_UUID,
+            "light_probe.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            ENVIRONMENT_MAP_SHADER_UUID,
+            "environment_map.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            IRRADIANCE_VOLUME_SHADER_UUID,
+            "irradiance_volume.wgsl",
+            Shader::from_wgsl
+        );
+
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -330,8 +330,13 @@ impl Plugin for LightProbePlugin {
         render_app
             .add_plugins(ExtractInstancesPlugin::<EnvironmentMapIds>::new())
             .init_resource::<LightProbesBuffer>()
-            .add_systems(ExtractSchedule, gather_light_probes::<EnvironmentMapLight>)
-            .add_systems(ExtractSchedule, gather_light_probes::<IrradianceVolume>)
+            .add_systems(
+                ExtractSchedule,
+                (
+                    gather_light_probes::<EnvironmentMapLight>,
+                    gather_light_probes::<IrradianceVolume>,
+                ),
+            )
             .add_systems(
                 Render,
                 upload_light_probes.in_set(RenderSet::PrepareResources),
@@ -633,11 +638,11 @@ where
 pub(crate) fn add_cubemap_texture_view<'a>(
     texture_views: &mut Vec<&'a <TextureView as Deref>::Target>,
     sampler: &mut Option<&'a Sampler>,
-    image_id: AssetId<Image>,
+    image_index: AssetIndex,
     images: &'a RenderAssets<GpuImage>,
     fallback_image: &'a FallbackImage,
 ) {
-    match images.get(image_id) {
+    match images.get(image_index) {
         None => {
             // Use the fallback image if the cubemap isn't loaded yet.
             texture_views.push(&*fallback_image.cube.texture_view);

@@ -44,7 +44,7 @@ pub use texture_atlas_builder::*;
 pub use texture_slice::*;
 
 use bevy_app::prelude::*;
-use bevy_asset::{load_internal_asset, AssetApp, Assets, Handle};
+use bevy_asset::{load_internal_asset, uuid::Uuid, AssetApp, Assets, Handle};
 use bevy_core_pipeline::core_2d::Transparent2d;
 use bevy_ecs::{prelude::*, query::QueryItem};
 use bevy_render::{
@@ -62,7 +62,7 @@ use bevy_render::{
 #[derive(Default)]
 pub struct SpritePlugin;
 
-pub const SPRITE_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(2763343953151597127);
+pub const SPRITE_SHADER_UUID: Uuid = Uuid::from_u128(2763343953151597127);
 
 /// System set for sprite rendering.
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
@@ -89,12 +89,6 @@ pub type WithSprite = Or<(With<Sprite>, With<SpriteSource>)>;
 
 impl Plugin for SpritePlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            SPRITE_SHADER_HANDLE,
-            "render/sprite.wgsl",
-            Shader::from_wgsl
-        );
         app.init_asset::<TextureAtlasLayout>()
             .register_asset_reflect::<TextureAtlasLayout>()
             .register_type::<Sprite>()
@@ -160,6 +154,12 @@ impl Plugin for SpritePlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            SPRITE_SHADER_UUID,
+            "render/sprite.wgsl",
+            Shader::from_wgsl
+        );
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.init_resource::<SpritePipeline>();
         }

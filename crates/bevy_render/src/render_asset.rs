@@ -1,6 +1,6 @@
 use crate::{ExtractSchedule, MainWorld, Render, RenderApp, RenderSet};
 use bevy_app::{App, Plugin, SubApp};
-use bevy_asset::{Asset, AssetEvent, AssetId, Assets};
+use bevy_asset::{Asset, AssetEvent, AssetIndex, Assets};
 use bevy_ecs::{
     prelude::{Commands, EventReader, IntoSystemConfigs, ResMut, Resource},
     schedule::SystemConfigs,
@@ -159,8 +159,8 @@ impl<A: RenderAsset> RenderAssetDependency for A {
 /// Temporarily stores the extracted and removed assets of the current frame.
 #[derive(Resource)]
 pub struct ExtractedAssets<A: RenderAsset> {
-    extracted: Vec<(AssetId<A::SourceAsset>, A::SourceAsset)>,
-    removed: Vec<AssetId<A::SourceAsset>>,
+    extracted: Vec<(AssetIndex, A::SourceAsset)>,
+    removed: Vec<AssetIndex>,
 }
 
 impl<A: RenderAsset> Default for ExtractedAssets<A> {
@@ -175,7 +175,7 @@ impl<A: RenderAsset> Default for ExtractedAssets<A> {
 /// Stores all GPU representations ([`RenderAsset`])
 /// of [`RenderAsset::SourceAsset`] as long as they exist.
 #[derive(Resource)]
-pub struct RenderAssets<A: RenderAsset>(HashMap<AssetId<A::SourceAsset>, A>);
+pub struct RenderAssets<A: RenderAsset>(HashMap<AssetIndex, A>);
 
 impl<A: RenderAsset> Default for RenderAssets<A> {
     fn default() -> Self {
@@ -184,27 +184,27 @@ impl<A: RenderAsset> Default for RenderAssets<A> {
 }
 
 impl<A: RenderAsset> RenderAssets<A> {
-    pub fn get(&self, id: impl Into<AssetId<A::SourceAsset>>) -> Option<&A> {
-        self.0.get(&id.into())
+    pub fn get(&self, index: AssetIndex) -> Option<&A> {
+        self.0.get(&index)
     }
 
-    pub fn get_mut(&mut self, id: impl Into<AssetId<A::SourceAsset>>) -> Option<&mut A> {
-        self.0.get_mut(&id.into())
+    pub fn get_mut(&mut self, index: AssetIndex) -> Option<&mut A> {
+        self.0.get_mut(&index)
     }
 
-    pub fn insert(&mut self, id: impl Into<AssetId<A::SourceAsset>>, value: A) -> Option<A> {
-        self.0.insert(id.into(), value)
+    pub fn insert(&mut self, index: AssetIndex, value: A) -> Option<A> {
+        self.0.insert(index, value)
     }
 
-    pub fn remove(&mut self, id: impl Into<AssetId<A::SourceAsset>>) -> Option<A> {
-        self.0.remove(&id.into())
+    pub fn remove(&mut self, index: AssetIndex) -> Option<A> {
+        self.0.remove(&index)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (AssetId<A::SourceAsset>, &A)> {
+    pub fn iter(&self) -> impl Iterator<Item = (AssetIndex, &A)> {
         self.0.iter().map(|(k, v)| (*k, v))
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (AssetId<A::SourceAsset>, &mut A)> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (AssetIndex, &mut A)> {
         self.0.iter_mut().map(|(k, v)| (*k, v))
     }
 }
@@ -239,12 +239,12 @@ fn extract_render_asset<A: RenderAsset>(mut commands: Commands, mut main_world: 
                 #[allow(clippy::match_same_arms)]
                 match event {
                     AssetEvent::Added { id } | AssetEvent::Modified { id } => {
-                        changed_assets.insert(*id);
+                        changed_assets.insert(id.index());
                     }
                     AssetEvent::Removed { .. } => {}
                     AssetEvent::Unused { id } => {
-                        changed_assets.remove(id);
-                        removed.push(*id);
+                        changed_assets.remove(&id.index());
+                        removed.push(id.index());
                     }
                     AssetEvent::LoadedWithDependencies { .. } => {
                         // TODO: handle this
@@ -281,7 +281,7 @@ fn extract_render_asset<A: RenderAsset>(mut commands: Commands, mut main_world: 
 /// All assets that should be prepared next frame.
 #[derive(Resource)]
 pub struct PrepareNextFrameAssets<A: RenderAsset> {
-    assets: Vec<(AssetId<A::SourceAsset>, A::SourceAsset)>,
+    assets: Vec<(AssetIndex, A::SourceAsset)>,
 }
 
 impl<A: RenderAsset> Default for PrepareNextFrameAssets<A> {

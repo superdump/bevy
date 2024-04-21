@@ -52,6 +52,8 @@ pub mod prelude {
     };
 }
 
+use bevy_asset::io::embedded::InternalAssets;
+use bevy_asset::uuid::Uuid;
 use bevy_ecs::schedule::ScheduleBuildSettings;
 use bevy_utils::prelude::default;
 pub use extract_param::Extract;
@@ -73,7 +75,7 @@ use crate::{
     view::{ViewPlugin, WindowRenderPlugin},
 };
 use bevy_app::{App, AppLabel, Plugin, SubApp};
-use bevy_asset::{load_internal_asset, AssetApp, AssetServer, Handle};
+use bevy_asset::{load_internal_asset, AssetApp, AssetServer};
 use bevy_ecs::{prelude::*, schedule::ScheduleLabel, system::SystemState};
 use bevy_utils::tracing::debug;
 use std::{
@@ -230,9 +232,7 @@ struct FutureRendererResources(
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, AppLabel)]
 pub struct RenderApp;
 
-pub const INSTANCE_INDEX_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(10313207077636615845);
-pub const MATHS_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(10665356303104593376);
+pub const MATHS_SHADER_UUID: Uuid = Uuid::from_u128(10665356303104593376);
 
 impl Plugin for RenderPlugin {
     /// Initializes the renderer, sets up the [`RenderSet`] and creates the rendering sub-app.
@@ -351,7 +351,6 @@ impl Plugin for RenderPlugin {
     }
 
     fn finish(&self, app: &mut App) {
-        load_internal_asset!(app, MATHS_SHADER_HANDLE, "maths.wgsl", Shader::from_wgsl);
         if let Some(future_renderer_resources) =
             app.world_mut().remove_resource::<FutureRendererResources>()
         {
@@ -366,6 +365,7 @@ impl Plugin for RenderPlugin {
             let render_app = app.sub_app_mut(RenderApp);
 
             render_app
+                .init_resource::<InternalAssets<Shader>>()
                 .insert_resource(instance)
                 .insert_resource(PipelineCache::new(
                     device.clone(),
@@ -377,6 +377,7 @@ impl Plugin for RenderPlugin {
                 .insert_resource(render_adapter)
                 .insert_resource(adapter_info);
         }
+        load_internal_asset!(app, MATHS_SHADER_UUID, "maths.wgsl", Shader::from_wgsl);
     }
 }
 

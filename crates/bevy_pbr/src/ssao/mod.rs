@@ -1,6 +1,6 @@
 use crate::NodePbr;
 use bevy_app::{App, Plugin};
-use bevy_asset::{load_internal_asset, Handle};
+use bevy_asset::{io::embedded::InternalAssets, load_internal_asset, uuid::Uuid, Handle};
 use bevy_core_pipeline::{
     core_3d::graph::{Core3d, Node3d},
     prelude::Camera3d,
@@ -38,40 +38,40 @@ use bevy_utils::{
 };
 use std::mem;
 
-const PREPROCESS_DEPTH_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(102258915420479);
-const GTAO_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(253938746510568);
-const SPATIAL_DENOISE_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(466162052558226);
-const GTAO_UTILS_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(366465052568786);
+const PREPROCESS_DEPTH_SHADER_UUID: Uuid = Uuid::from_u128(102258915420479);
+const GTAO_SHADER_UUID: Uuid = Uuid::from_u128(253938746510568);
+const SPATIAL_DENOISE_SHADER_UUID: Uuid = Uuid::from_u128(466162052558226);
+const GTAO_UTILS_SHADER_UUID: Uuid = Uuid::from_u128(366465052568786);
 
 /// Plugin for screen space ambient occlusion.
 pub struct ScreenSpaceAmbientOcclusionPlugin;
 
 impl Plugin for ScreenSpaceAmbientOcclusionPlugin {
     fn build(&self, app: &mut App) {
+        app.register_type::<ScreenSpaceAmbientOcclusionSettings>();
+    }
+
+    fn finish(&self, app: &mut App) {
         load_internal_asset!(
             app,
-            PREPROCESS_DEPTH_SHADER_HANDLE,
+            PREPROCESS_DEPTH_SHADER_UUID,
             "preprocess_depth.wgsl",
             Shader::from_wgsl
         );
-        load_internal_asset!(app, GTAO_SHADER_HANDLE, "gtao.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, GTAO_SHADER_UUID, "gtao.wgsl", Shader::from_wgsl);
         load_internal_asset!(
             app,
-            SPATIAL_DENOISE_SHADER_HANDLE,
+            SPATIAL_DENOISE_SHADER_UUID,
             "spatial_denoise.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            GTAO_UTILS_SHADER_HANDLE,
+            GTAO_UTILS_SHADER_UUID,
             "gtao_utils.wgsl",
             Shader::from_wgsl
         );
 
-        app.register_type::<ScreenSpaceAmbientOcclusionSettings>();
-    }
-
-    fn finish(&self, app: &mut App) {
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -309,6 +309,8 @@ struct SsaoPipelines {
 
     hilbert_index_lut: TextureView,
     point_clamp_sampler: Sampler,
+
+    gtao_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for SsaoPipelines {
@@ -401,6 +403,8 @@ impl FromWorld for SsaoPipelines {
             ),
         );
 
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
+
         let preprocess_depth_pipeline =
             pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
                 label: Some("ssao_preprocess_depth_pipeline".into()),
@@ -409,7 +413,10 @@ impl FromWorld for SsaoPipelines {
                     common_bind_group_layout.clone(),
                 ],
                 push_constant_ranges: vec![],
-                shader: PREPROCESS_DEPTH_SHADER_HANDLE,
+                shader: internal_assets
+                    .get(&PREPROCESS_DEPTH_SHADER_UUID)
+                    .expect("PREPROCESS_DEPTH_SHADER_UUID is not present in InternalAssets")
+                    .clone_weak(),
                 shader_defs: Vec::new(),
                 entry_point: "preprocess_depth".into(),
             });
@@ -422,10 +429,18 @@ impl FromWorld for SsaoPipelines {
                     common_bind_group_layout.clone(),
                 ],
                 push_constant_ranges: vec![],
-                shader: SPATIAL_DENOISE_SHADER_HANDLE,
+                shader: internal_assets
+                    .get(&SPATIAL_DENOISE_SHADER_UUID)
+                    .expect("SPATIAL_DENOISE_SHADER_UUID is not present in InternalAssets")
+                    .clone_weak(),
                 shader_defs: Vec::new(),
                 entry_point: "spatial_denoise".into(),
             });
+
+        let gtao_shader_handle = internal_assets
+            .get(&GTAO_SHADER_UUID)
+            .expect("GTAO_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
 
         Self {
             preprocess_depth_pipeline,
@@ -438,6 +453,8 @@ impl FromWorld for SsaoPipelines {
 
             hilbert_index_lut,
             point_clamp_sampler,
+
+            gtao_shader_handle,
         }
     }
 }
@@ -473,7 +490,7 @@ impl SpecializedComputePipeline for SsaoPipelines {
                 self.common_bind_group_layout.clone(),
             ],
             push_constant_ranges: vec![],
-            shader: GTAO_SHADER_HANDLE,
+            shader: self.gtao_shader_handle.clone_weak(),
             shader_defs,
             entry_point: "gtao".into(),
         }

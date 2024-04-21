@@ -51,7 +51,7 @@ use crate::{
     core_2d::Core2dPlugin,
     core_3d::Core3dPlugin,
     deferred::copy_lighting_id::CopyDeferredLightingIdPlugin,
-    fullscreen_vertex_shader::FULLSCREEN_SHADER_HANDLE,
+    fullscreen_vertex_shader::FULLSCREEN_SHADER_UUID,
     fxaa::FxaaPlugin,
     msaa_writeback::MsaaWritebackPlugin,
     prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
@@ -60,20 +60,13 @@ use crate::{
 };
 use bevy_app::{App, Plugin};
 use bevy_asset::load_internal_asset;
-use bevy_render::prelude::Shader;
+use bevy_render::{prelude::Shader, RenderApp};
 
 #[derive(Default)]
 pub struct CorePipelinePlugin;
 
 impl Plugin for CorePipelinePlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            FULLSCREEN_SHADER_HANDLE,
-            "fullscreen_vertex_shader/fullscreen.wgsl",
-            Shader::from_wgsl
-        );
-
         app.register_type::<DepthPrepass>()
             .register_type::<NormalPrepass>()
             .register_type::<MotionVectorPrepass>()
@@ -90,5 +83,14 @@ impl Plugin for CorePipelinePlugin {
                 FxaaPlugin,
                 CASPlugin,
             ));
+    }
+
+    fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            FULLSCREEN_SHADER_UUID,
+            "fullscreen_vertex_shader/fullscreen.wgsl",
+            Shader::from_wgsl
+        );
     }
 }

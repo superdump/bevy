@@ -1,15 +1,15 @@
 use crate::{Material2d, Material2dKey, Material2dPlugin, Mesh2dHandle};
-use bevy_app::{Plugin, Startup, Update};
-use bevy_asset::{load_internal_asset, Asset, Assets, Handle};
+use bevy_app::{App, Plugin, Startup, Update};
+use bevy_asset::{load_internal_asset, uuid::Uuid, Asset, Assets, Handle};
 use bevy_color::{LinearRgba, Srgba};
 use bevy_ecs::prelude::*;
 use bevy_reflect::{std_traits::ReflectDefault, Reflect, TypePath};
 use bevy_render::{
     extract_resource::ExtractResource, mesh::MeshVertexBufferLayoutRef, prelude::*,
-    render_resource::*,
+    render_resource::*, RenderApp,
 };
 
-pub const WIREFRAME_2D_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(6920362697190520314);
+pub const WIREFRAME_2D_SHADER_UUID: Uuid = Uuid::from_u128(6920362697190520314);
 
 /// A [`Plugin`] that draws wireframes for 2D meshes.
 ///
@@ -24,13 +24,6 @@ pub const WIREFRAME_2D_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(69
 pub struct Wireframe2dPlugin;
 impl Plugin for Wireframe2dPlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        load_internal_asset!(
-            app,
-            WIREFRAME_2D_SHADER_HANDLE,
-            "wireframe2d.wgsl",
-            Shader::from_wgsl
-        );
-
         app.register_type::<Wireframe2d>()
             .register_type::<NoWireframe2d>()
             .register_type::<Wireframe2dConfig>()
@@ -48,6 +41,15 @@ impl Plugin for Wireframe2dPlugin {
                     (apply_wireframe_material, apply_global_wireframe_material).chain(),
                 ),
             );
+    }
+
+    fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            WIREFRAME_2D_SHADER_UUID,
+            "wireframe2d.wgsl",
+            Shader::from_wgsl
+        );
     }
 }
 
@@ -213,7 +215,7 @@ pub struct Wireframe2dMaterial {
 
 impl Material2d for Wireframe2dMaterial {
     fn fragment_shader() -> ShaderRef {
-        WIREFRAME_2D_SHADER_HANDLE.into()
+        WIREFRAME_2D_SHADER_UUID.into()
     }
 
     fn depth_bias(&self) -> f32 {

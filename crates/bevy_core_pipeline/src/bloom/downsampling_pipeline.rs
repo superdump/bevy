@@ -1,5 +1,6 @@
-use super::{BloomSettings, BLOOM_SHADER_HANDLE, BLOOM_TEXTURE_FORMAT};
-use crate::fullscreen_vertex_shader::fullscreen_shader_vertex_state;
+use super::{BloomSettings, BLOOM_SHADER_UUID, BLOOM_TEXTURE_FORMAT};
+use crate::fullscreen_vertex_shader::{fullscreen_shader_vertex_state, FULLSCREEN_SHADER_UUID};
+use bevy_asset::{io::embedded::InternalAssets, Handle};
 use bevy_ecs::{
     prelude::{Component, Entity},
     system::{Commands, Query, Res, ResMut, Resource},
@@ -25,6 +26,8 @@ pub struct BloomDownsamplingPipeline {
     /// Layout with a texture, a sampler, and uniforms
     pub bind_group_layout: BindGroupLayout,
     pub sampler: Sampler,
+    pub fullscreen_vertex_shader_handle: Handle<Shader>,
+    pub bloom_downsampling_shader_handle: Handle<Shader>,
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
@@ -72,9 +75,21 @@ impl FromWorld for BloomDownsamplingPipeline {
             ..Default::default()
         });
 
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
+        let fullscreen_vertex_shader_handle = internal_assets
+            .get(&FULLSCREEN_SHADER_UUID)
+            .expect("FULLSCREEN_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let bloom_downsampling_shader_handle = internal_assets
+            .get(&BLOOM_SHADER_UUID)
+            .expect("BLOOM_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         BloomDownsamplingPipeline {
             bind_group_layout,
             sampler,
+            fullscreen_vertex_shader_handle,
+            bloom_downsampling_shader_handle,
         }
     }
 }
@@ -111,9 +126,11 @@ impl SpecializedRenderPipeline for BloomDownsamplingPipeline {
                 .into(),
             ),
             layout,
-            vertex: fullscreen_shader_vertex_state(),
+            vertex: fullscreen_shader_vertex_state(
+                self.fullscreen_vertex_shader_handle.clone_weak(),
+            ),
             fragment: Some(FragmentState {
-                shader: BLOOM_SHADER_HANDLE,
+                shader: self.bloom_downsampling_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point,
                 targets: vec![Some(ColorTargetState {

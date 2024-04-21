@@ -1,6 +1,6 @@
 use super::ShaderDefVal;
 use crate::define_atomic_id;
-use bevy_asset::{io::Reader, Asset, AssetLoader, AssetPath, Handle, LoadContext};
+use bevy_asset::{io::Reader, uuid::Uuid, Asset, AssetLoader, AssetPath, Handle, LoadContext};
 use bevy_reflect::TypePath;
 use bevy_utils::tracing::error;
 use futures_lite::AsyncReadExt;
@@ -322,6 +322,8 @@ pub enum ShaderRef {
     Handle(Handle<Shader>),
     /// An asset path leading to a shader
     Path(AssetPath<'static>),
+    /// A constant Uuid reference to a shader handle in the InternalAssets resource
+    InternalAsset(Uuid),
 }
 
 impl From<Handle<Shader>> for ShaderRef {
@@ -339,5 +341,11 @@ impl From<AssetPath<'static>> for ShaderRef {
 impl From<&'static str> for ShaderRef {
     fn from(path: &'static str) -> Self {
         Self::Path(AssetPath::from(path))
+    }
+}
+
+impl From<Uuid> for ShaderRef {
+    fn from(uuid: Uuid) -> Self {
+        Self::InternalAsset(uuid)
     }
 }

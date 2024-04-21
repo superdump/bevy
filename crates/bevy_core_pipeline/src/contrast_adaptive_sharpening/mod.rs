@@ -1,10 +1,10 @@
 use crate::{
     core_2d::graph::{Core2d, Node2d},
     core_3d::graph::{Core3d, Node3d},
-    fullscreen_vertex_shader::fullscreen_shader_vertex_state,
+    fullscreen_vertex_shader::{fullscreen_shader_vertex_state, FULLSCREEN_SHADER_UUID},
 };
 use bevy_app::prelude::*;
-use bevy_asset::{load_internal_asset, Handle};
+use bevy_asset::{io::embedded::InternalAssets, load_internal_asset, uuid::Uuid, Handle};
 use bevy_ecs::{prelude::*, query::QueryItem};
 use bevy_reflect::Reflect;
 use bevy_render::{
@@ -95,21 +95,13 @@ impl ExtractComponent for ContrastAdaptiveSharpeningSettings {
     }
 }
 
-const CONTRAST_ADAPTIVE_SHARPENING_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(6925381244141981602);
+const CONTRAST_ADAPTIVE_SHARPENING_SHADER_UUID: Uuid = Uuid::from_u128(6925381244141981602);
 
 /// Adds Support for Contrast Adaptive Sharpening (CAS).
 pub struct CASPlugin;
 
 impl Plugin for CASPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            CONTRAST_ADAPTIVE_SHARPENING_SHADER_HANDLE,
-            "robust_contrast_adaptive_sharpening.wgsl",
-            Shader::from_wgsl
-        );
-
         app.register_type::<ContrastAdaptiveSharpeningSettings>();
         app.add_plugins((
             ExtractComponentPlugin::<ContrastAdaptiveSharpeningSettings>::default(),
@@ -160,6 +152,12 @@ impl Plugin for CASPlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            CONTRAST_ADAPTIVE_SHARPENING_SHADER_UUID,
+            "robust_contrast_adaptive_sharpening.wgsl",
+            Shader::from_wgsl
+        );
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -171,6 +169,8 @@ impl Plugin for CASPlugin {
 pub struct CASPipeline {
     texture_bind_group: BindGroupLayout,
     sampler: Sampler,
+    fullscreen_vertex_shader_handle: Handle<Shader>,
+    contrast_adaptive_sharpening_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for CASPipeline {
@@ -191,9 +191,21 @@ impl FromWorld for CASPipeline {
 
         let sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
+        let internal_assets = render_world.resource::<InternalAssets<Shader>>();
+        let fullscreen_vertex_shader_handle = internal_assets
+            .get(&FULLSCREEN_SHADER_UUID)
+            .expect("FULLSCREEN_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let contrast_adaptive_sharpening_shader_handle = internal_assets
+            .get(&CONTRAST_ADAPTIVE_SHARPENING_SHADER_UUID)
+            .expect("CONTRAST_ADAPTIVE_SHARPENING_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         CASPipeline {
             texture_bind_group,
             sampler,
+            fullscreen_vertex_shader_handle,
+            contrast_adaptive_sharpening_shader_handle,
         }
     }
 }
@@ -215,9 +227,11 @@ impl SpecializedRenderPipeline for CASPipeline {
         RenderPipelineDescriptor {
             label: Some("contrast_adaptive_sharpening".into()),
             layout: vec![self.texture_bind_group.clone()],
-            vertex: fullscreen_shader_vertex_state(),
+            vertex: fullscreen_shader_vertex_state(
+                self.fullscreen_vertex_shader_handle.clone_weak(),
+            ),
             fragment: Some(FragmentState {
-                shader: CONTRAST_ADAPTIVE_SHARPENING_SHADER_HANDLE,
+                shader: self.contrast_adaptive_sharpening_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {

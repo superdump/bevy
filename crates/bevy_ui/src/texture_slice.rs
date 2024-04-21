@@ -64,7 +64,7 @@ impl ComputedTextureSlices {
                 rect,
                 flip_x,
                 flip_y,
-                image: image.texture.id(),
+                image: image.texture.index(),
                 atlas_size,
                 clip: clip.map(|clip| clip.clip),
                 camera_entity,

@@ -2,6 +2,7 @@ mod pipeline;
 mod render_pass;
 mod ui_material_pipeline;
 
+use bevy_asset::uuid::Uuid;
 use bevy_color::{Alpha, LinearRgba};
 use bevy_core_pipeline::core_2d::graph::{Core2d, Node2d};
 use bevy_core_pipeline::core_3d::graph::{Core3d, Node3d};
@@ -22,7 +23,7 @@ use crate::{
 };
 
 use bevy_app::prelude::*;
-use bevy_asset::{load_internal_asset, AssetEvent, AssetId, Assets, Handle};
+use bevy_asset::{AssetId, AssetIndex, Assets};
 use bevy_ecs::entity::EntityHashMap;
 use bevy_ecs::prelude::*;
 use bevy_math::{FloatOrd, Mat4, Rect, URect, UVec4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
@@ -57,7 +58,7 @@ pub mod graph {
     }
 }
 
-pub const UI_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(13012847047162779583);
+pub const UI_SHADER_UUID: Uuid = Uuid::from_u128(13012847047162779583);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
 pub enum RenderUiSystem {
@@ -68,8 +69,6 @@ pub enum RenderUiSystem {
 }
 
 pub fn build_ui_render(app: &mut App) {
-    load_internal_asset!(app, UI_SHADER_HANDLE, "ui.wgsl", Shader::from_wgsl);
-
     let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
         return;
     };
@@ -156,7 +155,7 @@ pub struct ExtractedUiNode {
     pub transform: Mat4,
     pub color: LinearRgba,
     pub rect: Rect,
-    pub image: AssetId<Image>,
+    pub image: AssetIndex,
     pub atlas_size: Option<Vec2>,
     pub clip: Option<Rect>,
     pub flip_x: bool,
@@ -249,7 +248,7 @@ pub fn extract_uinode_background_colors(
                     max: uinode.calculated_size,
                 },
                 clip: clip.map(|clip| clip.clip),
-                image: AssetId::default(),
+                image: AssetIndex::default(),
                 atlas_size: None,
                 flip_x: false,
                 flip_y: false,
@@ -356,7 +355,7 @@ pub fn extract_uinode_images(
                 color: image.color.into(),
                 rect,
                 clip: clip.map(|clip| clip.clip),
-                image: image.texture.id(),
+                image: image.texture.index(),
                 atlas_size,
                 flip_x: image.flip_x,
                 flip_y: image.flip_y,
@@ -529,7 +528,7 @@ pub fn extract_uinode_borders(
                     max: node.size(),
                     ..Default::default()
                 },
-                image,
+                image: image.index(),
                 atlas_size: None,
                 clip: clip.map(|clip| clip.clip),
                 flip_x: false,
@@ -621,7 +620,7 @@ pub fn extract_uinode_outlines(
                             max: edge.size(),
                             ..Default::default()
                         },
-                        image,
+                        image: image.index(),
                         atlas_size: None,
                         clip: maybe_clip.map(|clip| clip.clip),
                         flip_x: false,
@@ -794,7 +793,7 @@ pub fn extract_uinode_text(
                         * Mat4::from_translation(position.extend(0.) * inverse_scale_factor),
                     color,
                     rect,
-                    image: atlas_info.texture.id(),
+                    image: atlas_info.texture.index(),
                     atlas_size: Some(atlas.size.as_vec2() * inverse_scale_factor),
                     clip: clip.map(|clip| clip.clip),
                     flip_x: false,
@@ -857,7 +856,7 @@ pub(crate) const QUAD_INDICES: [usize; 6] = [0, 2, 3, 0, 1, 2];
 #[derive(Component)]
 pub struct UiBatch {
     pub range: Range<u32>,
-    pub image: AssetId<Image>,
+    pub image: AssetIndex,
     pub camera: Entity,
 }
 
@@ -908,7 +907,7 @@ pub fn queue_uinodes(
 
 #[derive(Resource, Default)]
 pub struct UiImageBindGroups {
-    pub values: HashMap<AssetId<Image>, BindGroup>,
+    pub values: HashMap<AssetIndex, BindGroup>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -927,18 +926,9 @@ pub fn prepare_uinodes(
     mut previous_len: Local<usize>,
 ) {
     // If an image has changed, the GpuImage has (probably) changed
-    for event in &events.images {
-        match event {
-            AssetEvent::Added { .. } |
-            AssetEvent::Unused { .. } |
-            // Images don't have dependencies
-            AssetEvent::LoadedWithDependencies { .. } => {}
-            AssetEvent::Modified { id } | AssetEvent::Removed { id } => {
-                image_bind_groups.values.remove(id);
-            }
-        };
+    for image_index in &events.changed_images {
+        image_bind_groups.values.remove(image_index);
     }
-
     if let Some(view_binding) = view_uniforms.uniforms.binding() {
         let mut batches: Vec<(Entity, UiBatch)> = Vec::with_capacity(*previous_len);
 
@@ -956,24 +946,24 @@ pub fn prepare_uinodes(
 
         for mut ui_phase in &mut phases {
             let mut batch_item_index = 0;
-            let mut batch_image_handle = AssetId::invalid();
+            let mut batch_image_index = AssetIndex::INVALID;
 
             for item_index in 0..ui_phase.items.len() {
                 let item = &mut ui_phase.items[item_index];
                 if let Some(extracted_uinode) = extracted_uinodes.uinodes.get(&item.entity) {
                     let mut existing_batch = batches.last_mut();
 
-                    if batch_image_handle == AssetId::invalid()
+                    if batch_image_index == AssetIndex::INVALID
                         || existing_batch.is_none()
-                        || (batch_image_handle != AssetId::default()
-                            && extracted_uinode.image != AssetId::default()
-                            && batch_image_handle != extracted_uinode.image)
+                        || (batch_image_index != AssetIndex::default()
+                            && extracted_uinode.image != AssetIndex::default()
+                            && batch_image_index != extracted_uinode.image)
                         || existing_batch.as_ref().map(|(_, b)| b.camera)
                             != Some(extracted_uinode.camera_entity)
                     {
                         if let Some(gpu_image) = gpu_images.get(extracted_uinode.image) {
                             batch_item_index = item_index;
-                            batch_image_handle = extracted_uinode.image;
+                            batch_image_index = extracted_uinode.image;
 
                             let new_batch = UiBatch {
                                 range: vertices_index..vertices_index,
@@ -985,7 +975,7 @@ pub fn prepare_uinodes(
 
                             image_bind_groups
                                 .values
-                                .entry(batch_image_handle)
+                                .entry(batch_image_index)
                                 .or_insert_with(|| {
                                     render_device.create_bind_group(
                                         "ui_material_bind_group",
@@ -1001,16 +991,16 @@ pub fn prepare_uinodes(
                         } else {
                             continue;
                         }
-                    } else if batch_image_handle == AssetId::default()
-                        && extracted_uinode.image != AssetId::default()
+                    } else if batch_image_index == AssetIndex::default()
+                        && extracted_uinode.image != AssetIndex::default()
                     {
                         if let Some(gpu_image) = gpu_images.get(extracted_uinode.image) {
-                            batch_image_handle = extracted_uinode.image;
+                            batch_image_index = extracted_uinode.image;
                             existing_batch.as_mut().unwrap().1.image = extracted_uinode.image;
 
                             image_bind_groups
                                 .values
-                                .entry(batch_image_handle)
+                                .entry(batch_image_index)
                                 .or_insert_with(|| {
                                     render_device.create_bind_group(
                                         "ui_material_bind_group",
@@ -1026,7 +1016,7 @@ pub fn prepare_uinodes(
                         }
                     }
 
-                    let mut flags = if extracted_uinode.image != AssetId::default() {
+                    let mut flags = if extracted_uinode.image != AssetIndex::default() {
                         shader_flags::TEXTURED
                     } else {
                         shader_flags::UNTEXTURED
@@ -1156,7 +1146,7 @@ pub fn prepare_uinodes(
                     existing_batch.unwrap().1.range.end = vertices_index;
                     ui_phase.items[batch_item_index].batch_range_mut().end += 1;
                 } else {
-                    batch_image_handle = AssetId::invalid();
+                    batch_image_index = AssetIndex::INVALID;
                 }
             }
         }

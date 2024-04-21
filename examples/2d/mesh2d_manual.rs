@@ -173,7 +173,7 @@ impl SpecializedRenderPipeline for ColoredMesh2dPipeline {
         RenderPipelineDescriptor {
             vertex: VertexState {
                 // Use our custom shader
-                shader: COLORED_MESH2D_SHADER_HANDLE,
+                shader: COLORED_MESH2D_SHADER_UUID,
                 entry_point: "vertex".into(),
                 shader_defs: vec![],
                 // Use our custom vertex buffer
@@ -181,7 +181,7 @@ impl SpecializedRenderPipeline for ColoredMesh2dPipeline {
             },
             fragment: Some(FragmentState {
                 // Use our custom shader
-                shader: COLORED_MESH2D_SHADER_HANDLE,
+                shader: COLORED_MESH2D_SHADER_UUID,
                 shader_defs: vec![],
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
@@ -279,15 +279,14 @@ fn fragment(in: FragmentInput) -> @location(0) vec4<f32> {
 pub struct ColoredMesh2dPlugin;
 
 /// Handle to the custom shader with a unique random ID
-pub const COLORED_MESH2D_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(13828845428412094821);
+pub const COLORED_MESH2D_SHADER_UUID: Handle<Shader> = Handle::weak_from_u128(13828845428412094821);
 
 impl Plugin for ColoredMesh2dPlugin {
     fn build(&self, app: &mut App) {
         // Load our custom shader
         let mut shaders = app.world_mut().resource_mut::<Assets<Shader>>();
         shaders.insert(
-            &COLORED_MESH2D_SHADER_HANDLE,
+            &COLORED_MESH2D_SHADER_UUID,
             Shader::from_wgsl(COLORED_MESH2D_SHADER, file!()),
         );
 
@@ -337,7 +336,7 @@ pub fn extract_colored_mesh2d(
         render_mesh_instances.insert(
             entity,
             RenderMesh2dInstance {
-                mesh_asset_id: handle.0.id(),
+                mesh_asset_index: handle.0.id(),
                 transforms,
                 material_bind_group_id: Material2dBindGroupId::default(),
                 automatic_batching: false,
@@ -377,7 +376,7 @@ pub fn queue_colored_mesh2d(
         // Queue all entities visible to that view
         for visible_entity in visible_entities.iter::<WithMesh2d>() {
             if let Some(mesh_instance) = render_mesh_instances.get(visible_entity) {
-                let mesh2d_handle = mesh_instance.mesh_asset_id;
+                let mesh2d_handle = mesh_instance.mesh_asset_index;
                 let mesh2d_transforms = &mesh_instance.transforms;
                 // Get our specialized pipeline
                 let mut mesh2d_key = mesh_key;

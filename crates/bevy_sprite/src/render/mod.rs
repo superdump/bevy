@@ -2,9 +2,9 @@ use std::ops::Range;
 
 use crate::{
     texture_atlas::{TextureAtlas, TextureAtlasLayout},
-    ComputedTextureSlices, Sprite, WithSprite, SPRITE_SHADER_HANDLE,
+    ComputedTextureSlices, Sprite, WithSprite, SPRITE_SHADER_UUID,
 };
-use bevy_asset::{AssetEvent, AssetId, Assets, Handle};
+use bevy_asset::{io::embedded::InternalAssets, AssetEvent, AssetIndex, Assets, Handle};
 use bevy_color::LinearRgba;
 use bevy_core_pipeline::{
     core_2d::Transparent2d,
@@ -37,7 +37,7 @@ use bevy_render::{
     Extract,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::HashMap;
+use bevy_utils::{HashMap, HashSet};
 use bytemuck::{Pod, Zeroable};
 use fixedbitset::FixedBitSet;
 
@@ -46,6 +46,7 @@ pub struct SpritePipeline {
     view_layout: BindGroupLayout,
     material_layout: BindGroupLayout,
     pub dummy_white_gpu_image: GpuImage,
+    pub sprite_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for SpritePipeline {
@@ -107,10 +108,17 @@ impl FromWorld for SpritePipeline {
             }
         };
 
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
+        let sprite_shader_handle = internal_assets
+            .get(&SPRITE_SHADER_UUID)
+            .expect("SPRITE_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         SpritePipeline {
             view_layout,
             material_layout,
             dummy_white_gpu_image,
+            sprite_shader_handle,
         }
     }
 }
@@ -246,13 +254,13 @@ impl SpecializedRenderPipeline for SpritePipeline {
 
         RenderPipelineDescriptor {
             vertex: VertexState {
-                shader: SPRITE_SHADER_HANDLE,
+                shader: self.sprite_shader_handle.clone_weak(),
                 entry_point: "vertex".into(),
                 shader_defs: shader_defs.clone(),
                 buffers: vec![instance_rate_vertex_buffer_layout],
             },
             fragment: Some(FragmentState {
-                shader: SPRITE_SHADER_HANDLE,
+                shader: self.sprite_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
@@ -292,7 +300,7 @@ pub struct ExtractedSprite {
     pub custom_size: Option<Vec2>,
     /// Asset ID of the [`Image`] of this sprite
     /// PERF: storing an `AssetId` instead of `Handle<Image>` enables some optimizations (`ExtractedSprite` becomes `Copy` and doesn't need to be dropped)
-    pub image_handle_id: AssetId<Image>,
+    pub image_index: AssetIndex,
     pub flip_x: bool,
     pub flip_y: bool,
     pub anchor: Vec2,
@@ -308,18 +316,28 @@ pub struct ExtractedSprites {
 
 #[derive(Resource, Default)]
 pub struct SpriteAssetEvents {
-    pub images: Vec<AssetEvent<Image>>,
+    pub changed_images: HashSet<AssetIndex>,
 }
 
 pub fn extract_sprite_events(
     mut events: ResMut<SpriteAssetEvents>,
     mut image_events: Extract<EventReader<AssetEvent<Image>>>,
 ) {
-    let SpriteAssetEvents { ref mut images } = *events;
-    images.clear();
+    let SpriteAssetEvents {
+        ref mut changed_images,
+    } = *events;
+    changed_images.clear();
 
     for event in image_events.read() {
-        images.push(*event);
+        match event {
+            AssetEvent::Added { .. } |
+            AssetEvent::Unused { .. } |
+            // Images don't have dependencies
+            AssetEvent::LoadedWithDependencies { .. } => {}
+            AssetEvent::Modified { id } | AssetEvent::Removed { id } => {
+                    changed_images.insert(id.index());
+            }
+        };
     }
 }
 
@@ -348,7 +366,7 @@ pub fn extract_sprites(
         if let Some(slices) = slices {
             extracted_sprites.sprites.extend(
                 slices
-                    .extract_sprites(transform, entity, sprite, handle)
+                    .extract_sprites(transform, entity, sprite, handle.index())
                     .map(|e| (commands.spawn_empty().id(), e)),
             );
         } else {
@@ -376,7 +394,7 @@ pub fn extract_sprites(
                     custom_size: sprite.custom_size,
                     flip_x: sprite.flip_x,
                     flip_y: sprite.flip_y,
-                    image_handle_id: handle.id(),
+                    image_index: handle.index(),
                     anchor: sprite.anchor.as_vec(),
                     original_entity: None,
                 },
@@ -429,13 +447,13 @@ impl Default for SpriteMeta {
 
 #[derive(Component, PartialEq, Eq, Clone)]
 pub struct SpriteBatch {
-    image_handle_id: AssetId<Image>,
+    image_index: AssetIndex,
     range: Range<u32>,
 }
 
 #[derive(Resource, Default)]
 pub struct ImageBindGroups {
-    values: HashMap<AssetId<Image>, BindGroup>,
+    values: HashMap<AssetIndex, BindGroup>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -538,16 +556,8 @@ pub fn prepare_sprites(
     events: Res<SpriteAssetEvents>,
 ) {
     // If an image has changed, the GpuImage has (probably) changed
-    for event in &events.images {
-        match event {
-            AssetEvent::Added { .. } |
-            AssetEvent::Unused { .. } |
-            // Images don't have dependencies
-            AssetEvent::LoadedWithDependencies { .. } => {}
-            AssetEvent::Modified { id } | AssetEvent::Removed { id } => {
-                image_bind_groups.values.remove(id);
-            }
-        };
+    for image_index in &events.changed_images {
+        image_bind_groups.values.remove(image_index);
     }
 
     if let Some(view_binding) = view_uniforms.uniforms.binding() {
@@ -570,7 +580,7 @@ pub fn prepare_sprites(
         for mut transparent_phase in &mut phases {
             let mut batch_item_index = 0;
             let mut batch_image_size = Vec2::ZERO;
-            let mut batch_image_handle = AssetId::invalid();
+            let mut batch_image_index = AssetIndex::INVALID;
 
             // Iterate through the phase items and detect when successive sprites that can be batched.
             // Spawn an entity with a `SpriteBatch` component for each possible batch.
@@ -581,21 +591,21 @@ pub fn prepare_sprites(
                     // If there is a phase item that is not a sprite, then we must start a new
                     // batch to draw the other phase item(s) and to respect draw order. This can be
                     // done by invalidating the batch_image_handle
-                    batch_image_handle = AssetId::invalid();
+                    batch_image_index = AssetIndex::INVALID;
                     continue;
                 };
 
-                let batch_image_changed = batch_image_handle != extracted_sprite.image_handle_id;
+                let batch_image_changed = batch_image_index != extracted_sprite.image_index;
                 if batch_image_changed {
-                    let Some(gpu_image) = gpu_images.get(extracted_sprite.image_handle_id) else {
+                    let Some(gpu_image) = gpu_images.get(extracted_sprite.image_index) else {
                         continue;
                     };
 
                     batch_image_size = gpu_image.size.as_vec2();
-                    batch_image_handle = extracted_sprite.image_handle_id;
+                    batch_image_index = extracted_sprite.image_index;
                     image_bind_groups
                         .values
-                        .entry(batch_image_handle)
+                        .entry(batch_image_index)
                         .or_insert_with(|| {
                             render_device.create_bind_group(
                                 "sprite_material_bind_group",
@@ -663,7 +673,7 @@ pub fn prepare_sprites(
                     batches.push((
                         item.entity,
                         SpriteBatch {
-                            image_handle_id: batch_image_handle,
+                            image_index: batch_image_index,
                             range: index..index,
                         },
                     ));
@@ -758,10 +768,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteTextureBindGrou
 
         pass.set_bind_group(
             I,
-            image_bind_groups
-                .values
-                .get(&batch.image_handle_id)
-                .unwrap(),
+            image_bind_groups.values.get(&batch.image_index).unwrap(),
             &[],
         );
         RenderCommandResult::Success

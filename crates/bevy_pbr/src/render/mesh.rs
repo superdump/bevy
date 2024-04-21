@@ -1,6 +1,6 @@
 use std::mem;
 
-use bevy_asset::{load_internal_asset, AssetId};
+use bevy_asset::{io::embedded::InternalAssets, load_internal_asset, AssetIndex};
 use bevy_core_pipeline::{
     core_3d::{AlphaMask3d, Opaque3d, Transmissive3d, Transparent3d, CORE_3D_DEPTH_FORMAT},
     deferred::{AlphaMask3dDeferred, Opaque3dDeferred},
@@ -61,15 +61,15 @@ pub struct MeshRenderPlugin {
     pub use_gpu_instance_buffer_builder: bool,
 }
 
-pub const FORWARD_IO_HANDLE: Handle<Shader> = Handle::weak_from_u128(2645551199423808407);
-pub const MESH_VIEW_TYPES_HANDLE: Handle<Shader> = Handle::weak_from_u128(8140454348013264787);
-pub const MESH_VIEW_BINDINGS_HANDLE: Handle<Shader> = Handle::weak_from_u128(9076678235888822571);
-pub const MESH_TYPES_HANDLE: Handle<Shader> = Handle::weak_from_u128(2506024101911992377);
-pub const MESH_BINDINGS_HANDLE: Handle<Shader> = Handle::weak_from_u128(16831548636314682308);
-pub const MESH_FUNCTIONS_HANDLE: Handle<Shader> = Handle::weak_from_u128(6300874327833745635);
-pub const MESH_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(3252377289100772450);
-pub const SKINNING_HANDLE: Handle<Shader> = Handle::weak_from_u128(13215291596265391738);
-pub const MORPH_HANDLE: Handle<Shader> = Handle::weak_from_u128(970982813587607345);
+pub const FORWARD_IO_UUID: Uuid = Uuid::from_u128(2645551199423808407);
+pub const MESH_VIEW_TYPES_UUID: Uuid = Uuid::from_u128(8140454348013264787);
+pub const MESH_VIEW_BINDINGS_UUID: Uuid = Uuid::from_u128(9076678235888822571);
+pub const MESH_TYPES_UUID: Uuid = Uuid::from_u128(2506024101911992377);
+pub const MESH_BINDINGS_UUID: Uuid = Uuid::from_u128(16831548636314682308);
+pub const MESH_FUNCTIONS_UUID: Uuid = Uuid::from_u128(6300874327833745635);
+pub const MESH_SHADER_UUID: Uuid = Uuid::from_u128(3252377289100772450);
+pub const SKINNING_UUID: Uuid = Uuid::from_u128(13215291596265391738);
+pub const MORPH_UUID: Uuid = Uuid::from_u128(970982813587607345);
 
 /// How many textures are allowed in the view bind group layout (`@group(0)`) before
 /// broader compatibility with WebGL and WebGPU is at risk, due to the minimum guaranteed
@@ -84,40 +84,6 @@ pub const MESH_PIPELINE_VIEW_LAYOUT_SAFE_MAX_TEXTURES: usize = 10;
 
 impl Plugin for MeshRenderPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, FORWARD_IO_HANDLE, "forward_io.wgsl", Shader::from_wgsl);
-        load_internal_asset!(
-            app,
-            MESH_VIEW_TYPES_HANDLE,
-            "mesh_view_types.wgsl",
-            Shader::from_wgsl_with_defs,
-            vec![
-                ShaderDefVal::UInt(
-                    "MAX_DIRECTIONAL_LIGHTS".into(),
-                    MAX_DIRECTIONAL_LIGHTS as u32
-                ),
-                ShaderDefVal::UInt(
-                    "MAX_CASCADES_PER_LIGHT".into(),
-                    MAX_CASCADES_PER_LIGHT as u32,
-                )
-            ]
-        );
-        load_internal_asset!(
-            app,
-            MESH_VIEW_BINDINGS_HANDLE,
-            "mesh_view_bindings.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(app, MESH_TYPES_HANDLE, "mesh_types.wgsl", Shader::from_wgsl);
-        load_internal_asset!(
-            app,
-            MESH_FUNCTIONS_HANDLE,
-            "mesh_functions.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(app, MESH_SHADER_HANDLE, "mesh.wgsl", Shader::from_wgsl);
-        load_internal_asset!(app, SKINNING_HANDLE, "skinning.wgsl", Shader::from_wgsl);
-        load_internal_asset!(app, MORPH_HANDLE, "morph.wgsl", Shader::from_wgsl);
-
         app.add_systems(
             PostUpdate,
             (no_automatic_skin_batching, no_automatic_morph_batching),
@@ -218,19 +184,52 @@ impl Plugin for MeshRenderPlugin {
                     per_object_buffer_batch_size,
                 ));
             }
-
-            render_app.init_resource::<MeshPipeline>();
         }
+        load_internal_asset!(app, FORWARD_IO_UUID, "forward_io.wgsl", Shader::from_wgsl);
+        load_internal_asset!(
+            app,
+            MESH_VIEW_TYPES_UUID,
+            "mesh_view_types.wgsl",
+            Shader::from_wgsl_with_defs,
+            vec![
+                ShaderDefVal::UInt(
+                    "MAX_DIRECTIONAL_LIGHTS".into(),
+                    MAX_DIRECTIONAL_LIGHTS as u32
+                ),
+                ShaderDefVal::UInt(
+                    "MAX_CASCADES_PER_LIGHT".into(),
+                    MAX_CASCADES_PER_LIGHT as u32,
+                )
+            ]
+        );
+        load_internal_asset!(
+            app,
+            MESH_VIEW_BINDINGS_UUID,
+            "mesh_view_bindings.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(app, MESH_TYPES_UUID, "mesh_types.wgsl", Shader::from_wgsl);
+        load_internal_asset!(
+            app,
+            MESH_FUNCTIONS_UUID,
+            "mesh_functions.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(app, MESH_SHADER_UUID, "mesh.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, SKINNING_UUID, "skinning.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, MORPH_UUID, "morph.wgsl", Shader::from_wgsl);
 
         // Load the mesh_bindings shader module here as it depends on runtime information about
         // whether storage buffers are supported, or the maximum uniform buffer binding size.
         load_internal_asset!(
             app,
-            MESH_BINDINGS_HANDLE,
+            MESH_BINDINGS_UUID,
             "mesh_bindings.wgsl",
             Shader::from_wgsl_with_defs,
             mesh_bindings_shader_defs
         );
+
+        app.sub_app_mut(RenderApp).init_resource::<MeshPipeline>();
     }
 }
 
@@ -394,7 +393,7 @@ pub struct RenderMeshInstanceGpu {
 /// a mesh.
 pub struct RenderMeshInstanceShared {
     /// The [`AssetId`] of the mesh.
-    pub mesh_asset_id: AssetId<Mesh>,
+    pub mesh_asset_index: AssetIndex,
     /// A slot for the material bind group ID.
     ///
     /// This is filled in during [`crate::material::queue_material_meshes`].
@@ -432,7 +431,7 @@ pub struct RenderMeshInstanceGpuBuilder {
 impl RenderMeshInstanceShared {
     fn from_components(
         previous_transform: Option<&PreviousGlobalTransform>,
-        handle: &Handle<Mesh>,
+        mesh_asset_index: AssetIndex,
         not_shadow_caster: bool,
         no_automatic_batching: bool,
     ) -> Self {
@@ -448,8 +447,7 @@ impl RenderMeshInstanceShared {
         );
 
         RenderMeshInstanceShared {
-            mesh_asset_id: handle.id(),
-
+            mesh_asset_index,
             flags: mesh_instance_flags,
             material_bind_group_id: AtomicMaterialBindGroupId::default(),
         }
@@ -498,10 +496,10 @@ impl RenderMeshInstances {
     }
 
     /// Returns the ID of the mesh asset attached to the given entity, if any.
-    pub(crate) fn mesh_asset_id(&self, entity: Entity) -> Option<AssetId<Mesh>> {
+    pub(crate) fn mesh_asset_index(&self, entity: Entity) -> Option<AssetIndex> {
         match *self {
-            RenderMeshInstances::CpuBuilding(ref instances) => instances.mesh_asset_id(entity),
-            RenderMeshInstances::GpuBuilding(ref instances) => instances.mesh_asset_id(entity),
+            RenderMeshInstances::CpuBuilding(ref instances) => instances.mesh_asset_index(entity),
+            RenderMeshInstances::GpuBuilding(ref instances) => instances.mesh_asset_index(entity),
         }
     }
 
@@ -521,7 +519,7 @@ impl RenderMeshInstances {
 
 pub(crate) trait RenderMeshInstancesTable {
     /// Returns the ID of the mesh asset attached to the given entity, if any.
-    fn mesh_asset_id(&self, entity: Entity) -> Option<AssetId<Mesh>>;
+    fn mesh_asset_index(&self, entity: Entity) -> Option<AssetIndex>;
 
     /// Constructs [`RenderMeshQueueData`] for the given entity, if it has a
     /// mesh attached.
@@ -529,8 +527,8 @@ pub(crate) trait RenderMeshInstancesTable {
 }
 
 impl RenderMeshInstancesTable for RenderMeshInstancesCpu {
-    fn mesh_asset_id(&self, entity: Entity) -> Option<AssetId<Mesh>> {
-        self.get(&entity).map(|instance| instance.mesh_asset_id)
+    fn mesh_asset_index(&self, entity: Entity) -> Option<AssetIndex> {
+        self.get(&entity).map(|instance| instance.mesh_asset_index)
     }
 
     fn render_mesh_queue_data(&self, entity: Entity) -> Option<RenderMeshQueueData> {
@@ -543,8 +541,8 @@ impl RenderMeshInstancesTable for RenderMeshInstancesCpu {
 
 impl RenderMeshInstancesTable for RenderMeshInstancesGpu {
     /// Returns the ID of the mesh asset attached to the given entity, if any.
-    fn mesh_asset_id(&self, entity: Entity) -> Option<AssetId<Mesh>> {
-        self.get(&entity).map(|instance| instance.mesh_asset_id)
+    fn mesh_asset_index(&self, entity: Entity) -> Option<AssetIndex> {
+        self.get(&entity).map(|instance| instance.mesh_asset_index)
     }
 
     /// Constructs [`RenderMeshQueueData`] for the given entity, if it has a
@@ -616,7 +614,7 @@ pub fn extract_meshes_for_cpu_building(
 
             let shared = RenderMeshInstanceShared::from_components(
                 previous_transform,
-                handle,
+                handle.index(),
                 not_shadow_caster,
                 no_automatic_batching,
             );
@@ -705,7 +703,7 @@ pub fn extract_meshes_for_gpu_building(
 
             let shared = RenderMeshInstanceShared::from_components(
                 previous_transform,
-                handle,
+                handle.index(),
                 not_shadow_caster,
                 no_automatic_batching,
             );
@@ -831,6 +829,8 @@ pub struct MeshPipeline {
     ///
     /// This affects whether reflection probes can be used.
     pub binding_arrays_are_usable: bool,
+
+    pub mesh_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for MeshPipeline {
@@ -839,8 +839,10 @@ impl FromWorld for MeshPipeline {
             Res<RenderDevice>,
             Res<DefaultImageSampler>,
             Res<RenderQueue>,
+            Res<InternalAssets<Shader>>,
         )> = SystemState::new(world);
-        let (render_device, default_sampler, render_queue) = system_state.get_mut(world);
+        let (render_device, default_sampler, render_queue, internal_assets) =
+            system_state.get_mut(world);
         let clustered_forward_buffer_binding_type = render_device
             .get_supported_read_only_binding_type(CLUSTERED_FORWARD_STORAGE_BUFFER_COUNT);
 
@@ -881,6 +883,11 @@ impl FromWorld for MeshPipeline {
             }
         };
 
+        let mesh_shader_handle = internal_assets
+            .get(&MESH_SHADER_UUID)
+            .expect("MESH_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         MeshPipeline {
             view_layouts,
             clustered_forward_buffer_binding_type,
@@ -888,6 +895,7 @@ impl FromWorld for MeshPipeline {
             mesh_layouts: MeshLayouts::new(&render_device),
             per_object_buffer_batch_size: GpuArrayBuffer::<MeshUniform>::batch_size(&render_device),
             binding_arrays_are_usable: binding_arrays_are_usable(&render_device),
+            mesh_shader_handle,
         }
     }
 }
@@ -896,10 +904,10 @@ impl MeshPipeline {
     pub fn get_image_texture<'a>(
         &'a self,
         gpu_images: &'a RenderAssets<GpuImage>,
-        handle_option: &Option<Handle<Image>>,
+        index_option: &Option<AssetIndex>,
     ) -> Option<(&'a TextureView, &'a Sampler)> {
-        if let Some(handle) = handle_option {
-            let gpu_image = gpu_images.get(handle)?;
+        if let Some(index) = index_option {
+            let gpu_image = gpu_images.get(*index)?;
             Some((&gpu_image.texture_view, &gpu_image.sampler))
         } else {
             Some((
@@ -927,7 +935,7 @@ impl GetBatchData for MeshPipeline {
     type Param = (SRes<RenderMeshInstances>, SRes<RenderLightmaps>);
     // The material bind group ID, the mesh ID, and the lightmap ID,
     // respectively.
-    type CompareData = (MaterialBindGroupId, AssetId<Mesh>, Option<AssetId<Image>>);
+    type CompareData = (MaterialBindGroupId, AssetIndex, Option<AssetIndex>);
 
     type BufferData = MeshUniform;
 
@@ -952,7 +960,7 @@ impl GetBatchData for MeshPipeline {
             ),
             mesh_instance.should_batch().then_some((
                 mesh_instance.material_bind_group_id.get(),
-                mesh_instance.mesh_asset_id,
+                mesh_instance.mesh_asset_index,
                 maybe_lightmap.map(|lightmap| lightmap.image),
             )),
         ))
@@ -982,7 +990,7 @@ impl GetFullBatchData for MeshPipeline {
             mesh_instance.current_uniform_index,
             mesh_instance.should_batch().then_some((
                 mesh_instance.material_bind_group_id.get(),
-                mesh_instance.mesh_asset_id,
+                mesh_instance.mesh_asset_index,
                 maybe_lightmap.map(|lightmap| lightmap.image),
             )),
         ))
@@ -1474,13 +1482,13 @@ impl SpecializedMeshPipeline for MeshPipeline {
 
         Ok(RenderPipelineDescriptor {
             vertex: VertexState {
-                shader: MESH_SHADER_HANDLE,
+                shader: self.mesh_shader_handle.clone_weak(),
                 entry_point: "vertex".into(),
                 shader_defs: shader_defs.clone(),
                 buffers: vec![vertex_buffer_layout],
             },
             fragment: Some(FragmentState {
-                shader: MESH_SHADER_HANDLE,
+                shader: self.mesh_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
@@ -1531,8 +1539,8 @@ impl SpecializedMeshPipeline for MeshPipeline {
 pub struct MeshBindGroups {
     model_only: Option<BindGroup>,
     skinned: Option<BindGroup>,
-    morph_targets: HashMap<AssetId<Mesh>, BindGroup>,
-    lightmaps: HashMap<AssetId<Image>, BindGroup>,
+    morph_targets: HashMap<AssetIndex, BindGroup>,
+    lightmaps: HashMap<AssetIndex, BindGroup>,
 }
 impl MeshBindGroups {
     pub fn reset(&mut self) {
@@ -1545,13 +1553,13 @@ impl MeshBindGroups {
     /// key `lightmap`.
     pub fn get(
         &self,
-        asset_id: AssetId<Mesh>,
-        lightmap: Option<AssetId<Image>>,
+        asset_index: AssetIndex,
+        lightmap: Option<AssetIndex>,
         is_skinned: bool,
         morph: bool,
     ) -> Option<&BindGroup> {
         match (is_skinned, morph, lightmap) {
-            (_, true, _) => self.morph_targets.get(&asset_id),
+            (_, true, _) => self.morph_targets.get(&asset_index),
             (true, false, _) => self.skinned.as_ref(),
             (false, false, Some(lightmap)) => self.lightmaps.get(&lightmap),
             (false, false, None) => self.model_only.as_ref(),
@@ -1691,7 +1699,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
 
         let entity = &item.entity();
 
-        let Some(mesh_asset_id) = mesh_instances.mesh_asset_id(*entity) else {
+        let Some(mesh_asset_index) = mesh_instances.mesh_asset_index(*entity) else {
             return RenderCommandResult::Success;
         };
         let skin_index = skin_indices.get(entity);
@@ -1705,7 +1713,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
             .get(entity)
             .map(|render_lightmap| render_lightmap.image);
 
-        let Some(bind_group) = bind_groups.get(mesh_asset_id, lightmap, is_skinned, is_morphed)
+        let Some(bind_group) = bind_groups.get(mesh_asset_index, lightmap, is_skinned, is_morphed)
         else {
             error!(
                 "The MeshBindGroups resource wasn't set in the render phase. \
@@ -1777,7 +1785,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
         let meshes = meshes.into_inner();
         let mesh_instances = mesh_instances.into_inner();
 
-        let Some(mesh_asset_id) = mesh_instances.mesh_asset_id(item.entity()) else {
+        let Some(mesh_asset_id) = mesh_instances.mesh_asset_index(item.entity()) else {
             return RenderCommandResult::Failure;
         };
         let Some(gpu_mesh) = meshes.get(mesh_asset_id) else {

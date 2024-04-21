@@ -68,7 +68,7 @@ pub mod prelude {
 
 use aabb::AabbGizmoPlugin;
 use bevy_app::{App, Last, Plugin};
-use bevy_asset::{load_internal_asset, Asset, AssetApp, Assets, Handle};
+use bevy_asset::{load_internal_asset, uuid::Uuid, Asset, AssetApp, Assets, Handle};
 use bevy_color::LinearRgba;
 use bevy_ecs::{
     component::Component,
@@ -104,8 +104,8 @@ use gizmos::GizmoStorage;
 use light::LightGizmoPlugin;
 use std::{any::TypeId, mem};
 
-const LINE_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(7414812689238026784);
-const LINE_JOINT_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(1162780797909187908);
+const LINE_SHADER_UUID: Uuid = Uuid::from_u128(7414812689238026784);
+const LINE_JOINT_SHADER_UUID: Uuid = Uuid::from_u128(1162780797909187908);
 
 /// A [`Plugin`] that provides an immediate mode drawing api for visual debugging.
 ///
@@ -118,14 +118,6 @@ impl Plugin for GizmoPlugin {
         #[cfg(all(not(feature = "bevy_pbr"), not(feature = "bevy_sprite")))]
         bevy_utils::tracing::error!(
             "bevy_gizmos requires either bevy_pbr or bevy_sprite. Please enable one."
-        );
-
-        load_internal_asset!(app, LINE_SHADER_HANDLE, "lines.wgsl", Shader::from_wgsl);
-        load_internal_asset!(
-            app,
-            LINE_JOINT_SHADER_HANDLE,
-            "line_joints.wgsl",
-            Shader::from_wgsl
         );
 
         app.register_type::<GizmoConfig>()
@@ -167,6 +159,14 @@ impl Plugin for GizmoPlugin {
     }
 
     fn finish(&self, app: &mut bevy_app::App) {
+        load_internal_asset!(app, LINE_SHADER_UUID, "lines.wgsl", Shader::from_wgsl);
+        load_internal_asset!(
+            app,
+            LINE_JOINT_SHADER_UUID,
+            "line_joints.wgsl",
+            Shader::from_wgsl
+        );
+
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -484,7 +484,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLineGizmo {
         let Some(handle) = handle else {
             return RenderCommandResult::Failure;
         };
-        let Some(line_gizmo) = line_gizmos.into_inner().get(handle) else {
+        let Some(line_gizmo) = line_gizmos.into_inner().get(handle.index()) else {
             return RenderCommandResult::Failure;
         };
 
@@ -530,7 +530,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLineJointGizmo {
         let Some(handle) = handle else {
             return RenderCommandResult::Failure;
         };
-        let Some(line_gizmo) = line_gizmos.into_inner().get(handle) else {
+        let Some(line_gizmo) = line_gizmos.into_inner().get(handle.index()) else {
             return RenderCommandResult::Failure;
         };
 

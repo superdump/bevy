@@ -136,15 +136,15 @@ use bevy_ecs::component::Component;
 use bevy_render::{
     render_asset::RenderAssets,
     render_resource::{
-        binding_types, BindGroupLayoutEntryBuilder, Sampler, SamplerBindingType, Shader,
-        TextureSampleType, TextureView,
+        binding_types, BindGroupLayoutEntryBuilder, Sampler, SamplerBindingType, TextureSampleType,
+        TextureView,
     },
     renderer::RenderDevice,
     texture::{FallbackImage, GpuImage, Image},
 };
 use std::{num::NonZeroU32, ops::Deref};
 
-use bevy_asset::{AssetId, Handle};
+use bevy_asset::{uuid::Uuid, AssetIndex, Handle};
 use bevy_reflect::Reflect;
 
 use crate::{
@@ -154,8 +154,8 @@ use crate::{
 
 use super::LightProbeComponent;
 
-pub const IRRADIANCE_VOLUME_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(160299515939076705258408299184317675488);
+pub const IRRADIANCE_VOLUME_SHADER_UUID: Uuid =
+    Uuid::from_u128(160299515939076705258408299184317675488);
 
 /// On WebGL and WebGPU, we must disable irradiance volumes, as otherwise we can
 /// overflow the number of texture bindings when deferred rendering is in use
@@ -316,17 +316,17 @@ pub(crate) fn get_bind_group_layout_entries(
 }
 
 impl LightProbeComponent for IrradianceVolume {
-    type AssetId = AssetId<Image>;
+    type AssetId = AssetIndex;
 
     // Irradiance volumes can't be attached to the view, so we store nothing
     // here.
     type ViewLightProbeInfo = ();
 
     fn id(&self, image_assets: &RenderAssets<GpuImage>) -> Option<Self::AssetId> {
-        if image_assets.get(&self.voxels).is_none() {
+        if image_assets.get(self.voxels.index()).is_none() {
             None
         } else {
-            Some(self.voxels.id())
+            Some(self.voxels.index())
         }
     }
 

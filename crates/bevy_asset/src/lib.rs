@@ -43,6 +43,7 @@ pub use loader::*;
 pub use path::*;
 pub use reflect::*;
 pub use server::*;
+pub use uuid;
 
 /// Rusty Object Notation, a crate used to serialize and deserialize bevy assets.
 pub use ron;

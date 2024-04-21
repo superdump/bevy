@@ -1,15 +1,15 @@
 use crate::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
-use bevy_app::{Plugin, Startup, Update};
-use bevy_asset::{load_internal_asset, Asset, Assets, Handle};
+use bevy_app::{App, Plugin, Startup, Update};
+use bevy_asset::{load_internal_asset, uuid::Uuid, Asset, Assets, Handle};
 use bevy_color::{Color, LinearRgba};
 use bevy_ecs::prelude::*;
 use bevy_reflect::{std_traits::ReflectDefault, Reflect, TypePath};
 use bevy_render::{
     extract_resource::ExtractResource, mesh::MeshVertexBufferLayoutRef, prelude::*,
-    render_resource::*,
+    render_resource::*, RenderApp,
 };
 
-pub const WIREFRAME_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(192598014480025766);
+pub const WIREFRAME_SHADER_UUID: Uuid = Uuid::from_u128(192598014480025766);
 
 /// A [`Plugin`] that draws wireframes.
 ///
@@ -24,13 +24,6 @@ pub const WIREFRAME_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(19259
 pub struct WireframePlugin;
 impl Plugin for WireframePlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        load_internal_asset!(
-            app,
-            WIREFRAME_SHADER_HANDLE,
-            "render/wireframe.wgsl",
-            Shader::from_wgsl
-        );
-
         app.register_type::<Wireframe>()
             .register_type::<NoWireframe>()
             .register_type::<WireframeConfig>()
@@ -48,6 +41,15 @@ impl Plugin for WireframePlugin {
                     (apply_wireframe_material, apply_global_wireframe_material).chain(),
                 ),
             );
+    }
+
+    fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            WIREFRAME_SHADER_UUID,
+            "render/wireframe.wgsl",
+            Shader::from_wgsl
+        );
     }
 }
 
@@ -203,7 +205,7 @@ pub struct WireframeMaterial {
 
 impl Material for WireframeMaterial {
     fn fragment_shader() -> ShaderRef {
-        WIREFRAME_SHADER_HANDLE.into()
+        WIREFRAME_SHADER_UUID.into()
     }
 
     fn specialize(

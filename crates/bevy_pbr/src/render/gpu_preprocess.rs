@@ -9,7 +9,7 @@
 use std::num::NonZeroU64;
 
 use bevy_app::{App, Plugin};
-use bevy_asset::{load_internal_asset, Handle};
+use bevy_asset::{io::embedded::InternalAssets, load_internal_asset, uuid::Uuid, Handle};
 use bevy_core_pipeline::core_3d::graph::{Core3d, Node3d};
 use bevy_ecs::{
     component::Component,
@@ -37,8 +37,7 @@ use bevy_utils::tracing::warn;
 use crate::{graph::NodePbr, MeshInputUniform, MeshUniform};
 
 /// The handle to the `mesh_preprocess.wgsl` compute shader.
-pub const MESH_PREPROCESS_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(16991728318640779533);
+pub const MESH_PREPROCESS_SHADER_UUID: Uuid = Uuid::from_u128(16991728318640779533);
 
 /// The GPU workgroup size.
 const WORKGROUP_SIZE: usize = 64;
@@ -69,6 +68,8 @@ pub struct PreprocessPipeline {
     ///
     /// This gets filled in in `prepare_preprocess_pipeline`.
     pub pipeline_id: Option<CachedComputePipelineId>,
+
+    pub mesh_preprocess_shader_handle: Handle<Shader>,
 }
 
 /// The compute shader bind group for the mesh uniform building pass.
@@ -78,16 +79,16 @@ pub struct PreprocessPipeline {
 pub struct PreprocessBindGroup(BindGroup);
 
 impl Plugin for GpuMeshPreprocessPlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, _app: &mut App) {}
+
+    fn finish(&self, app: &mut App) {
         load_internal_asset!(
             app,
-            MESH_PREPROCESS_SHADER_HANDLE,
+            MESH_PREPROCESS_SHADER_UUID,
             "mesh_preprocess.wgsl",
             Shader::from_wgsl
         );
-    }
 
-    fn finish(&self, app: &mut App) {
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -191,7 +192,7 @@ impl SpecializedComputePipeline for PreprocessPipeline {
             label: Some("mesh preprocessing".into()),
             layout: vec![self.bind_group_layout.clone()],
             push_constant_ranges: vec![],
-            shader: MESH_PREPROCESS_SHADER_HANDLE,
+            shader: self.mesh_preprocess_shader_handle.clone_weak(),
             shader_defs: vec![],
             entry_point: "main".into(),
         }
@@ -221,9 +222,16 @@ impl FromWorld for PreprocessPipeline {
             &bind_group_layout_entries,
         );
 
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
+        let mesh_preprocess_shader_handle = internal_assets
+            .get(&MESH_PREPROCESS_SHADER_UUID)
+            .expect("MESH_PREPROCESS_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         PreprocessPipeline {
             bind_group_layout,
             pipeline_id: None,
+            mesh_preprocess_shader_handle,
         }
     }
 }

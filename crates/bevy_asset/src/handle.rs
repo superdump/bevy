@@ -1,6 +1,6 @@
 use crate::{
-    meta::MetaTransform, Asset, AssetId, AssetIndexAllocator, AssetPath, InternalAssetId,
-    UntypedAssetId,
+    meta::MetaTransform, Asset, AssetId, AssetIndex, AssetIndexAllocator, AssetPath,
+    InternalAssetId, UntypedAssetId,
 };
 use bevy_ecs::prelude::*;
 use bevy_reflect::{std_traits::ReflectDefault, Reflect, TypePath};
@@ -12,7 +12,6 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use uuid::Uuid;
 
 /// Provides [`Handle`] and [`UntypedHandle`] _for a specific asset type_.
 /// This should _only_ be used for one specific asset type.
@@ -45,7 +44,7 @@ impl AssetHandleProvider {
     /// [`UntypedHandle`] will match the [`Asset`] [`TypeId`] assigned to this [`AssetHandleProvider`].
     pub fn reserve_handle(&self) -> UntypedHandle {
         let index = self.allocator.reserve();
-        UntypedHandle::Strong(self.get_handle(InternalAssetId::Index(index), false, None, None))
+        UntypedHandle::Strong(self.get_handle(InternalAssetId::from(index), false, None, None))
     }
 
     pub(crate) fn get_handle(
@@ -72,7 +71,7 @@ impl AssetHandleProvider {
     ) -> Arc<StrongHandle> {
         let index = self.allocator.reserve();
         self.get_handle(
-            InternalAssetId::Index(index),
+            InternalAssetId::from(index),
             asset_server_managed,
             path,
             meta_transform,
@@ -143,12 +142,13 @@ impl<T: Asset> Clone for Handle<T> {
 }
 
 impl<A: Asset> Handle<A> {
-    /// Create a new [`Handle::Weak`] with the given [`u128`] encoding of a [`Uuid`].
-    pub const fn weak_from_u128(value: u128) -> Self {
-        Handle::Weak(AssetId::Uuid {
-            uuid: Uuid::from_u128(value),
-        })
-    }
+    // No longer valid
+    // /// Create a new [`Handle::Weak`] with the given [`u128`] encoding of a [`Uuid`].
+    // pub const fn weak_from_u128(value: u128) -> Self {
+    //     Handle::Weak(AssetId::Uuid {
+    //         uuid: Uuid::from_u128(value),
+    //     })
+    // }
 
     /// Returns the [`AssetId`] of this [`Asset`].
     #[inline]
@@ -156,6 +156,14 @@ impl<A: Asset> Handle<A> {
         match self {
             Handle::Strong(handle) => handle.id.typed_unchecked(),
             Handle::Weak(id) => *id,
+        }
+    }
+
+    #[inline]
+    pub fn index(&self) -> AssetIndex {
+        match self {
+            Handle::Strong(handle) => handle.id.index(),
+            Handle::Weak(id) => id.index(),
         }
     }
 

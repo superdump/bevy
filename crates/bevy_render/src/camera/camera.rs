@@ -9,7 +9,7 @@ use crate::{
     view::{ColorGrading, ExtractedView, ExtractedWindows, RenderLayers, VisibleEntities},
     Extract,
 };
-use bevy_asset::{AssetEvent, AssetId, Assets, Handle};
+use bevy_asset::{AssetEvent, AssetIndex, Assets, Handle};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     change_detection::DetectChanges,
@@ -542,7 +542,7 @@ pub enum NormalizedRenderTarget {
     /// Window to which the camera's view is rendered.
     Window(NormalizedWindowRef),
     /// Image to which the camera's view is rendered.
-    Image(Handle<Image>),
+    Image(AssetIndex),
     /// Texture View to which the camera's view is rendered.
     /// Useful when the texture view needs to be created outside of Bevy, for example OpenXR.
     TextureView(ManualTextureViewHandle),
@@ -561,7 +561,7 @@ impl RenderTarget {
             RenderTarget::Window(window_ref) => window_ref
                 .normalize(primary_window)
                 .map(NormalizedRenderTarget::Window),
-            RenderTarget::Image(handle) => Some(NormalizedRenderTarget::Image(handle.clone())),
+            RenderTarget::Image(handle) => Some(NormalizedRenderTarget::Image(handle.index())),
             RenderTarget::TextureView(id) => Some(NormalizedRenderTarget::TextureView(*id)),
         }
     }
@@ -588,8 +588,8 @@ impl NormalizedRenderTarget {
             NormalizedRenderTarget::Window(window_ref) => windows
                 .get(&window_ref.entity())
                 .and_then(|window| window.swap_chain_texture_view.as_ref()),
-            NormalizedRenderTarget::Image(image_handle) => {
-                images.get(image_handle).map(|image| &image.texture_view)
+            NormalizedRenderTarget::Image(image_index) => {
+                images.get(*image_index).map(|image| &image.texture_view)
             }
             NormalizedRenderTarget::TextureView(id) => {
                 manual_texture_views.get(id).map(|tex| &tex.texture_view)
@@ -608,8 +608,8 @@ impl NormalizedRenderTarget {
             NormalizedRenderTarget::Window(window_ref) => windows
                 .get(&window_ref.entity())
                 .and_then(|window| window.swap_chain_texture_format),
-            NormalizedRenderTarget::Image(image_handle) => {
-                images.get(image_handle).map(|image| image.texture_format)
+            NormalizedRenderTarget::Image(image_index) => {
+                images.get(*image_index).map(|image| image.texture_format)
             }
             NormalizedRenderTarget::TextureView(id) => {
                 manual_texture_views.get(id).map(|tex| tex.format)
@@ -631,8 +631,8 @@ impl NormalizedRenderTarget {
                     physical_size: window.physical_size(),
                     scale_factor: window.resolution.scale_factor(),
                 }),
-            NormalizedRenderTarget::Image(image_handle) => {
-                let image = images.get(image_handle)?;
+            NormalizedRenderTarget::Image(image_index) => {
+                let image = images.get_with_index(*image_index)?;
                 Some(RenderTargetInfo {
                     physical_size: image.size(),
                     scale_factor: 1.0,
@@ -651,14 +651,14 @@ impl NormalizedRenderTarget {
     fn is_changed(
         &self,
         changed_window_ids: &HashSet<Entity>,
-        changed_image_handles: &HashSet<&AssetId<Image>>,
+        changed_image_handles: &HashSet<AssetIndex>,
     ) -> bool {
         match self {
             NormalizedRenderTarget::Window(window_ref) => {
                 changed_window_ids.contains(&window_ref.entity())
             }
-            NormalizedRenderTarget::Image(image_handle) => {
-                changed_image_handles.contains(&image_handle.id())
+            NormalizedRenderTarget::Image(image_index) => {
+                changed_image_handles.contains(image_index)
             }
             NormalizedRenderTarget::TextureView(_) => true,
         }
@@ -706,10 +706,10 @@ pub fn camera_system<T: CameraProjection + Component>(
         .collect();
     changed_window_ids.extend(scale_factor_changed_window_ids.clone());
 
-    let changed_image_handles: HashSet<&AssetId<Image>> = image_asset_events
+    let changed_image_handles: HashSet<AssetIndex> = image_asset_events
         .read()
         .filter_map(|event| match event {
-            AssetEvent::Modified { id } | AssetEvent::Added { id } => Some(id),
+            AssetEvent::Modified { id } | AssetEvent::Added { id } => Some(id.index()),
             _ => None,
         })
         .collect();

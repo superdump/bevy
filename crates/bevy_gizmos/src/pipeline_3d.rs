@@ -2,11 +2,11 @@ use crate::{
     config::{GizmoLineJoint, GizmoLineStyle, GizmoMeshConfig},
     line_gizmo_vertex_buffer_layouts, line_joint_gizmo_vertex_buffer_layouts, DrawLineGizmo,
     DrawLineJointGizmo, GizmoRenderSystem, GpuLineGizmo, LineGizmo,
-    LineGizmoUniformBindgroupLayout, SetLineGizmoBindGroup, LINE_JOINT_SHADER_HANDLE,
-    LINE_SHADER_HANDLE,
+    LineGizmoUniformBindgroupLayout, SetLineGizmoBindGroup, LINE_JOINT_SHADER_UUID,
+    LINE_SHADER_UUID,
 };
 use bevy_app::{App, Plugin};
-use bevy_asset::Handle;
+use bevy_asset::{io::embedded::InternalAssets, Handle};
 use bevy_core_pipeline::{
     core_3d::{Transparent3d, CORE_3D_DEPTH_FORMAT},
     prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
@@ -70,6 +70,7 @@ impl Plugin for LineGizmo3dPlugin {
 struct LineGizmoPipeline {
     mesh_pipeline: MeshPipeline,
     uniform_layout: BindGroupLayout,
+    line_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for LineGizmoPipeline {
@@ -80,6 +81,11 @@ impl FromWorld for LineGizmoPipeline {
                 .resource::<LineGizmoUniformBindgroupLayout>()
                 .layout
                 .clone(),
+            line_shader_handle: render_world
+                .resource::<InternalAssets<Shader>>()
+                .get(&LINE_SHADER_UUID)
+                .expect("LINE_SHADER_UUID is not present in InternalAssets")
+                .clone_weak(),
         }
     }
 }
@@ -125,13 +131,13 @@ impl SpecializedRenderPipeline for LineGizmoPipeline {
 
         RenderPipelineDescriptor {
             vertex: VertexState {
-                shader: LINE_SHADER_HANDLE,
+                shader: self.line_shader_handle.clone_weak(),
                 entry_point: "vertex".into(),
                 shader_defs: shader_defs.clone(),
                 buffers: line_gizmo_vertex_buffer_layouts(key.strip),
             },
             fragment: Some(FragmentState {
-                shader: LINE_SHADER_HANDLE,
+                shader: self.line_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point: fragment_entry_point.into(),
                 targets: vec![Some(ColorTargetState {
@@ -164,6 +170,7 @@ impl SpecializedRenderPipeline for LineGizmoPipeline {
 struct LineJointGizmoPipeline {
     mesh_pipeline: MeshPipeline,
     uniform_layout: BindGroupLayout,
+    line_joint_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for LineJointGizmoPipeline {
@@ -174,6 +181,11 @@ impl FromWorld for LineJointGizmoPipeline {
                 .resource::<LineGizmoUniformBindgroupLayout>()
                 .layout
                 .clone(),
+            line_joint_shader_handle: render_world
+                .resource::<InternalAssets<Shader>>()
+                .get(&LINE_JOINT_SHADER_UUID)
+                .expect("LINE_JOINT_SHADER_UUID is not present in InternalAssets")
+                .clone_weak(),
         }
     }
 }
@@ -223,13 +235,13 @@ impl SpecializedRenderPipeline for LineJointGizmoPipeline {
 
         RenderPipelineDescriptor {
             vertex: VertexState {
-                shader: LINE_JOINT_SHADER_HANDLE,
+                shader: self.line_joint_shader_handle.clone_weak(),
                 entry_point: entry_point.into(),
                 shader_defs: shader_defs.clone(),
                 buffers: line_joint_gizmo_vertex_buffer_layouts(),
             },
             fragment: Some(FragmentState {
-                shader: LINE_JOINT_SHADER_HANDLE,
+                shader: self.line_joint_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
@@ -327,7 +339,7 @@ fn queue_line_gizmos_3d(
                 continue;
             }
 
-            let Some(line_gizmo) = line_gizmo_assets.get(handle) else {
+            let Some(line_gizmo) = line_gizmo_assets.get(handle.index()) else {
                 continue;
             };
 
@@ -413,7 +425,7 @@ fn queue_line_joint_gizmos_3d(
                 continue;
             }
 
-            let Some(line_gizmo) = line_gizmo_assets.get(handle) else {
+            let Some(line_gizmo) = line_gizmo_assets.get(handle.index()) else {
                 continue;
             };
 

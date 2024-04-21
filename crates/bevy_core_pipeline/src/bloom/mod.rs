@@ -10,7 +10,7 @@ use crate::{
     core_3d::graph::{Core3d, Node3d},
 };
 use bevy_app::{App, Plugin};
-use bevy_asset::{load_internal_asset, Handle};
+use bevy_asset::{load_internal_asset, uuid::Uuid};
 use bevy_ecs::{prelude::*, query::QueryItem};
 use bevy_math::UVec2;
 use bevy_render::{
@@ -34,7 +34,7 @@ use upsampling_pipeline::{
     prepare_upsampling_pipeline, BloomUpsamplingPipeline, UpsamplingPipelineIds,
 };
 
-const BLOOM_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(929599476923908);
+const BLOOM_SHADER_UUID: Uuid = Uuid::from_u128(929599476923908);
 
 const BLOOM_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg11b10Float;
 
@@ -46,8 +46,6 @@ pub struct BloomPlugin;
 
 impl Plugin for BloomPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, BLOOM_SHADER_HANDLE, "bloom.wgsl", Shader::from_wgsl);
-
         app.register_type::<BloomSettings>();
         app.register_type::<BloomPrefilterSettings>();
         app.register_type::<BloomCompositeMode>();
@@ -86,6 +84,7 @@ impl Plugin for BloomPlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(app, BLOOM_SHADER_UUID, "bloom.wgsl", Shader::from_wgsl);
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };

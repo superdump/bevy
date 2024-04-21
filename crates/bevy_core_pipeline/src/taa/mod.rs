@@ -1,11 +1,11 @@
 use crate::{
     core_3d::graph::{Core3d, Node3d},
-    fullscreen_vertex_shader::fullscreen_shader_vertex_state,
+    fullscreen_vertex_shader::{fullscreen_shader_vertex_state, FULLSCREEN_SHADER_UUID},
     prelude::Camera3d,
     prepass::{DepthPrepass, MotionVectorPrepass, ViewPrepassTextures},
 };
 use bevy_app::{App, Plugin};
-use bevy_asset::{load_internal_asset, Handle};
+use bevy_asset::{io::embedded::InternalAssets, load_internal_asset, uuid::Uuid, Handle};
 use bevy_core::FrameCount;
 use bevy_ecs::{
     prelude::{Bundle, Component, Entity},
@@ -35,7 +35,7 @@ use bevy_render::{
     ExtractSchedule, MainWorld, Render, RenderApp, RenderSet,
 };
 
-const TAA_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(656865235226276);
+const TAA_SHADER_UUID: Uuid = Uuid::from_u128(656865235226276);
 
 /// Plugin for temporal anti-aliasing. Disables multisample anti-aliasing (MSAA).
 ///
@@ -44,7 +44,7 @@ pub struct TemporalAntiAliasPlugin;
 
 impl Plugin for TemporalAntiAliasPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, TAA_SHADER_HANDLE, "taa.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, TAA_SHADER_UUID, "taa.wgsl", Shader::from_wgsl);
 
         app.insert_resource(Msaa::Off)
             .register_type::<TemporalAntiAliasSettings>();
@@ -238,6 +238,8 @@ struct TaaPipeline {
     taa_bind_group_layout: BindGroupLayout,
     nearest_sampler: Sampler,
     linear_sampler: Sampler,
+    fullscreen_vertex_shader_handle: Handle<Shader>,
+    taa_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for TaaPipeline {
@@ -278,10 +280,22 @@ impl FromWorld for TaaPipeline {
             ),
         );
 
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
+        let fullscreen_vertex_shader_handle = internal_assets
+            .get(&FULLSCREEN_SHADER_UUID)
+            .expect("FULLSCREEN_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let taa_shader_handle = internal_assets
+            .get(&TAA_SHADER_UUID)
+            .expect("TAA_SHADER_UUID not present in InternalAssets")
+            .clone_weak();
+
         TaaPipeline {
             taa_bind_group_layout,
             nearest_sampler,
             linear_sampler,
+            fullscreen_vertex_shader_handle,
+            taa_shader_handle,
         }
     }
 }
@@ -312,9 +326,11 @@ impl SpecializedRenderPipeline for TaaPipeline {
         RenderPipelineDescriptor {
             label: Some("taa_pipeline".into()),
             layout: vec![self.taa_bind_group_layout.clone()],
-            vertex: fullscreen_shader_vertex_state(),
+            vertex: fullscreen_shader_vertex_state(
+                self.fullscreen_vertex_shader_handle.clone_weak(),
+            ),
             fragment: Some(FragmentState {
-                shader: TAA_SHADER_HANDLE,
+                shader: self.taa_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point: "taa".into(),
                 targets: vec![

@@ -163,9 +163,9 @@ pub fn queue_material_meshlet_meshes<M: Material>(
     let gpu_scene = gpu_scene.deref_mut();
 
     for (i, (instance, _, _)) in gpu_scene.instances.iter().enumerate() {
-        if let Some(material_asset_id) = render_material_instances.get(instance) {
-            let material_asset_id = material_asset_id.untyped();
-            if let Some(material_id) = gpu_scene.material_id_lookup.get(&material_asset_id) {
+        if let Some(material_asset_index) = render_material_instances.get(instance) {
+            let material_asset_index = material_asset_index.untyped();
+            if let Some(material_id) = gpu_scene.material_id_lookup.get(&material_asset_index) {
                 gpu_scene.material_ids_present_in_scene.insert(*material_id);
                 gpu_scene.instance_material_ids.get_mut()[i] = *material_id;
             }

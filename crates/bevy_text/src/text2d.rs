@@ -144,7 +144,7 @@ pub fn extract_text2d_sprite(
                     color,
                     rect: Some(atlas.textures[atlas_info.glyph_index].as_rect()),
                     custom_size: None,
-                    image_handle_id: atlas_info.texture.id(),
+                    image_index: atlas_info.texture.index(),
                     flip_x: false,
                     flip_y: false,
                     anchor: Anchor::Center.as_vec(),

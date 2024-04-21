@@ -1,4 +1,4 @@
-use crate::{self as bevy_asset};
+use crate::{self as bevy_asset, InternalAssetId};
 use crate::{
     Asset, AssetEvent, AssetHandleProvider, AssetId, AssetServer, Handle, LoadState, UntypedHandle,
 };
@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     any::TypeId,
     iter::Enumerate,
-    marker::PhantomData,
     sync::{atomic::AtomicU32, Arc},
 };
 use thiserror::Error;
@@ -22,7 +21,18 @@ use uuid::Uuid;
 /// A generational runtime-only identifier for a specific [`Asset`] stored in [`Assets`]. This is optimized for efficient runtime
 /// usage and is not suitable for identifying assets across app runs.
 #[derive(
-    Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Reflect, Serialize, Deserialize,
+    Debug,
+    Default,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Reflect,
+    Serialize,
+    Deserialize,
 )]
 pub struct AssetIndex {
     pub(crate) generation: u32,
@@ -30,6 +40,11 @@ pub struct AssetIndex {
 }
 
 impl AssetIndex {
+    pub const INVALID: Self = Self {
+        generation: u32::MAX,
+        index: u32::MAX,
+    };
+
     /// Convert the [`AssetIndex`] into an opaque blob of bits to transport it in circumstances where carrying a strongly typed index isn't possible.
     ///
     /// The result of this function should not be relied upon for anything except putting it back into [`AssetIndex::from_bits`] to recover the index.
@@ -291,7 +306,8 @@ impl<A: Asset> DenseAssetStorage<A> {
 #[derive(Resource)]
 pub struct Assets<A: Asset> {
     dense_storage: DenseAssetStorage<A>,
-    hash_map: HashMap<Uuid, A>,
+    // Uuid assets are stored in dense storage
+    hash_map: HashMap<Uuid, AssetIndex>,
     handle_provider: AssetHandleProvider,
     queued_events: Vec<AssetEvent<A>>,
     /// Assets managed by the `Assets` struct with live strong `Handle`s
@@ -328,13 +344,11 @@ impl<A: Asset> Assets<A> {
 
     /// Inserts the given `asset`, identified by the given `id`. If an asset already exists for `id`, it will be replaced.
     pub fn insert(&mut self, id: impl Into<AssetId<A>>, asset: A) {
-        match id.into() {
-            AssetId::Index { index, .. } => {
-                self.insert_with_index(index, asset).unwrap();
-            }
-            AssetId::Uuid { uuid } => {
-                self.insert_with_uuid(uuid, asset);
-            }
+        let id = id.into();
+        if let Some(uuid) = id.uuid() {
+            self.insert_with_uuid(uuid, asset);
+        } else {
+            self.insert_with_index(id.index(), asset).unwrap();
         }
     }
 
@@ -354,23 +368,39 @@ impl<A: Asset> Assets<A> {
 
     /// Returns `true` if the `id` exists in this collection. Otherwise it returns `false`.
     pub fn contains(&self, id: impl Into<AssetId<A>>) -> bool {
-        match id.into() {
-            AssetId::Index { index, .. } => self.dense_storage.get(index).is_some(),
-            AssetId::Uuid { uuid } => self.hash_map.contains_key(&uuid),
+        self.dense_storage.get(id.into().index()).is_some()
+    }
+
+    // No longer necessary
+    pub fn insert_with_uuid(&mut self, uuid: Uuid, asset: A) -> (Handle<A>, Option<A>) {
+        if let Some(&index) = self.hash_map.get(&uuid) {
+            let old = self.dense_storage.remove_still_alive(index);
+            self.dense_storage.insert(index, asset).unwrap();
+            let id = AssetId::<A>::new(Some(uuid), index);
+            self.queued_events.push(AssetEvent::Modified { id });
+            (
+                Handle::Strong(
+                    self.handle_provider
+                        .get_handle(id.into(), false, None, None),
+                ),
+                old,
+            )
+        } else {
+            let index = self.dense_storage.allocator.reserve();
+            self.hash_map.insert(uuid, index);
+            self.dense_storage.insert(index, asset).unwrap();
+            let id = AssetId::<A>::new(Some(uuid), index);
+            self.queued_events.push(AssetEvent::Added { id });
+            (
+                Handle::Strong(
+                    self.handle_provider
+                        .get_handle(id.into(), false, None, None),
+                ),
+                None,
+            )
         }
     }
 
-    pub(crate) fn insert_with_uuid(&mut self, uuid: Uuid, asset: A) -> Option<A> {
-        let result = self.hash_map.insert(uuid, asset);
-        if result.is_some() {
-            self.queued_events
-                .push(AssetEvent::Modified { id: uuid.into() });
-        } else {
-            self.queued_events
-                .push(AssetEvent::Added { id: uuid.into() });
-        }
-        result
-    }
     pub(crate) fn insert_with_index(
         &mut self,
         index: AssetIndex,
@@ -408,23 +438,24 @@ impl<A: Asset> Assets<A> {
             return None;
         }
         *self.duplicate_handles.entry(id).or_insert(0) += 1;
-        let index = match id {
-            AssetId::Index { index, .. } => index.into(),
-            AssetId::Uuid { uuid } => uuid.into(),
-        };
-        Some(Handle::Strong(
-            self.handle_provider.get_handle(index, false, None, None),
-        ))
+        Some(Handle::Strong(self.handle_provider.get_handle(
+            InternalAssetId::from(id),
+            false,
+            None,
+            None,
+        )))
     }
 
     /// Retrieves a reference to the [`Asset`] with the given `id`, if it exists.
     /// Note that this supports anything that implements `Into<AssetId<A>>`, which includes [`Handle`] and [`AssetId`].
     #[inline]
     pub fn get(&self, id: impl Into<AssetId<A>>) -> Option<&A> {
-        match id.into() {
-            AssetId::Index { index, .. } => self.dense_storage.get(index),
-            AssetId::Uuid { uuid } => self.hash_map.get(&uuid),
-        }
+        self.dense_storage.get(id.into().index())
+    }
+
+    #[inline]
+    pub fn get_with_index(&self, index: AssetIndex) -> Option<&A> {
+        self.dense_storage.get(index)
     }
 
     /// Retrieves a mutable reference to the [`Asset`] with the given `id`, if it exists.
@@ -432,10 +463,7 @@ impl<A: Asset> Assets<A> {
     #[inline]
     pub fn get_mut(&mut self, id: impl Into<AssetId<A>>) -> Option<&mut A> {
         let id: AssetId<A> = id.into();
-        let result = match id {
-            AssetId::Index { index, .. } => self.dense_storage.get_mut(index),
-            AssetId::Uuid { uuid } => self.hash_map.get_mut(&uuid),
-        };
+        let result = self.dense_storage.get_mut(id.index());
         if result.is_some() {
             self.queued_events.push(AssetEvent::Modified { id });
         }
@@ -458,10 +486,7 @@ impl<A: Asset> Assets<A> {
     pub fn remove_untracked(&mut self, id: impl Into<AssetId<A>>) -> Option<A> {
         let id: AssetId<A> = id.into();
         self.duplicate_handles.remove(&id);
-        match id {
-            AssetId::Index { index, .. } => self.dense_storage.remove_still_alive(index),
-            AssetId::Uuid { uuid } => self.hash_map.remove(&uuid),
-        }
+        self.dense_storage.remove_still_alive(id.index())
     }
 
     /// Removes the [`Asset`] with the given `id`.
@@ -473,10 +498,7 @@ impl<A: Asset> Assets<A> {
                 return;
             }
         }
-        let existed = match id {
-            AssetId::Index { index, .. } => self.dense_storage.remove_dropped(index).is_some(),
-            AssetId::Uuid { uuid } => self.hash_map.remove(&uuid).is_some(),
-        };
+        let existed = self.dense_storage.remove_dropped(id.index()).is_some();
         if existed {
             self.queued_events.push(AssetEvent::Removed { id });
         }
@@ -484,19 +506,17 @@ impl<A: Asset> Assets<A> {
 
     /// Returns `true` if there are no assets in this collection.
     pub fn is_empty(&self) -> bool {
-        self.dense_storage.is_empty() && self.hash_map.is_empty()
+        self.dense_storage.is_empty()
     }
 
     /// Returns the number of assets currently stored in the collection.
     pub fn len(&self) -> usize {
-        self.dense_storage.len() + self.hash_map.len()
+        self.dense_storage.len()
     }
 
     /// Returns an iterator over the [`AssetId`] of every [`Asset`] stored in this collection.
     pub fn ids(&self) -> impl Iterator<Item = AssetId<A>> + '_ {
-        self.dense_storage
-            .ids()
-            .chain(self.hash_map.keys().map(|uuid| AssetId::from(*uuid)))
+        self.dense_storage.ids()
     }
 
     /// Returns an iterator over the [`AssetId`] and [`Asset`] ref of every asset in this collection.
@@ -509,21 +529,15 @@ impl<A: Asset> Assets<A> {
             .filter_map(|(i, v)| match v {
                 Entry::None => None,
                 Entry::Some { value, generation } => value.as_ref().map(|v| {
-                    let id = AssetId::Index {
-                        index: AssetIndex {
+                    (
+                        AssetId::<A>::from(AssetIndex {
                             generation: *generation,
                             index: i as u32,
-                        },
-                        marker: PhantomData,
-                    };
-                    (id, v)
+                        }),
+                        v,
+                    )
                 }),
             })
-            .chain(
-                self.hash_map
-                    .iter()
-                    .map(|(i, v)| (AssetId::Uuid { uuid: *i }, v)),
-            )
     }
 
     /// Returns an iterator over the [`AssetId`] and mutable [`Asset`] ref of every asset in this collection.
@@ -531,7 +545,6 @@ impl<A: Asset> Assets<A> {
     pub fn iter_mut(&mut self) -> AssetsMutIterator<'_, A> {
         AssetsMutIterator {
             dense_storage: self.dense_storage.storage.iter_mut().enumerate(),
-            hash_map: self.hash_map.iter_mut(),
             queued_events: &mut self.queued_events,
         }
     }
@@ -596,7 +609,6 @@ impl<A: Asset> Assets<A> {
 pub struct AssetsMutIterator<'a, A: Asset> {
     queued_events: &'a mut Vec<AssetEvent<A>>,
     dense_storage: Enumerate<std::slice::IterMut<'a, Entry<A>>>,
-    hash_map: bevy_utils::hashbrown::hash_map::IterMut<'a, Uuid, A>,
 }
 
 impl<'a, A: Asset> Iterator for AssetsMutIterator<'a, A> {
@@ -609,13 +621,10 @@ impl<'a, A: Asset> Iterator for AssetsMutIterator<'a, A> {
                     continue;
                 }
                 Entry::Some { value, generation } => {
-                    let id = AssetId::Index {
-                        index: AssetIndex {
-                            generation: *generation,
-                            index: i as u32,
-                        },
-                        marker: PhantomData,
-                    };
+                    let id = AssetId::from(AssetIndex {
+                        generation: *generation,
+                        index: i as u32,
+                    });
                     self.queued_events.push(AssetEvent::Modified { id });
                     if let Some(value) = value {
                         return Some((id, value));
@@ -623,13 +632,7 @@ impl<'a, A: Asset> Iterator for AssetsMutIterator<'a, A> {
                 }
             }
         }
-        if let Some((key, value)) = self.hash_map.next() {
-            let id = AssetId::Uuid { uuid: *key };
-            self.queued_events.push(AssetEvent::Modified { id });
-            Some((id, value))
-        } else {
-            None
-        }
+        None
     }
 }
 

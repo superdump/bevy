@@ -17,6 +17,7 @@ pub mod ui_material;
 pub mod update;
 pub mod widget;
 
+use bevy_asset::load_internal_asset;
 use bevy_derive::{Deref, DerefMut};
 use bevy_reflect::Reflect;
 #[cfg(feature = "bevy_text")]
@@ -54,6 +55,7 @@ use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_input::InputSystem;
 use bevy_render::{
+    render_resource::Shader,
     view::{check_visibility, VisibilitySystems},
     RenderApp,
 };
@@ -188,6 +190,7 @@ impl Plugin for UiPlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(app, UI_SHADER_UUID, "render/ui.wgsl", Shader::from_wgsl);
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };

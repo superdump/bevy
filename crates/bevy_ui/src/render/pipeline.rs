@@ -1,3 +1,4 @@
+use bevy_asset::{io::embedded::InternalAssets, Handle};
 use bevy_ecs::prelude::*;
 use bevy_render::{
     render_resource::{
@@ -9,15 +10,19 @@ use bevy_render::{
     view::{ViewTarget, ViewUniform},
 };
 
+use crate::UI_SHADER_UUID;
+
 #[derive(Resource)]
 pub struct UiPipeline {
     pub view_layout: BindGroupLayout,
     pub image_layout: BindGroupLayout,
+    pub ui_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for UiPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
 
         let view_layout = render_device.create_bind_group_layout(
             "ui_view_layout",
@@ -38,9 +43,15 @@ impl FromWorld for UiPipeline {
             ),
         );
 
+        let ui_shader_handle = internal_assets
+            .get(&UI_SHADER_UUID)
+            .expect("UI_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         UiPipeline {
             view_layout,
             image_layout,
+            ui_shader_handle,
         }
     }
 }
@@ -77,13 +88,13 @@ impl SpecializedRenderPipeline for UiPipeline {
 
         RenderPipelineDescriptor {
             vertex: VertexState {
-                shader: super::UI_SHADER_HANDLE,
+                shader: self.ui_shader_handle.clone_weak(),
                 entry_point: "vertex".into(),
                 shader_defs: shader_defs.clone(),
                 buffers: vec![vertex_layout],
             },
             fragment: Some(FragmentState {
-                shader: super::UI_SHADER_HANDLE,
+                shader: self.ui_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {

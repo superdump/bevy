@@ -18,22 +18,20 @@ use thiserror::Error;
 ///
 /// For an "untyped" / "generic-less" id, see [`UntypedAssetId`].
 #[derive(Reflect, Serialize, Deserialize)]
-pub enum AssetId<A: Asset> {
+pub struct AssetId<A: Asset> {
     /// A small / efficient runtime identifier that can be used to efficiently look up an asset stored in [`Assets`]. This is
     /// the "default" identifier used for assets. The alternative(s) (ex: [`AssetId::Uuid`]) will only be used if assets are
     /// explicitly registered that way.
     ///
     /// [`Assets`]: crate::Assets
-    Index {
-        index: AssetIndex,
-        #[reflect(ignore)]
-        marker: PhantomData<fn() -> A>,
-    },
+    index: AssetIndex,
+    #[reflect(ignore)]
+    marker: PhantomData<fn() -> A>,
     /// A stable-across-runs / const asset identifier. This will only be used if an asset is explicitly registered in [`Assets`]
     /// with one.
     ///
     /// [`Assets`]: crate::Assets
-    Uuid { uuid: Uuid },
+    uuid: Option<Uuid>,
 }
 
 impl<A: Asset> AssetId<A> {
@@ -48,9 +46,30 @@ impl<A: Asset> AssetId<A> {
     /// Returns an [`AssetId`] with [`Self::INVALID_UUID`], which _should_ never be assigned to.
     #[inline]
     pub const fn invalid() -> Self {
-        Self::Uuid {
-            uuid: Self::INVALID_UUID,
+        Self {
+            uuid: Some(Self::INVALID_UUID),
+            index: AssetIndex::INVALID,
+            marker: PhantomData,
         }
+    }
+
+    #[inline]
+    pub fn new(uuid: Option<Uuid>, index: AssetIndex) -> Self {
+        Self {
+            index,
+            marker: PhantomData,
+            uuid,
+        }
+    }
+
+    #[inline]
+    pub fn index(&self) -> AssetIndex {
+        self.index
+    }
+
+    #[inline]
+    pub fn uuid(&self) -> Option<Uuid> {
+        self.uuid
     }
 
     /// Converts this to an "untyped" / "generic-less" [`Asset`] identifier that stores the type information
@@ -62,17 +81,19 @@ impl<A: Asset> AssetId<A> {
 
     #[inline]
     pub(crate) fn internal(self) -> InternalAssetId {
-        match self {
-            AssetId::Index { index, .. } => InternalAssetId::Index(index),
-            AssetId::Uuid { uuid } => InternalAssetId::Uuid(uuid),
+        InternalAssetId {
+            index: self.index,
+            uuid: self.uuid,
         }
     }
 }
 
 impl<A: Asset> Default for AssetId<A> {
     fn default() -> Self {
-        AssetId::Uuid {
-            uuid: Self::DEFAULT_UUID,
+        Self {
+            uuid: Some(Self::DEFAULT_UUID),
+            index: AssetIndex::default(),
+            marker: PhantomData,
         }
     }
 }
@@ -93,25 +114,14 @@ impl<A: Asset> Display for AssetId<A> {
 
 impl<A: Asset> Debug for AssetId<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AssetId::Index { index, .. } => {
-                write!(
-                    f,
-                    "AssetId<{}>{{ index: {}, generation: {}}}",
-                    std::any::type_name::<A>(),
-                    index.index,
-                    index.generation
-                )
-            }
-            AssetId::Uuid { uuid } => {
-                write!(
-                    f,
-                    "AssetId<{}>{{uuid: {}}}",
-                    std::any::type_name::<A>(),
-                    uuid
-                )
-            }
-        }
+        write!(
+            f,
+            "AssetId<{}>{{ index: {}, generation: {}, uuid: {:?}}}",
+            std::any::type_name::<A>(),
+            self.index.index,
+            self.index.generation,
+            self.uuid,
+        )
     }
 }
 
@@ -147,36 +157,39 @@ impl<A: Asset> Ord for AssetId<A> {
 impl<A: Asset> From<AssetIndex> for AssetId<A> {
     #[inline]
     fn from(value: AssetIndex) -> Self {
-        Self::Index {
+        Self {
             index: value,
             marker: PhantomData,
+            uuid: None,
         }
     }
 }
 
-impl<A: Asset> From<Uuid> for AssetId<A> {
-    #[inline]
-    fn from(value: Uuid) -> Self {
-        Self::Uuid { uuid: value }
-    }
-}
+// Cannot have an AssetId without an AssetIndex anymore
+// impl<A: Asset> From<Uuid> for AssetId<A> {
+//     #[inline]
+//     fn from(value: Uuid) -> Self {
+//         Self::Uuid { uuid: value }
+//     }
+// }
 
 /// An "untyped" / "generic-less" [`Asset`] identifier that behaves much like [`AssetId`], but stores the [`Asset`] type
 /// information at runtime instead of compile-time. This increases the size of the type, but it enables storing asset ids
 /// across asset types together and enables comparisons between them.
 #[derive(Debug, Copy, Clone)]
-pub enum UntypedAssetId {
+pub struct UntypedAssetId {
     /// A small / efficient runtime identifier that can be used to efficiently look up an asset stored in [`Assets`]. This is
     /// the "default" identifier used for assets. The alternative(s) (ex: [`UntypedAssetId::Uuid`]) will only be used if assets are
     /// explicitly registered that way.
     ///
     /// [`Assets`]: crate::Assets
-    Index { type_id: TypeId, index: AssetIndex },
+    type_id: TypeId,
+    index: AssetIndex,
     /// A stable-across-runs / const asset identifier. This will only be used if an asset is explicitly registered in [`Assets`]
     /// with one.
     ///
     /// [`Assets`]: crate::Assets
-    Uuid { type_id: TypeId, uuid: Uuid },
+    uuid: Option<Uuid>,
 }
 
 impl UntypedAssetId {
@@ -185,13 +198,16 @@ impl UntypedAssetId {
     /// consider using [`UntypedAssetId::typed_debug_checked`] instead.
     #[inline]
     pub fn typed_unchecked<A: Asset>(self) -> AssetId<A> {
-        match self {
-            UntypedAssetId::Index { index, .. } => AssetId::Index {
-                index,
-                marker: PhantomData,
-            },
-            UntypedAssetId::Uuid { uuid, .. } => AssetId::Uuid { uuid },
+        AssetId {
+            index: self.index,
+            marker: PhantomData,
+            uuid: self.uuid,
         }
+    }
+
+    #[inline]
+    pub fn index(&self) -> AssetIndex {
+        self.index
     }
 
     /// Converts this to a "typed" [`AssetId`]. When compiled in debug-mode it will check to see if the stored type
@@ -237,36 +253,23 @@ impl UntypedAssetId {
     /// Returns the stored [`TypeId`] of the referenced [`Asset`].
     #[inline]
     pub fn type_id(&self) -> TypeId {
-        match self {
-            UntypedAssetId::Index { type_id, .. } | UntypedAssetId::Uuid { type_id, .. } => {
-                *type_id
-            }
-        }
+        self.type_id
     }
 
     #[inline]
     pub(crate) fn internal(self) -> InternalAssetId {
-        match self {
-            UntypedAssetId::Index { index, .. } => InternalAssetId::Index(index),
-            UntypedAssetId::Uuid { uuid, .. } => InternalAssetId::Uuid(uuid),
-        }
+        InternalAssetId::from(self)
     }
 }
 
 impl Display for UntypedAssetId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut writer = f.debug_struct("UntypedAssetId");
-        match self {
-            UntypedAssetId::Index { index, type_id } => {
-                writer
-                    .field("type_id", type_id)
-                    .field("index", &index.index)
-                    .field("generation", &index.generation);
-            }
-            UntypedAssetId::Uuid { uuid, type_id } => {
-                writer.field("type_id", type_id).field("uuid", uuid);
-            }
-        }
+        writer
+            .field("type_id", &self.type_id)
+            .field("index", &self.index.index)
+            .field("generation", &self.index.generation)
+            .field("uuid", &self.uuid);
         writer.finish()
     }
 }
@@ -306,43 +309,61 @@ impl PartialOrd for UntypedAssetId {
 /// [`InternalAssetId`] contains no type information and will happily collide
 /// with indices across types.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub(crate) enum InternalAssetId {
-    Index(AssetIndex),
-    Uuid(Uuid),
+pub(crate) struct InternalAssetId {
+    index: AssetIndex,
+    uuid: Option<Uuid>,
 }
 
 impl InternalAssetId {
     #[inline]
     pub(crate) fn typed<A: Asset>(self) -> AssetId<A> {
-        match self {
-            InternalAssetId::Index(index) => AssetId::Index {
-                index,
-                marker: PhantomData,
-            },
-            InternalAssetId::Uuid(uuid) => AssetId::Uuid { uuid },
+        AssetId {
+            index: self.index,
+            marker: PhantomData,
+            uuid: self.uuid,
         }
     }
 
     #[inline]
     pub(crate) fn untyped(self, type_id: TypeId) -> UntypedAssetId {
-        match self {
-            InternalAssetId::Index(index) => UntypedAssetId::Index { index, type_id },
-            InternalAssetId::Uuid(uuid) => UntypedAssetId::Uuid { uuid, type_id },
+        UntypedAssetId {
+            type_id,
+            index: self.index,
+            uuid: self.uuid,
         }
     }
 }
 
 impl From<AssetIndex> for InternalAssetId {
-    fn from(value: AssetIndex) -> Self {
-        Self::Index(value)
+    fn from(index: AssetIndex) -> Self {
+        Self { index, uuid: None }
     }
 }
 
-impl From<Uuid> for InternalAssetId {
-    fn from(value: Uuid) -> Self {
-        Self::Uuid(value)
+impl From<UntypedAssetId> for InternalAssetId {
+    fn from(value: UntypedAssetId) -> Self {
+        Self {
+            index: value.index,
+            uuid: value.uuid,
+        }
     }
 }
+
+impl<A: Asset> From<AssetId<A>> for InternalAssetId {
+    fn from(value: AssetId<A>) -> Self {
+        Self {
+            index: value.index,
+            uuid: value.uuid,
+        }
+    }
+}
+
+// No longer valid
+// impl From<Uuid> for InternalAssetId {
+//     fn from(value: Uuid) -> Self {
+//         Self::Uuid(value)
+//     }
+// }
 
 // Cross Operations
 
@@ -381,11 +402,10 @@ impl<A: Asset> PartialOrd<AssetId<A>> for UntypedAssetId {
 impl<A: Asset> From<AssetId<A>> for UntypedAssetId {
     #[inline]
     fn from(value: AssetId<A>) -> Self {
-        let type_id = TypeId::of::<A>();
-
-        match value {
-            AssetId::Index { index, .. } => UntypedAssetId::Index { type_id, index },
-            AssetId::Uuid { uuid } => UntypedAssetId::Uuid { type_id, uuid },
+        UntypedAssetId {
+            type_id: TypeId::of::<A>(),
+            index: value.index,
+            uuid: value.uuid,
         }
     }
 }
@@ -399,13 +419,15 @@ impl<A: Asset> TryFrom<UntypedAssetId> for AssetId<A> {
         let expected = TypeId::of::<A>();
 
         match value {
-            UntypedAssetId::Index { index, type_id } if type_id == expected => Ok(AssetId::Index {
+            UntypedAssetId {
+                index,
+                uuid,
+                type_id,
+            } if type_id == expected => Ok(AssetId {
                 index,
                 marker: PhantomData,
+                uuid,
             }),
-            UntypedAssetId::Uuid { uuid, type_id } if type_id == expected => {
-                Ok(AssetId::Uuid { uuid })
-            }
             _ => Err(UntypedAssetIdConversionError::TypeIdMismatch { expected, found }),
         }
     }

@@ -6,19 +6,18 @@ use crate::{
     Extract, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_app::{App, Plugin};
-use bevy_asset::{load_internal_asset, Handle};
+use bevy_asset::{load_internal_asset, uuid::Uuid};
 use bevy_core::FrameCount;
 use bevy_ecs::prelude::*;
 use bevy_reflect::prelude::*;
 use bevy_time::Time;
 
-pub const GLOBALS_TYPE_HANDLE: Handle<Shader> = Handle::weak_from_u128(17924628719070609599);
+pub const GLOBALS_TYPE_SHADER_UUID: Uuid = Uuid::from_u128(17924628719070609599);
 
 pub struct GlobalsPlugin;
 
 impl Plugin for GlobalsPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, GLOBALS_TYPE_HANDLE, "globals.wgsl", Shader::from_wgsl);
         app.register_type::<GlobalsUniform>();
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
@@ -31,6 +30,15 @@ impl Plugin for GlobalsPlugin {
                     prepare_globals_buffer.in_set(RenderSet::PrepareResources),
                 );
         }
+    }
+
+    fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            GLOBALS_TYPE_SHADER_UUID,
+            "globals.wgsl",
+            Shader::from_wgsl
+        );
     }
 }
 

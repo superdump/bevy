@@ -1,6 +1,6 @@
 use crate::{Material2d, Material2dPlugin, MaterialMesh2dBundle};
 use bevy_app::{App, Plugin};
-use bevy_asset::{load_internal_asset, Asset, AssetApp, Assets, Handle};
+use bevy_asset::{load_internal_asset, uuid::Uuid, Asset, AssetApp, Assets, Handle};
 use bevy_color::{Color, LinearRgba};
 use bevy_math::Vec4;
 use bevy_reflect::prelude::*;
@@ -8,23 +8,16 @@ use bevy_render::{
     render_asset::RenderAssets,
     render_resource::*,
     texture::{GpuImage, Image},
+    RenderApp,
 };
 
-pub const COLOR_MATERIAL_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(3253086872234592509);
+pub const COLOR_MATERIAL_SHADER_UUID: Uuid = Uuid::from_u128(3253086872234592509);
 
 #[derive(Default)]
 pub struct ColorMaterialPlugin;
 
 impl Plugin for ColorMaterialPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            COLOR_MATERIAL_SHADER_HANDLE,
-            "color_material.wgsl",
-            Shader::from_wgsl
-        );
-
         app.add_plugins(Material2dPlugin::<ColorMaterial>::default())
             .register_asset_reflect::<ColorMaterial>();
 
@@ -37,6 +30,15 @@ impl Plugin for ColorMaterialPlugin {
                     ..Default::default()
                 },
             );
+    }
+
+    fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            COLOR_MATERIAL_SHADER_UUID,
+            "color_material.wgsl",
+            Shader::from_wgsl
+        );
     }
 }
 
@@ -111,7 +113,7 @@ impl AsBindGroupShaderType<ColorMaterialUniform> for ColorMaterial {
 
 impl Material2d for ColorMaterial {
     fn fragment_shader() -> ShaderRef {
-        COLOR_MATERIAL_SHADER_HANDLE.into()
+        COLOR_MATERIAL_SHADER_UUID.into()
     }
 }
 

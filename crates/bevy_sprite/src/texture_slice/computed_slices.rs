@@ -1,7 +1,7 @@
 use crate::{ExtractedSprite, ImageScaleMode, Sprite, TextureAtlas, TextureAtlasLayout};
 
 use super::TextureSlice;
-use bevy_asset::{AssetEvent, Assets, Handle};
+use bevy_asset::{AssetEvent, AssetIndex, Assets, Handle};
 use bevy_ecs::prelude::*;
 use bevy_math::{Rect, Vec2};
 use bevy_render::texture::Image;
@@ -29,7 +29,7 @@ impl ComputedTextureSlices {
         transform: &'a GlobalTransform,
         original_entity: Entity,
         sprite: &'a Sprite,
-        handle: &'a Handle<Image>,
+        image_index: AssetIndex,
     ) -> impl ExactSizeIterator<Item = ExtractedSprite> + 'a {
         let mut flip = Vec2::ONE;
         let [mut flip_x, mut flip_y] = [false; 2];
@@ -52,7 +52,7 @@ impl ComputedTextureSlices {
                 custom_size: Some(slice.draw_size),
                 flip_x,
                 flip_y,
-                image_handle_id: handle.id(),
+                image_index,
                 anchor: Self::redepend_anchor_from_sprite_to_slice(sprite, slice),
             }
         })

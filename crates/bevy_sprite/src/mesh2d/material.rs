@@ -1,5 +1,5 @@
 use bevy_app::{App, Plugin};
-use bevy_asset::{Asset, AssetApp, AssetId, AssetServer, Handle};
+use bevy_asset::{io::embedded::InternalAssets, Asset, AssetApp, AssetIndex, AssetServer, Handle};
 use bevy_core_pipeline::{
     core_2d::Transparent2d,
     tonemapping::{DebandDither, Tonemapping},
@@ -174,11 +174,18 @@ where
 }
 
 #[derive(Resource, Deref, DerefMut)]
-pub struct RenderMaterial2dInstances<M: Material2d>(EntityHashMap<AssetId<M>>);
+pub struct RenderMaterial2dInstances<M: Material2d> {
+    #[deref]
+    map: EntityHashMap<AssetIndex>,
+    marker: PhantomData<M>,
+}
 
 impl<M: Material2d> Default for RenderMaterial2dInstances<M> {
     fn default() -> Self {
-        Self(Default::default())
+        Self {
+            map: Default::default(),
+            marker: PhantomData,
+        }
     }
 }
 
@@ -189,7 +196,7 @@ fn extract_material_meshes_2d<M: Material2d>(
     material_instances.clear();
     for (entity, view_visibility, handle) in &query {
         if view_visibility.get() {
-            material_instances.insert(entity, handle.id());
+            material_instances.insert(entity, handle.index());
         }
     }
 }
@@ -288,6 +295,7 @@ impl<M: Material2d> FromWorld for Material2dPipeline<M> {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.resource::<AssetServer>();
         let render_device = world.resource::<RenderDevice>();
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
         let material2d_layout = M::bind_group_layout(render_device);
 
         Material2dPipeline {
@@ -297,11 +305,13 @@ impl<M: Material2d> FromWorld for Material2dPipeline<M> {
                 ShaderRef::Default => None,
                 ShaderRef::Handle(handle) => Some(handle),
                 ShaderRef::Path(path) => Some(asset_server.load(path)),
+                ShaderRef::InternalAsset(uuid) => internal_assets.get(&uuid).cloned(),
             },
             fragment_shader: match M::fragment_shader() {
                 ShaderRef::Default => None,
                 ShaderRef::Handle(handle) => Some(handle),
                 ShaderRef::Path(path) => Some(asset_server.load(path)),
+                ShaderRef::InternalAsset(uuid) => internal_assets.get(&uuid).cloned(),
             },
             marker: PhantomData,
         }
@@ -404,16 +414,16 @@ pub fn queue_material2d_meshes<M: Material2d>(
             }
         }
         for visible_entity in visible_entities.iter::<WithMesh2d>() {
-            let Some(material_asset_id) = render_material_instances.get(visible_entity) else {
+            let Some(&material_asset_index) = render_material_instances.get(visible_entity) else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.get_mut(visible_entity) else {
                 continue;
             };
-            let Some(material2d) = render_materials.get(*material_asset_id) else {
+            let Some(material2d) = render_materials.get(material_asset_index) else {
                 continue;
             };
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_index) else {
                 continue;
             };
             let mesh_key =

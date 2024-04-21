@@ -51,12 +51,6 @@ impl Plugin for WindowRenderPlugin {
                 .add_systems(Render, prepare_windows.in_set(RenderSet::ManageViews));
         }
     }
-
-    fn finish(&self, app: &mut App) {
-        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<ScreenshotToScreenPipeline>();
-        }
-    }
 }
 
 pub struct ExtractedWindow {

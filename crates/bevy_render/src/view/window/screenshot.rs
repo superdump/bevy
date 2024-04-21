@@ -1,7 +1,7 @@
 use std::{borrow::Cow, path::Path, sync::PoisonError};
 
 use bevy_app::Plugin;
-use bevy_asset::{load_internal_asset, Handle};
+use bevy_asset::{io::embedded::InternalAssets, load_internal_asset, uuid::Uuid, Handle};
 use bevy_ecs::{entity::EntityHashMap, prelude::*};
 use bevy_tasks::AsyncComputeTaskPool;
 use bevy_utils::tracing::{error, info, info_span};
@@ -122,23 +122,25 @@ impl ScreenshotManager {
 
 pub struct ScreenshotPlugin;
 
-const SCREENSHOT_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(11918575842344596158);
+const SCREENSHOT_SHADER_UUID: Uuid = Uuid::from_u128(11918575842344596158);
 
 impl Plugin for ScreenshotPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         app.init_resource::<ScreenshotManager>();
-
-        load_internal_asset!(
-            app,
-            SCREENSHOT_SHADER_HANDLE,
-            "screenshot.wgsl",
-            Shader::from_wgsl
-        );
     }
 
     fn finish(&self, app: &mut bevy_app::App) {
+        load_internal_asset!(
+            app,
+            SCREENSHOT_SHADER_UUID,
+            "screenshot.wgsl",
+            Shader::from_wgsl
+        );
+
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<SpecializedRenderPipelines<ScreenshotToScreenPipeline>>();
+            render_app
+                .init_resource::<ScreenshotToScreenPipeline>()
+                .init_resource::<SpecializedRenderPipelines<ScreenshotToScreenPipeline>>();
         }
     }
 }
@@ -167,11 +169,17 @@ pub(crate) fn layout_data(width: u32, height: u32, format: TextureFormat) -> Ima
 #[derive(Resource)]
 pub struct ScreenshotToScreenPipeline {
     pub bind_group_layout: BindGroupLayout,
+    pub shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for ScreenshotToScreenPipeline {
     fn from_world(render_world: &mut World) -> Self {
         let device = render_world.resource::<RenderDevice>();
+        let shader_handle = render_world
+            .resource::<InternalAssets<Shader>>()
+            .get(&SCREENSHOT_SHADER_UUID)
+            .expect("SCREENSHOT_SHADER_UUID is missing from InternalAssets")
+            .clone_weak();
 
         let bind_group_layout = device.create_bind_group_layout(
             "screenshot-to-screen-bgl",
@@ -181,7 +189,10 @@ impl FromWorld for ScreenshotToScreenPipeline {
             ),
         );
 
-        Self { bind_group_layout }
+        Self {
+            bind_group_layout,
+            shader_handle,
+        }
     }
 }
 
@@ -196,7 +207,7 @@ impl SpecializedRenderPipeline for ScreenshotToScreenPipeline {
                 buffers: vec![],
                 shader_defs: vec![],
                 entry_point: Cow::Borrowed("vs_main"),
-                shader: SCREENSHOT_SHADER_HANDLE,
+                shader: self.shader_handle.clone_weak(),
             },
             primitive: wgpu::PrimitiveState {
                 cull_mode: Some(wgpu::Face::Back),
@@ -205,7 +216,7 @@ impl SpecializedRenderPipeline for ScreenshotToScreenPipeline {
             depth_stencil: None,
             multisample: Default::default(),
             fragment: Some(FragmentState {
-                shader: SCREENSHOT_SHADER_HANDLE,
+                shader: self.shader_handle.clone_weak(),
                 entry_point: Cow::Borrowed("fs_main"),
                 shader_defs: vec![],
                 targets: vec![Some(wgpu::ColorTargetState {

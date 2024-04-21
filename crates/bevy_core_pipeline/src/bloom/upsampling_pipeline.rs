@@ -1,8 +1,9 @@
 use super::{
-    downsampling_pipeline::BloomUniforms, BloomCompositeMode, BloomSettings, BLOOM_SHADER_HANDLE,
+    downsampling_pipeline::BloomUniforms, BloomCompositeMode, BloomSettings, BLOOM_SHADER_UUID,
     BLOOM_TEXTURE_FORMAT,
 };
-use crate::fullscreen_vertex_shader::fullscreen_shader_vertex_state;
+use crate::fullscreen_vertex_shader::{fullscreen_shader_vertex_state, FULLSCREEN_SHADER_UUID};
+use bevy_asset::{io::embedded::InternalAssets, Handle};
 use bevy_ecs::{
     prelude::{Component, Entity},
     system::{Commands, Query, Res, ResMut, Resource},
@@ -26,6 +27,8 @@ pub struct UpsamplingPipelineIds {
 #[derive(Resource)]
 pub struct BloomUpsamplingPipeline {
     pub bind_group_layout: BindGroupLayout,
+    pub fullscreen_vertex_shader_handle: Handle<Shader>,
+    pub bloom_upsampling_shader_handle: Handle<Shader>,
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
@@ -53,7 +56,21 @@ impl FromWorld for BloomUpsamplingPipeline {
             ),
         );
 
-        BloomUpsamplingPipeline { bind_group_layout }
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
+        let fullscreen_vertex_shader_handle = internal_assets
+            .get(&FULLSCREEN_SHADER_UUID)
+            .expect("FULLSCREEN_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let bloom_upsampling_shader_handle = internal_assets
+            .get(&BLOOM_SHADER_UUID)
+            .expect("BLOOM_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
+        BloomUpsamplingPipeline {
+            bind_group_layout,
+            fullscreen_vertex_shader_handle,
+            bloom_upsampling_shader_handle,
+        }
     }
 }
 
@@ -102,9 +119,11 @@ impl SpecializedRenderPipeline for BloomUpsamplingPipeline {
         RenderPipelineDescriptor {
             label: Some("bloom_upsampling_pipeline".into()),
             layout: vec![self.bind_group_layout.clone()],
-            vertex: fullscreen_shader_vertex_state(),
+            vertex: fullscreen_shader_vertex_state(
+                self.fullscreen_vertex_shader_handle.clone_weak(),
+            ),
             fragment: Some(FragmentState {
-                shader: BLOOM_SHADER_HANDLE,
+                shader: self.bloom_upsampling_shader_handle.clone_weak(),
                 shader_defs: vec![],
                 entry_point: "upsample".into(),
                 targets: vec![Some(ColorTargetState {

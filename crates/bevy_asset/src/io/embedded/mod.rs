@@ -1,12 +1,18 @@
 #[cfg(feature = "embedded_watcher")]
 mod embedded_watcher;
 
+use bevy_derive::{Deref, DerefMut};
+use bevy_utils::HashMap;
 #[cfg(feature = "embedded_watcher")]
 pub use embedded_watcher::*;
+use uuid::Uuid;
 
-use crate::io::{
-    memory::{Dir, MemoryAssetReader, Value},
-    AssetSource, AssetSourceBuilders,
+use crate::{
+    io::{
+        memory::{Dir, MemoryAssetReader, Value},
+        AssetSource, AssetSourceBuilders,
+    },
+    Asset, Handle,
 };
 use bevy_ecs::system::Resource;
 use std::path::{Path, PathBuf};
@@ -249,12 +255,21 @@ pub fn watched_path(_source_file_path: &'static str, _asset_path: &'static str) 
     PathBuf::from("")
 }
 
+#[derive(Resource, Deref, DerefMut)]
+pub struct InternalAssets<A: Asset>(HashMap<Uuid, Handle<A>>);
+
+impl<A: Asset> Default for InternalAssets<A> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
 /// Loads an "internal" asset by embedding the string stored in the given `path_str` and associates it with the given handle.
 #[macro_export]
 macro_rules! load_internal_asset {
-    ($app: ident, $handle: expr, $path_str: expr, $loader: expr) => {{
-        let mut assets = $app.world_mut().resource_mut::<$crate::Assets<_>>();
-        assets.insert($handle.id(), ($loader)(
+    ($app: ident, $uuid: expr, $path_str: expr, $loader: expr) => {{
+        use bevy_asset::io::embedded::InternalAssets;
+        let (handle, _) = $app.world_mut().resource_mut::<$crate::Assets<_>>().insert_with_uuid($uuid, ($loader)(
             include_str!($path_str),
             std::path::Path::new(file!())
                 .parent()
@@ -262,11 +277,12 @@ macro_rules! load_internal_asset {
                 .join($path_str)
                 .to_string_lossy()
         ));
+        $app.sub_app_mut(RenderApp).world_mut().resource_mut::<InternalAssets<_>>().insert($uuid, handle);
     }};
     // we can't support params without variadic arguments, so internal assets with additional params can't be hot-reloaded
-    ($app: ident, $handle: ident, $path_str: expr, $loader: expr $(, $param:expr)+) => {{
-        let mut assets = $app.world_mut().resource_mut::<$crate::Assets<_>>();
-        assets.insert($handle.id(), ($loader)(
+    ($app: ident, $uuid: ident, $path_str: expr, $loader: expr $(, $param:expr)+) => {{
+        use bevy_asset::io::embedded::InternalAssets;
+        let (handle, _) = $app.world_mut().resource_mut::<$crate::Assets<_>>().insert_with_uuid($uuid, ($loader)(
             include_str!($path_str),
             std::path::Path::new(file!())
                 .parent()
@@ -275,6 +291,7 @@ macro_rules! load_internal_asset {
                 .to_string_lossy(),
             $($param),+
         ));
+        $app.sub_app_mut(RenderApp).world_mut().resource_mut::<InternalAssets<_>>().insert($uuid, handle);
     }};
 }
 

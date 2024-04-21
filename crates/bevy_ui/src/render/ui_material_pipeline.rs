@@ -1,6 +1,6 @@
 use std::{hash::Hash, marker::PhantomData, ops::Range};
 
-use bevy_asset::*;
+use bevy_asset::{io::embedded::InternalAssets, uuid::Uuid, *};
 use bevy_ecs::{
     prelude::Component,
     query::ROQueryItem,
@@ -26,9 +26,9 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::*;
 
-pub const UI_MATERIAL_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(10074188772096983955);
+pub const UI_MATERIAL_SHADER_UUID: Uuid = Uuid::from_u128(10074188772096983955);
 
-const UI_VERTEX_OUTPUT_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(10123618247720234751);
+const UI_VERTEX_OUTPUT_SHADER_UUID: Uuid = Uuid::from_u128(10123618247720234751);
 
 /// Adds the necessary ECS resources and render logic to enable rendering entities using the given
 /// [`UiMaterial`] asset type (which includes [`UiMaterial`] types).
@@ -47,13 +47,13 @@ where
     fn build(&self, app: &mut App) {
         load_internal_asset!(
             app,
-            UI_VERTEX_OUTPUT_SHADER_HANDLE,
+            UI_VERTEX_OUTPUT_SHADER_UUID,
             "ui_vertex_output.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            UI_MATERIAL_SHADER_HANDLE,
+            UI_MATERIAL_SHADER_UUID,
             "ui_material.wgsl",
             Shader::from_wgsl
         );
@@ -121,7 +121,19 @@ pub struct UiMaterialVertex {
 pub struct UiMaterialBatch<M: UiMaterial> {
     /// The range of vertices inside the [`UiMaterialMeta`]
     pub range: Range<u32>,
-    pub material: AssetId<M>,
+    pub material: AssetIndex,
+    marker: PhantomData<M>,
+}
+
+impl<M: UiMaterial> UiMaterialBatch<M> {
+    #[inline]
+    pub fn new(range: Range<u32>, material: AssetIndex) -> Self {
+        Self {
+            range,
+            material,
+            marker: PhantomData,
+        }
+    }
 }
 
 /// Render pipeline data for a given [`UiMaterial`]
@@ -131,6 +143,7 @@ pub struct UiMaterialPipeline<M: UiMaterial> {
     pub view_layout: BindGroupLayout,
     pub vertex_shader: Option<Handle<Shader>>,
     pub fragment_shader: Option<Handle<Shader>>,
+    pub ui_material_shader_handle: Handle<Shader>,
     marker: PhantomData<M>,
 }
 
@@ -158,13 +171,13 @@ where
 
         let mut descriptor = RenderPipelineDescriptor {
             vertex: VertexState {
-                shader: UI_MATERIAL_SHADER_HANDLE,
+                shader: self.ui_material_shader_handle.clone_weak(),
                 entry_point: "vertex".into(),
                 shader_defs: shader_defs.clone(),
                 buffers: vec![vertex_layout],
             },
             fragment: Some(FragmentState {
-                shader: UI_MATERIAL_SHADER_HANDLE,
+                shader: self.ui_material_shader_handle.clone_weak(),
                 shader_defs,
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
@@ -216,6 +229,7 @@ impl<M: UiMaterial> FromWorld for UiMaterialPipeline<M> {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.resource::<AssetServer>();
         let render_device = world.resource::<RenderDevice>();
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
         let ui_layout = M::bind_group_layout(render_device);
 
         let view_layout = render_device.create_bind_group_layout(
@@ -229,6 +243,11 @@ impl<M: UiMaterial> FromWorld for UiMaterialPipeline<M> {
             ),
         );
 
+        let ui_material_shader_handle = internal_assets
+            .get(&UI_MATERIAL_SHADER_UUID)
+            .expect("UI_MATERIAL_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         UiMaterialPipeline {
             ui_layout,
             view_layout,
@@ -236,13 +255,16 @@ impl<M: UiMaterial> FromWorld for UiMaterialPipeline<M> {
                 ShaderRef::Default => None,
                 ShaderRef::Handle(handle) => Some(handle),
                 ShaderRef::Path(path) => Some(asset_server.load(path)),
+                ShaderRef::InternalAsset(uuid) => internal_assets.get(&uuid).cloned(),
             },
             fragment_shader: match M::fragment_shader() {
                 ShaderRef::Default => None,
                 ShaderRef::Handle(handle) => Some(handle),
                 ShaderRef::Path(path) => Some(asset_server.load(path)),
+                ShaderRef::InternalAsset(uuid) => internal_assets.get(&uuid).cloned(),
             },
             marker: PhantomData,
+            ui_material_shader_handle,
         }
     }
 }
@@ -326,12 +348,12 @@ impl<P: PhaseItem, M: UiMaterial> RenderCommand<P> for DrawUiMaterialNode<M> {
     }
 }
 
-pub struct ExtractedUiMaterialNode<M: UiMaterial> {
+pub struct ExtractedUiMaterialNode {
     pub stack_index: usize,
     pub transform: Mat4,
     pub rect: Rect,
     pub border: [f32; 4],
-    pub material: AssetId<M>,
+    pub material: AssetIndex,
     pub clip: Option<Rect>,
     // Camera to render this UI node to. By the time it is extracted,
     // it is defaulted to a single camera if only one exists.
@@ -341,13 +363,15 @@ pub struct ExtractedUiMaterialNode<M: UiMaterial> {
 
 #[derive(Resource)]
 pub struct ExtractedUiMaterialNodes<M: UiMaterial> {
-    pub uinodes: SparseSet<Entity, ExtractedUiMaterialNode<M>>,
+    pub uinodes: SparseSet<Entity, ExtractedUiMaterialNode>,
+    marker: PhantomData<M>,
 }
 
 impl<M: UiMaterial> Default for ExtractedUiMaterialNodes<M> {
     fn default() -> Self {
         Self {
             uinodes: Default::default(),
+            marker: PhantomData,
         }
     }
 }
@@ -430,7 +454,7 @@ pub fn extract_ui_material_nodes<M: UiMaterial>(
                 ExtractedUiMaterialNode {
                     stack_index,
                     transform: transform.compute_matrix(),
-                    material: handle.id(),
+                    material: handle.index(),
                     rect: Rect {
                         min: Vec2::ZERO,
                         max: uinode.calculated_size,
@@ -473,23 +497,21 @@ pub fn prepare_uimaterial_nodes<M: UiMaterial>(
 
         for mut ui_phase in &mut phases {
             let mut batch_item_index = 0;
-            let mut batch_shader_handle = AssetId::invalid();
+            let mut batch_shader_index = AssetIndex::INVALID;
 
             for item_index in 0..ui_phase.items.len() {
                 let item = &mut ui_phase.items[item_index];
                 if let Some(extracted_uinode) = extracted_uinodes.uinodes.get(item.entity) {
                     let mut existing_batch = batches
                         .last_mut()
-                        .filter(|_| batch_shader_handle == extracted_uinode.material);
+                        .filter(|_| batch_shader_index == extracted_uinode.material);
 
                     if existing_batch.is_none() {
                         batch_item_index = item_index;
-                        batch_shader_handle = extracted_uinode.material;
+                        batch_shader_index = extracted_uinode.material;
 
-                        let new_batch = UiMaterialBatch {
-                            range: index..index,
-                            material: extracted_uinode.material,
-                        };
+                        let new_batch =
+                            UiMaterialBatch::new(index..index, extracted_uinode.material);
 
                         batches.push((item.entity, new_batch));
 
@@ -584,7 +606,7 @@ pub fn prepare_uimaterial_nodes<M: UiMaterial>(
                     existing_batch.unwrap().1.range.end = index;
                     ui_phase.items[batch_item_index].batch_range_mut().end += 1;
                 } else {
-                    batch_shader_handle = AssetId::invalid();
+                    batch_shader_index = AssetIndex::INVALID;
                 }
             }
         }

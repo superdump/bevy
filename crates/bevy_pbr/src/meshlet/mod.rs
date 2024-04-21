@@ -49,9 +49,9 @@ use self::{
         MeshletViewMaterialsPrepass,
     },
     pipelines::{
-        MeshletPipelines, MESHLET_COPY_MATERIAL_DEPTH_SHADER_HANDLE, MESHLET_CULLING_SHADER_HANDLE,
-        MESHLET_DOWNSAMPLE_DEPTH_SHADER_HANDLE, MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_HANDLE,
-        MESHLET_WRITE_INDEX_BUFFER_SHADER_HANDLE,
+        MeshletPipelines, MESHLET_COPY_MATERIAL_DEPTH_SHADER_UUID, MESHLET_CULLING_SHADER_UUID,
+        MESHLET_DOWNSAMPLE_DEPTH_SHADER_UUID, MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID,
+        MESHLET_WRITE_INDEX_BUFFER_SHADER_UUID,
     },
     visibility_buffer_raster_node::MeshletVisibilityBufferRasterPassNode,
 };
@@ -85,9 +85,8 @@ use bevy_render::{
 use bevy_transform::components::{GlobalTransform, Transform};
 use bevy_transform::TransformSystem;
 
-const MESHLET_BINDINGS_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(1325134235233421);
-const MESHLET_MESH_MATERIAL_SHADER_HANDLE: Handle<Shader> =
-    Handle::weak_from_u128(3325134235233421);
+const MESHLET_BINDINGS_SHADER_UUID: Uuid = Uuid::from_u128(1325134235233421);
+const MESHLET_MESH_MATERIAL_SHADER_UUID: Handle<Shader> = Handle::weak_from_u128(3325134235233421);
 
 /// Provides a plugin for rendering large amounts of high-poly 3d meshes using an efficient GPU-driven method. See also [`MeshletMesh`].
 ///
@@ -116,49 +115,49 @@ impl Plugin for MeshletPlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(
             app,
-            MESHLET_BINDINGS_SHADER_HANDLE,
+            MESHLET_BINDINGS_SHADER_UUID,
             "meshlet_bindings.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            super::MESHLET_VISIBILITY_BUFFER_RESOLVE_SHADER_HANDLE,
+            super::MESHLET_VISIBILITY_BUFFER_RESOLVE_SHADER_UUID,
             "visibility_buffer_resolve.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            MESHLET_CULLING_SHADER_HANDLE,
+            MESHLET_CULLING_SHADER_UUID,
             "cull_meshlets.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            MESHLET_WRITE_INDEX_BUFFER_SHADER_HANDLE,
+            MESHLET_WRITE_INDEX_BUFFER_SHADER_UUID,
             "write_index_buffer.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            MESHLET_DOWNSAMPLE_DEPTH_SHADER_HANDLE,
+            MESHLET_DOWNSAMPLE_DEPTH_SHADER_UUID,
             "downsample_depth.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_HANDLE,
+            MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID,
             "visibility_buffer_raster.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            MESHLET_MESH_MATERIAL_SHADER_HANDLE,
+            MESHLET_MESH_MATERIAL_SHADER_UUID,
             "meshlet_mesh_material.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
-            MESHLET_COPY_MATERIAL_DEPTH_SHADER_HANDLE,
+            MESHLET_COPY_MATERIAL_DEPTH_SHADER_UUID,
             "copy_material_depth.wgsl",
             Shader::from_wgsl
         );

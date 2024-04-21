@@ -1,5 +1,5 @@
 use bevy_app::{App, Plugin};
-use bevy_asset::{load_internal_asset, Handle};
+use bevy_asset::{io::embedded::InternalAssets, load_internal_asset, uuid::Uuid, Handle};
 use bevy_ecs::prelude::*;
 use bevy_render::{
     render_resource::{
@@ -10,23 +10,22 @@ use bevy_render::{
     RenderApp,
 };
 
-use crate::fullscreen_vertex_shader::fullscreen_shader_vertex_state;
+use crate::fullscreen_vertex_shader::{fullscreen_shader_vertex_state, FULLSCREEN_SHADER_UUID};
 
-pub const BLIT_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(2312396983770133547);
+pub const BLIT_SHADER_UUID: Uuid = Uuid::from_u128(2312396983770133547);
 
 /// Adds support for specialized "blit pipelines", which can be used to write one texture to another.
 pub struct BlitPlugin;
 
 impl Plugin for BlitPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, BLIT_SHADER_HANDLE, "blit.wgsl", Shader::from_wgsl);
-
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.allow_ambiguous_resource::<SpecializedRenderPipelines<BlitPipeline>>();
         }
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(app, BLIT_SHADER_UUID, "blit.wgsl", Shader::from_wgsl);
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -40,6 +39,8 @@ impl Plugin for BlitPlugin {
 pub struct BlitPipeline {
     pub texture_bind_group: BindGroupLayout,
     pub sampler: Sampler,
+    pub fullscreen_vertex_shader_handle: Handle<Shader>,
+    pub blit_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for BlitPipeline {
@@ -59,9 +60,21 @@ impl FromWorld for BlitPipeline {
 
         let sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
+        let internal_assets = render_world.resource::<InternalAssets<Shader>>();
+        let fullscreen_vertex_shader_handle = internal_assets
+            .get(&FULLSCREEN_SHADER_UUID)
+            .expect("FULLSCREEN_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let blit_shader_handle = internal_assets
+            .get(&BLIT_SHADER_UUID)
+            .expect("BLIT_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         BlitPipeline {
             texture_bind_group,
             sampler,
+            fullscreen_vertex_shader_handle,
+            blit_shader_handle,
         }
     }
 }
@@ -80,9 +93,11 @@ impl SpecializedRenderPipeline for BlitPipeline {
         RenderPipelineDescriptor {
             label: Some("blit pipeline".into()),
             layout: vec![self.texture_bind_group.clone()],
-            vertex: fullscreen_shader_vertex_state(),
+            vertex: fullscreen_shader_vertex_state(
+                self.fullscreen_vertex_shader_handle.clone_weak(),
+            ),
             fragment: Some(FragmentState {
-                shader: BLIT_SHADER_HANDLE,
+                shader: self.blit_shader_handle.clone_weak(),
                 shader_defs: vec![],
                 entry_point: "fs_main".into(),
                 targets: vec![Some(ColorTargetState {

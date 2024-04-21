@@ -12,7 +12,7 @@ use crate::{
     renderer::RenderDevice,
     texture::GpuImage,
 };
-use bevy_asset::{Asset, Handle};
+use bevy_asset::{Asset, AssetIndex, Handle};
 use bevy_derive::EnumVariantMeta;
 use bevy_ecs::system::{
     lifetimeless::{SRes, SResMut},
@@ -127,7 +127,8 @@ pub struct Mesh {
     #[reflect(ignore)]
     attributes: BTreeMap<MeshVertexAttributeId, MeshAttributeData>,
     indices: Option<Indices>,
-    morph_targets: Option<Handle<Image>>,
+    morph_targets_handle: Option<Handle<Image>>,
+    morph_targets: Option<AssetIndex>,
     morph_target_names: Option<Vec<String>>,
     pub asset_usage: RenderAssetUsages,
 }
@@ -211,6 +212,7 @@ impl Mesh {
             primitive_topology,
             attributes: Default::default(),
             indices: None,
+            morph_targets_handle: None,
             morph_targets: None,
             morph_target_names: None,
             asset_usage,
@@ -917,7 +919,8 @@ impl Mesh {
     ///
     /// [morph targets]: https://en.wikipedia.org/wiki/Morph_target_animation
     pub fn set_morph_targets(&mut self, morph_targets: Handle<Image>) {
-        self.morph_targets = Some(morph_targets);
+        self.morph_targets = Some(morph_targets.index());
+        self.morph_targets_handle = Some(morph_targets);
     }
 
     /// Consumes the mesh and returns a mesh with the given [morph targets].
@@ -1486,7 +1489,7 @@ impl RenderAsset for GpuMesh {
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
         let morph_targets = match mesh.morph_targets.as_ref() {
             Some(mt) => {
-                let Some(target_image) = images.get(mt) else {
+                let Some(target_image) = images.get(*mt) else {
                     return Err(PrepareAssetError::RetryNextUpdate(mesh));
                 };
                 Some(target_image.texture_view.clone())
