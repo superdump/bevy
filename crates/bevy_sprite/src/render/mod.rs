@@ -4,7 +4,10 @@ use crate::{
     texture_atlas::{TextureAtlas, TextureAtlasLayout},
     ComputedTextureSlices, Sprite, WithSprite, SPRITE_SHADER_UUID,
 };
-use bevy_asset::{io::embedded::InternalAssets, AssetEvent, AssetIndex, Assets, Handle};
+use bevy_asset::{
+    io::embedded::InternalAssets, AssetEvent, AssetHashMap, AssetHashSet, AssetIndex, Assets,
+    Handle,
+};
 use bevy_color::LinearRgba;
 use bevy_core_pipeline::{
     core_2d::Transparent2d,
@@ -37,7 +40,6 @@ use bevy_render::{
     Extract,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::{HashMap, HashSet};
 use bytemuck::{Pod, Zeroable};
 use fixedbitset::FixedBitSet;
 
@@ -316,7 +318,7 @@ pub struct ExtractedSprites {
 
 #[derive(Resource, Default)]
 pub struct SpriteAssetEvents {
-    pub changed_images: HashSet<AssetIndex>,
+    pub changed_images: AssetHashSet,
 }
 
 pub fn extract_sprite_events(
@@ -453,7 +455,7 @@ pub struct SpriteBatch {
 
 #[derive(Resource, Default)]
 pub struct ImageBindGroups {
-    values: HashMap<AssetIndex, BindGroup>,
+    values: AssetHashMap<BindGroup>,
 }
 
 #[allow(clippy::too_many_arguments)]

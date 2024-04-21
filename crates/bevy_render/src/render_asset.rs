@@ -1,6 +1,6 @@
 use crate::{ExtractSchedule, MainWorld, Render, RenderApp, RenderSet};
 use bevy_app::{App, Plugin, SubApp};
-use bevy_asset::{Asset, AssetEvent, AssetIndex, Assets};
+use bevy_asset::{Asset, AssetEvent, AssetHashMap, AssetHashSet, AssetIndex, Assets};
 use bevy_ecs::{
     prelude::{Commands, EventReader, IntoSystemConfigs, ResMut, Resource},
     schedule::SystemConfigs,
@@ -8,7 +8,6 @@ use bevy_ecs::{
     world::{FromWorld, Mut},
 };
 use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
-use bevy_utils::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use thiserror::Error;
@@ -175,7 +174,7 @@ impl<A: RenderAsset> Default for ExtractedAssets<A> {
 /// Stores all GPU representations ([`RenderAsset`])
 /// of [`RenderAsset::SourceAsset`] as long as they exist.
 #[derive(Resource)]
-pub struct RenderAssets<A: RenderAsset>(HashMap<AssetIndex, A>);
+pub struct RenderAssets<A: RenderAsset>(AssetHashMap<A>);
 
 impl<A: RenderAsset> Default for RenderAssets<A> {
     fn default() -> Self {
@@ -232,7 +231,7 @@ fn extract_render_asset<A: RenderAsset>(mut commands: Commands, mut main_world: 
         |world, mut cached_state: Mut<CachedExtractRenderAssetSystemState<A>>| {
             let (mut events, mut assets) = cached_state.state.get_mut(world);
 
-            let mut changed_assets = HashSet::default();
+            let mut changed_assets = AssetHashSet::default();
             let mut removed = Vec::new();
 
             for event in events.read() {

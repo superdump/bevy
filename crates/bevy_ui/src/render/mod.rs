@@ -23,7 +23,7 @@ use crate::{
 };
 
 use bevy_app::prelude::*;
-use bevy_asset::{AssetId, AssetIndex, Assets};
+use bevy_asset::{AssetHashMap, AssetId, AssetIndex, Assets};
 use bevy_ecs::entity::EntityHashMap;
 use bevy_ecs::prelude::*;
 use bevy_math::{FloatOrd, Mat4, Rect, URect, UVec4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
@@ -42,7 +42,6 @@ use bevy_sprite::TextureAtlasLayout;
 #[cfg(feature = "bevy_text")]
 use bevy_text::{PositionedGlyph, Text, TextLayoutInfo};
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::HashMap;
 use bytemuck::{Pod, Zeroable};
 use std::ops::Range;
 
@@ -907,7 +906,7 @@ pub fn queue_uinodes(
 
 #[derive(Resource, Default)]
 pub struct UiImageBindGroups {
-    pub values: HashMap<AssetIndex, BindGroup>,
+    pub values: AssetHashMap<BindGroup>,
 }
 
 #[allow(clippy::too_many_arguments)]

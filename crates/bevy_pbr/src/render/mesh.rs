@@ -1,6 +1,6 @@
 use std::mem;
 
-use bevy_asset::{io::embedded::InternalAssets, load_internal_asset, AssetIndex};
+use bevy_asset::{io::embedded::InternalAssets, load_internal_asset, AssetHashMap, AssetIndex};
 use bevy_core_pipeline::{
     core_3d::{AlphaMask3d, Opaque3d, Transmissive3d, Transparent3d, CORE_3D_DEPTH_FORMAT},
     deferred::{AlphaMask3dDeferred, Opaque3dDeferred},
@@ -31,7 +31,7 @@ use bevy_render::{
     Extract,
 };
 use bevy_transform::components::GlobalTransform;
-use bevy_utils::{tracing::error, Entry, HashMap, Parallel};
+use bevy_utils::{tracing::error, Entry, Parallel};
 
 #[cfg(debug_assertions)]
 use bevy_utils::warn_once;
@@ -1539,8 +1539,8 @@ impl SpecializedMeshPipeline for MeshPipeline {
 pub struct MeshBindGroups {
     model_only: Option<BindGroup>,
     skinned: Option<BindGroup>,
-    morph_targets: HashMap<AssetIndex, BindGroup>,
-    lightmaps: HashMap<AssetIndex, BindGroup>,
+    morph_targets: AssetHashMap<BindGroup>,
+    lightmaps: AssetHashMap<BindGroup>,
 }
 impl MeshBindGroups {
     pub fn reset(&mut self) {

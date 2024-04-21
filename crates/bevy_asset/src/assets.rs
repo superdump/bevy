@@ -7,11 +7,12 @@ use bevy_ecs::{
     system::{Res, ResMut, Resource},
 };
 use bevy_reflect::{Reflect, TypePath};
-use bevy_utils::HashMap;
+use bevy_utils::{hashbrown, EntityHash, HashMap};
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::{
     any::TypeId,
+    hash::Hash,
     iter::Enumerate,
     sync::{atomic::AtomicU32, Arc},
 };
@@ -20,23 +21,67 @@ use uuid::Uuid;
 
 /// A generational runtime-only identifier for a specific [`Asset`] stored in [`Assets`]. This is optimized for efficient runtime
 /// usage and is not suitable for identifying assets across app runs.
-#[derive(
-    Debug,
-    Default,
-    Copy,
-    Clone,
-    Eq,
-    PartialEq,
-    Hash,
-    Ord,
-    PartialOrd,
-    Reflect,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Default, Copy, Clone, Reflect, Serialize, Deserialize)]
+#[repr(C, align(8))]
 pub struct AssetIndex {
-    pub(crate) generation: u32,
+    // Do not reorder the fields here. The ordering is explicitly used by repr(C)
+    // to make this struct equivalent to a u64.
+    #[cfg(target_endian = "little")]
     pub(crate) index: u32,
+    pub(crate) generation: u32,
+    #[cfg(target_endian = "big")]
+    pub(crate) index: u32,
+}
+
+// By not short-circuiting in comparisons, we get better codegen.
+// See <https://github.com/rust-lang/rust/issues/117800>
+impl PartialEq for AssetIndex {
+    #[inline]
+    fn eq(&self, other: &AssetIndex) -> bool {
+        // By using `to_bits`, the codegen can be optimised out even
+        // further potentially. Relies on the correct alignment/field
+        // order of `AssetIndex`.
+        self.to_bits() == other.to_bits()
+    }
+}
+
+impl Eq for AssetIndex {}
+
+// The derive macro codegen output is not optimal and can't be optimised as well
+// by the compiler. This impl resolves the issue of non-optimal codegen by relying
+// on comparing against the bit representation of `AssetIndex` instead of comparing
+// the fields. The result is then LLVM is able to optimise the codegen for AssetIndex
+// far beyond what the derive macro can.
+// See <https://github.com/rust-lang/rust/issues/106107>
+impl PartialOrd for AssetIndex {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        // Make use of our `Ord` impl to ensure optimal codegen output
+        Some(self.cmp(other))
+    }
+}
+
+// The derive macro codegen output is not optimal and can't be optimised as well
+// by the compiler. This impl resolves the issue of non-optimal codegen by relying
+// on comparing against the bit representation of `AssetIndex` instead of comparing
+// the fields. The result is then LLVM is able to optimise the codegen for AssetIndex
+// far beyond what the derive macro can.
+// See <https://github.com/rust-lang/rust/issues/106107>
+impl Ord for AssetIndex {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // This will result in better codegen for ordering comparisons, plus
+        // avoids pitfalls with regards to macro codegen relying on property
+        // position when we want to compare against the bit representation.
+        self.to_bits().cmp(&other.to_bits())
+    }
+}
+
+impl Hash for AssetIndex {
+    #[inline]
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.to_bits().hash(state);
+    }
 }
 
 impl AssetIndex {
@@ -55,11 +100,17 @@ impl AssetIndex {
     /// Convert an opaque `u64` acquired from [`AssetIndex::to_bits`] back into an [`AssetIndex`]. This should not be used with any inputs other than those
     /// derived from [`AssetIndex::to_bits`], as there are no guarantees for what will happen with such inputs.
     pub fn from_bits(bits: u64) -> Self {
-        let index = ((bits << 32) >> 32) as u32;
+        let index = bits as u32;
         let generation = (bits >> 32) as u32;
         Self { generation, index }
     }
 }
+
+/// A [`HashMap`](hashbrown::HashMap) pre-configured to use [`EntityHash`] hashing.
+pub type AssetHashMap<V> = hashbrown::HashMap<AssetIndex, V, EntityHash>;
+
+/// A [`HashSet`](hashbrown::HashSet) pre-configured to use [`EntityHash`] hashing.
+pub type AssetHashSet = hashbrown::HashSet<AssetIndex, EntityHash>;
 
 /// Allocates generational [`AssetIndex`] values and facilitates their reuse.
 pub(crate) struct AssetIndexAllocator {
