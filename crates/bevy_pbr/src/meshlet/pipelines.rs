@@ -1,7 +1,8 @@
 use super::gpu_scene::MeshletGpuScene;
-use bevy_asset::Handle;
+use bevy_asset::{io::embedded::InternalAssets, uuid::Uuid};
 use bevy_core_pipeline::{
-    core_3d::CORE_3D_DEPTH_FORMAT, fullscreen_vertex_shader::fullscreen_shader_vertex_state,
+    core_3d::CORE_3D_DEPTH_FORMAT,
+    fullscreen_vertex_shader::{fullscreen_shader_vertex_state, FULLSCREEN_SHADER_UUID},
 };
 use bevy_ecs::{
     system::Resource,
@@ -10,14 +11,10 @@ use bevy_ecs::{
 use bevy_render::render_resource::*;
 
 pub const MESHLET_CULLING_SHADER_UUID: Uuid = Uuid::from_u128(4325134235233421);
-pub const MESHLET_WRITE_INDEX_BUFFER_SHADER_UUID: Handle<Shader> =
-    Handle::weak_from_u128(5325134235233421);
-pub const MESHLET_DOWNSAMPLE_DEPTH_SHADER_UUID: Handle<Shader> =
-    Handle::weak_from_u128(6325134235233421);
-pub const MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID: Handle<Shader> =
-    Handle::weak_from_u128(7325134235233421);
-pub const MESHLET_COPY_MATERIAL_DEPTH_SHADER_UUID: Handle<Shader> =
-    Handle::weak_from_u128(8325134235233421);
+pub const MESHLET_WRITE_INDEX_BUFFER_SHADER_UUID: Uuid = Uuid::from_u128(5325134235233421);
+pub const MESHLET_DOWNSAMPLE_DEPTH_SHADER_UUID: Uuid = Uuid::from_u128(6325134235233421);
+pub const MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID: Uuid = Uuid::from_u128(7325134235233421);
+pub const MESHLET_COPY_MATERIAL_DEPTH_SHADER_UUID: Uuid = Uuid::from_u128(8325134235233421);
 
 #[derive(Resource)]
 pub struct MeshletPipelines {
@@ -40,6 +37,33 @@ impl FromWorld for MeshletPipelines {
         let downsample_depth_layout = gpu_scene.downsample_depth_bind_group_layout();
         let visibility_buffer_layout = gpu_scene.visibility_buffer_raster_bind_group_layout();
         let copy_material_depth_layout = gpu_scene.copy_material_depth_bind_group_layout();
+
+        let internal_assets = world.resource::<InternalAssets<Shader>>();
+        let fullscreen_vertex_shader_handle = internal_assets
+            .get(&FULLSCREEN_SHADER_UUID)
+            .expect("FULLSCREEN_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let meshlet_copy_material_depth_shader_handle = internal_assets
+            .get(&MESHLET_COPY_MATERIAL_DEPTH_SHADER_UUID)
+            .expect("MESHLET_COPY_MATERIAL_DEPTH_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let meshlet_visibility_buffer_raster_shader_handle = internal_assets
+            .get(&MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID)
+            .expect("MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let meshlet_downsample_depth_shader_handle = internal_assets
+            .get(&MESHLET_DOWNSAMPLE_DEPTH_SHADER_UUID)
+            .expect("MESHLET_DOWNSAMPLE_DEPTH_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let meshlet_write_index_buffer_shader_handle = internal_assets
+            .get(&MESHLET_WRITE_INDEX_BUFFER_SHADER_UUID)
+            .expect("MESHLET_WRITE_INDEX_BUFFER_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+        let meshlet_culling_shader_handle = internal_assets
+            .get(&MESHLET_CULLING_SHADER_UUID)
+            .expect("MESHLET_CULLING_SHADER_UUID is not present in InternalAssets")
+            .clone_weak();
+
         let pipeline_cache = world.resource_mut::<PipelineCache>();
 
         Self {
@@ -47,7 +71,7 @@ impl FromWorld for MeshletPipelines {
                 label: Some("meshlet_culling_first_pipeline".into()),
                 layout: vec![cull_layout.clone()],
                 push_constant_ranges: vec![],
-                shader: MESHLET_CULLING_SHADER_UUID,
+                shader: meshlet_culling_shader_handle.clone_weak(),
                 shader_defs: vec!["MESHLET_CULLING_PASS".into()],
                 entry_point: "cull_meshlets".into(),
             }),
@@ -56,7 +80,7 @@ impl FromWorld for MeshletPipelines {
                 label: Some("meshlet_culling_second_pipeline".into()),
                 layout: vec![cull_layout],
                 push_constant_ranges: vec![],
-                shader: MESHLET_CULLING_SHADER_UUID,
+                shader: meshlet_culling_shader_handle,
                 shader_defs: vec![
                     "MESHLET_CULLING_PASS".into(),
                     "MESHLET_SECOND_CULLING_PASS".into(),
@@ -69,7 +93,7 @@ impl FromWorld for MeshletPipelines {
                     label: Some("meshlet_write_index_buffer_first_pipeline".into()),
                     layout: vec![write_index_buffer_layout.clone()],
                     push_constant_ranges: vec![],
-                    shader: MESHLET_WRITE_INDEX_BUFFER_SHADER_UUID,
+                    shader: meshlet_write_index_buffer_shader_handle.clone_weak(),
                     shader_defs: vec!["MESHLET_WRITE_INDEX_BUFFER_PASS".into()],
                     entry_point: "write_index_buffer".into(),
                 },
@@ -80,7 +104,7 @@ impl FromWorld for MeshletPipelines {
                     label: Some("meshlet_write_index_buffer_second_pipeline".into()),
                     layout: vec![write_index_buffer_layout],
                     push_constant_ranges: vec![],
-                    shader: MESHLET_WRITE_INDEX_BUFFER_SHADER_UUID,
+                    shader: meshlet_write_index_buffer_shader_handle,
                     shader_defs: vec![
                         "MESHLET_WRITE_INDEX_BUFFER_PASS".into(),
                         "MESHLET_SECOND_WRITE_INDEX_BUFFER_PASS".into(),
@@ -93,12 +117,14 @@ impl FromWorld for MeshletPipelines {
                 label: Some("meshlet_downsample_depth".into()),
                 layout: vec![downsample_depth_layout],
                 push_constant_ranges: vec![],
-                vertex: fullscreen_shader_vertex_state(),
+                vertex: fullscreen_shader_vertex_state(
+                    fullscreen_vertex_shader_handle.clone_weak(),
+                ),
                 primitive: PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: MultisampleState::default(),
                 fragment: Some(FragmentState {
-                    shader: MESHLET_DOWNSAMPLE_DEPTH_SHADER_UUID,
+                    shader: meshlet_downsample_depth_shader_handle,
                     shader_defs: vec![],
                     entry_point: "downsample_depth".into(),
                     targets: vec![Some(ColorTargetState {
@@ -115,7 +141,7 @@ impl FromWorld for MeshletPipelines {
                     layout: vec![visibility_buffer_layout.clone()],
                     push_constant_ranges: vec![],
                     vertex: VertexState {
-                        shader: MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID,
+                        shader: meshlet_visibility_buffer_raster_shader_handle.clone_weak(),
                         shader_defs: vec![
                             "MESHLET_VISIBILITY_BUFFER_RASTER_PASS".into(),
                             "MESHLET_VISIBILITY_BUFFER_RASTER_PASS_OUTPUT".into(),
@@ -141,7 +167,7 @@ impl FromWorld for MeshletPipelines {
                     }),
                     multisample: MultisampleState::default(),
                     fragment: Some(FragmentState {
-                        shader: MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID,
+                        shader: meshlet_visibility_buffer_raster_shader_handle.clone_weak(),
                         shader_defs: vec![
                             "MESHLET_VISIBILITY_BUFFER_RASTER_PASS".into(),
                             "MESHLET_VISIBILITY_BUFFER_RASTER_PASS_OUTPUT".into(),
@@ -169,7 +195,7 @@ impl FromWorld for MeshletPipelines {
                     layout: vec![visibility_buffer_layout.clone()],
                     push_constant_ranges: vec![],
                     vertex: VertexState {
-                        shader: MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID,
+                        shader: meshlet_visibility_buffer_raster_shader_handle.clone_weak(),
                         shader_defs: vec!["MESHLET_VISIBILITY_BUFFER_RASTER_PASS".into()],
                         entry_point: "vertex".into(),
                         buffers: vec![],
@@ -201,7 +227,7 @@ impl FromWorld for MeshletPipelines {
                     layout: vec![visibility_buffer_layout],
                     push_constant_ranges: vec![],
                     vertex: VertexState {
-                        shader: MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID,
+                        shader: meshlet_visibility_buffer_raster_shader_handle.clone_weak(),
                         shader_defs: vec![
                             "MESHLET_VISIBILITY_BUFFER_RASTER_PASS".into(),
                             "DEPTH_CLAMP_ORTHO".into(),
@@ -227,7 +253,7 @@ impl FromWorld for MeshletPipelines {
                     }),
                     multisample: MultisampleState::default(),
                     fragment: Some(FragmentState {
-                        shader: MESHLET_VISIBILITY_BUFFER_RASTER_SHADER_UUID,
+                        shader: meshlet_visibility_buffer_raster_shader_handle.clone_weak(),
                         shader_defs: vec![
                             "MESHLET_VISIBILITY_BUFFER_RASTER_PASS".into(),
                             "DEPTH_CLAMP_ORTHO".into(),
@@ -242,7 +268,7 @@ impl FromWorld for MeshletPipelines {
                 label: Some("meshlet_copy_material_depth".into()),
                 layout: vec![copy_material_depth_layout],
                 push_constant_ranges: vec![],
-                vertex: fullscreen_shader_vertex_state(),
+                vertex: fullscreen_shader_vertex_state(fullscreen_vertex_shader_handle),
                 primitive: PrimitiveState::default(),
                 depth_stencil: Some(DepthStencilState {
                     format: TextureFormat::Depth16Unorm,
@@ -253,7 +279,7 @@ impl FromWorld for MeshletPipelines {
                 }),
                 multisample: MultisampleState::default(),
                 fragment: Some(FragmentState {
-                    shader: MESHLET_COPY_MATERIAL_DEPTH_SHADER_UUID,
+                    shader: meshlet_copy_material_depth_shader_handle,
                     shader_defs: vec![],
                     entry_point: "copy_material_depth".into(),
                     targets: vec![],

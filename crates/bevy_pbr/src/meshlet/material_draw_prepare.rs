@@ -1,6 +1,6 @@
 use super::{MeshletGpuScene, MESHLET_MESH_MATERIAL_SHADER_UUID};
 use crate::{environment_map::EnvironmentMapLight, irradiance_volume::IrradianceVolume, *};
-use bevy_asset::AssetServer;
+use bevy_asset::{io::embedded::InternalAssets, AssetServer};
 use bevy_core_pipeline::{
     core_3d::Camera3d,
     prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
@@ -34,6 +34,7 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: Material>(
     render_material_instances: Res<RenderMaterialInstances<M>>,
     asset_server: Res<AssetServer>,
     mut mesh_vertex_buffer_layouts: ResMut<MeshVertexBufferLayouts>,
+    internal_assets: Res<InternalAssets<Shader>>,
     mut views: Query<
         (
             &mut MeshletViewMaterialsMainOpaquePass,
@@ -59,6 +60,11 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: Material>(
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     let fake_vertex_buffer_layout = &fake_vertex_buffer_layout(&mut mesh_vertex_buffer_layouts);
+
+    let meshlet_mesh_material_shader_handle = internal_assets
+        .get(&MESHLET_MESH_MATERIAL_SHADER_UUID)
+        .expect("Meshlet material shader not present in InternalAssets")
+        .clone_weak();
 
     for (
         mut materials,
@@ -139,8 +145,8 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: Material>(
 
         view_key |= MeshPipelineKey::from_primitive_topology(PrimitiveTopology::TriangleList);
 
-        for material_id in render_material_instances.values() {
-            let Some(material) = render_materials.get(*material_id) else {
+        for material_index in render_material_instances.values().copied() {
+            let Some(material) = render_materials.get(material_index) else {
                 continue;
             };
 
@@ -173,7 +179,7 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: Material>(
                 ],
                 push_constant_ranges: vec![],
                 vertex: VertexState {
-                    shader: MESHLET_MESH_MATERIAL_SHADER_UUID,
+                    shader: meshlet_mesh_material_shader_handle.clone(),
                     shader_defs: shader_defs.clone(),
                     entry_point: material_pipeline_descriptor.vertex.entry_point,
                     buffers: Vec::new(),
@@ -189,9 +195,13 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: Material>(
                 multisample: MultisampleState::default(),
                 fragment: Some(FragmentState {
                     shader: match M::meshlet_mesh_fragment_shader() {
-                        ShaderRef::Default => MESHLET_MESH_MATERIAL_SHADER_UUID,
+                        ShaderRef::Default => meshlet_mesh_material_shader_handle.clone(),
                         ShaderRef::Handle(handle) => handle,
                         ShaderRef::Path(path) => asset_server.load(path),
+                        ShaderRef::InternalAsset(uuid) => internal_assets
+                            .get(&uuid)
+                            .expect("Meshlet material shader not present in InternalAssets")
+                            .clone_weak(),
                     },
                     shader_defs,
                     entry_point: material_fragment.entry_point,
@@ -199,7 +209,7 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: Material>(
                 }),
             };
 
-            let material_id = gpu_scene.get_material_id(material_id.untyped());
+            let material_id = gpu_scene.get_material_id(material_index);
 
             let pipeline_id = *cache.entry(view_key).or_insert_with(|| {
                 pipeline_cache.queue_render_pipeline(pipeline_descriptor.clone())
@@ -231,6 +241,7 @@ pub fn prepare_material_meshlet_meshes_prepass<M: Material>(
     render_material_instances: Res<RenderMaterialInstances<M>>,
     mut mesh_vertex_buffer_layouts: ResMut<MeshVertexBufferLayouts>,
     asset_server: Res<AssetServer>,
+    internal_assets: Res<InternalAssets<Shader>>,
     mut views: Query<
         (
             &mut MeshletViewMaterialsPrepass,
@@ -244,6 +255,11 @@ pub fn prepare_material_meshlet_meshes_prepass<M: Material>(
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     let fake_vertex_buffer_layout = &fake_vertex_buffer_layout(&mut mesh_vertex_buffer_layouts);
+
+    let meshlet_mesh_material_shader_handle = internal_assets
+        .get(&MESHLET_MESH_MATERIAL_SHADER_UUID)
+        .expect("Meshlet material shader not present in InternalAssets")
+        .clone_weak();
 
     for (
         mut materials,
@@ -264,8 +280,8 @@ pub fn prepare_material_meshlet_meshes_prepass<M: Material>(
 
         view_key |= MeshPipelineKey::from_primitive_topology(PrimitiveTopology::TriangleList);
 
-        for material_id in render_material_instances.values() {
-            let Some(material) = render_materials.get(*material_id) else {
+        for material_index in render_material_instances.values().copied() {
+            let Some(material) = render_materials.get(material_index) else {
                 continue;
             };
 
@@ -325,7 +341,7 @@ pub fn prepare_material_meshlet_meshes_prepass<M: Material>(
                 ],
                 push_constant_ranges: vec![],
                 vertex: VertexState {
-                    shader: MESHLET_MESH_MATERIAL_SHADER_UUID,
+                    shader: meshlet_mesh_material_shader_handle.clone(),
                     shader_defs: shader_defs.clone(),
                     entry_point: material_pipeline_descriptor.vertex.entry_point,
                     buffers: Vec::new(),
@@ -341,9 +357,13 @@ pub fn prepare_material_meshlet_meshes_prepass<M: Material>(
                 multisample: MultisampleState::default(),
                 fragment: Some(FragmentState {
                     shader: match fragment_shader {
-                        ShaderRef::Default => MESHLET_MESH_MATERIAL_SHADER_UUID,
+                        ShaderRef::Default => meshlet_mesh_material_shader_handle.clone(),
                         ShaderRef::Handle(handle) => handle,
                         ShaderRef::Path(path) => asset_server.load(path),
+                        ShaderRef::InternalAsset(uuid) => internal_assets
+                            .get(&uuid)
+                            .expect("Meshlet material shader not present in InternalAssets")
+                            .clone_weak(),
                     },
                     shader_defs,
                     entry_point,
@@ -351,7 +371,7 @@ pub fn prepare_material_meshlet_meshes_prepass<M: Material>(
                 }),
             };
 
-            let material_id = gpu_scene.get_material_id(material_id.untyped());
+            let material_id = gpu_scene.get_material_id(material_index);
 
             let pipeline_id = *cache.entry(view_key).or_insert_with(|| {
                 pipeline_cache.queue_render_pipeline(pipeline_descriptor.clone())

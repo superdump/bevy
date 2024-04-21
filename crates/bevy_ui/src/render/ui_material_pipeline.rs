@@ -45,18 +45,6 @@ where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(
-            app,
-            UI_VERTEX_OUTPUT_SHADER_UUID,
-            "ui_vertex_output.wgsl",
-            Shader::from_wgsl
-        );
-        load_internal_asset!(
-            app,
-            UI_MATERIAL_SHADER_UUID,
-            "ui_material.wgsl",
-            Shader::from_wgsl
-        );
         app.init_asset::<M>().add_plugins((
             ExtractComponentPlugin::<Handle<M>>::extract_visible(),
             RenderAssetPlugin::<PreparedUiMaterial<M>>::default(),
@@ -83,6 +71,19 @@ where
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            UI_VERTEX_OUTPUT_SHADER_UUID,
+            "ui_vertex_output.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            UI_MATERIAL_SHADER_UUID,
+            "ui_material.wgsl",
+            Shader::from_wgsl
+        );
+
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.init_resource::<UiMaterialPipeline<M>>();
         }

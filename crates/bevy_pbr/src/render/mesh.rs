@@ -229,7 +229,9 @@ impl Plugin for MeshRenderPlugin {
             mesh_bindings_shader_defs
         );
 
-        app.sub_app_mut(RenderApp).init_resource::<MeshPipeline>();
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.init_resource::<MeshPipeline>();
+        }
     }
 }
 

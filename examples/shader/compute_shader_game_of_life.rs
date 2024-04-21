@@ -134,8 +134,12 @@ fn prepare_bind_group(
     game_of_life_images: Res<GameOfLifeImages>,
     render_device: Res<RenderDevice>,
 ) {
-    let view_a = gpu_images.get(&game_of_life_images.texture_a).unwrap();
-    let view_b = gpu_images.get(&game_of_life_images.texture_b).unwrap();
+    let view_a = gpu_images
+        .get(game_of_life_images.texture_a.index())
+        .unwrap();
+    let view_b = gpu_images
+        .get(game_of_life_images.texture_b.index())
+        .unwrap();
     let bind_group_0 = render_device.create_bind_group(
         None,
         &pipeline.texture_bind_group_layout,

@@ -57,7 +57,7 @@ use self::{
 };
 use crate::{graph::NodePbr, Material};
 use bevy_app::{App, Plugin, PostUpdate};
-use bevy_asset::{load_internal_asset, AssetApp, Handle};
+use bevy_asset::{load_internal_asset, uuid::Uuid, AssetApp, Handle};
 use bevy_core_pipeline::{
     core_3d::{
         graph::{Core3d, Node3d},
@@ -86,7 +86,7 @@ use bevy_transform::components::{GlobalTransform, Transform};
 use bevy_transform::TransformSystem;
 
 const MESHLET_BINDINGS_SHADER_UUID: Uuid = Uuid::from_u128(1325134235233421);
-const MESHLET_MESH_MATERIAL_SHADER_UUID: Handle<Shader> = Handle::weak_from_u128(3325134235233421);
+const MESHLET_MESH_MATERIAL_SHADER_UUID: Uuid = Uuid::from_u128(3325134235233421);
 
 /// Provides a plugin for rendering large amounts of high-poly 3d meshes using an efficient GPU-driven method. See also [`MeshletMesh`].
 ///
@@ -113,6 +113,23 @@ pub struct MeshletPlugin;
 
 impl Plugin for MeshletPlugin {
     fn build(&self, app: &mut App) {
+        app.init_asset::<MeshletMesh>()
+            .register_asset_loader(MeshletMeshSaverLoad)
+            .insert_resource(Msaa::Off)
+            .add_systems(
+                PostUpdate,
+                check_visibility::<WithMeshletMesh>
+                    .in_set(VisibilitySystems::CheckVisibility)
+                    .after(VisibilitySystems::CalculateBounds)
+                    .after(VisibilitySystems::UpdateOrthographicFrusta)
+                    .after(VisibilitySystems::UpdatePerspectiveFrusta)
+                    .after(VisibilitySystems::UpdateProjectionFrusta)
+                    .after(VisibilitySystems::VisibilityPropagate)
+                    .after(TransformSystem::TransformPropagate),
+            );
+    }
+
+    fn finish(&self, app: &mut App) {
         load_internal_asset!(
             app,
             MESHLET_BINDINGS_SHADER_UUID,
@@ -162,23 +179,6 @@ impl Plugin for MeshletPlugin {
             Shader::from_wgsl
         );
 
-        app.init_asset::<MeshletMesh>()
-            .register_asset_loader(MeshletMeshSaverLoad)
-            .insert_resource(Msaa::Off)
-            .add_systems(
-                PostUpdate,
-                check_visibility::<WithMeshletMesh>
-                    .in_set(VisibilitySystems::CheckVisibility)
-                    .after(VisibilitySystems::CalculateBounds)
-                    .after(VisibilitySystems::UpdateOrthographicFrusta)
-                    .after(VisibilitySystems::UpdatePerspectiveFrusta)
-                    .after(VisibilitySystems::UpdateProjectionFrusta)
-                    .after(VisibilitySystems::VisibilityPropagate)
-                    .after(TransformSystem::TransformPropagate),
-            );
-    }
-
-    fn finish(&self, app: &mut App) {
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };

@@ -277,7 +277,9 @@ macro_rules! load_internal_asset {
                 .join($path_str)
                 .to_string_lossy()
         ));
-        $app.sub_app_mut(RenderApp).world_mut().resource_mut::<InternalAssets<_>>().insert($uuid, handle);
+        if let Some(render_app) = $app.get_sub_app_mut(RenderApp) {
+            render_app.world_mut().resource_mut::<InternalAssets<_>>().insert($uuid, handle);
+        }
     }};
     // we can't support params without variadic arguments, so internal assets with additional params can't be hot-reloaded
     ($app: ident, $uuid: ident, $path_str: expr, $loader: expr $(, $param:expr)+) => {{
@@ -291,7 +293,9 @@ macro_rules! load_internal_asset {
                 .to_string_lossy(),
             $($param),+
         ));
-        $app.sub_app_mut(RenderApp).world_mut().resource_mut::<InternalAssets<_>>().insert($uuid, handle);
+        if let Some(render_app) = $app.get_sub_app_mut(RenderApp) {
+            render_app.world_mut().resource_mut::<InternalAssets<_>>().insert($uuid, handle);
+        }
     }};
 }
 

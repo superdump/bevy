@@ -148,7 +148,9 @@ impl Plugin for Mesh2dRenderPlugin {
             mesh_bindings_shader_defs
         );
 
-        app.sub_app_mut(RenderApp).init_resource::<Mesh2dPipeline>();
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.init_resource::<Mesh2dPipeline>();
+        }
     }
 }
 

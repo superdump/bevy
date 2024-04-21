@@ -44,8 +44,6 @@ pub struct TemporalAntiAliasPlugin;
 
 impl Plugin for TemporalAntiAliasPlugin {
     fn build(&self, app: &mut App) {
-        load_internal_asset!(app, TAA_SHADER_UUID, "taa.wgsl", Shader::from_wgsl);
-
         app.insert_resource(Msaa::Off)
             .register_type::<TemporalAntiAliasSettings>();
 
@@ -76,6 +74,8 @@ impl Plugin for TemporalAntiAliasPlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        load_internal_asset!(app, TAA_SHADER_UUID, "taa.wgsl", Shader::from_wgsl);
+
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };

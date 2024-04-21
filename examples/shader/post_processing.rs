@@ -7,9 +7,10 @@
 //! This is a fairly low level example and assumes some familiarity with rendering concepts and wgpu.
 
 use bevy::{
+    asset::io::embedded::InternalAssets,
     core_pipeline::{
         core_3d::graph::{Core3d, Node3d},
-        fullscreen_vertex_shader::fullscreen_shader_vertex_state,
+        fullscreen_vertex_shader::{fullscreen_shader_vertex_state, FULLSCREEN_SHADER_UUID},
     },
     ecs::query::QueryItem,
     prelude::*,
@@ -250,6 +251,11 @@ impl FromWorld for PostProcessPipeline {
 
         // Get the shader handle
         let shader = world.load_asset("shaders/post_processing.wgsl");
+        let fullscreen_vertex_shader_handle = world
+            .resource::<InternalAssets<Shader>>()
+            .get(&FULLSCREEN_SHADER_UUID)
+            .unwrap()
+            .clone_weak();
 
         let pipeline_id = world
             .resource_mut::<PipelineCache>()
@@ -258,7 +264,7 @@ impl FromWorld for PostProcessPipeline {
                 label: Some("post_process_pipeline".into()),
                 layout: vec![layout.clone()],
                 // This will setup a fullscreen triangle for the vertex state
-                vertex: fullscreen_shader_vertex_state(),
+                vertex: fullscreen_shader_vertex_state(fullscreen_vertex_shader_handle),
                 fragment: Some(FragmentState {
                     shader,
                     shader_defs: vec![],

@@ -6,6 +6,7 @@
 //! [`Material2d`]: bevy::sprite::Material2d
 
 use bevy::{
+    asset::uuid::Uuid,
     color::palettes::basic::YELLOW,
     core_pipeline::core_2d::Transparent2d,
     math::FloatOrd,
@@ -126,12 +127,16 @@ pub struct ColoredMesh2d;
 pub struct ColoredMesh2dPipeline {
     /// this pipeline wraps the standard [`Mesh2dPipeline`]
     mesh2d_pipeline: Mesh2dPipeline,
+    colored_mesh2d_shader_handle: Handle<Shader>,
 }
 
 impl FromWorld for ColoredMesh2dPipeline {
     fn from_world(world: &mut World) -> Self {
+        let colored_mesh2d_shader_handle =
+            world.resource::<ColoredMesh2dShaderHandle>().0.clone_weak();
         Self {
             mesh2d_pipeline: Mesh2dPipeline::from_world(world),
+            colored_mesh2d_shader_handle,
         }
     }
 }
@@ -173,7 +178,7 @@ impl SpecializedRenderPipeline for ColoredMesh2dPipeline {
         RenderPipelineDescriptor {
             vertex: VertexState {
                 // Use our custom shader
-                shader: COLORED_MESH2D_SHADER_UUID,
+                shader: self.colored_mesh2d_shader_handle.clone_weak(),
                 entry_point: "vertex".into(),
                 shader_defs: vec![],
                 // Use our custom vertex buffer
@@ -181,7 +186,7 @@ impl SpecializedRenderPipeline for ColoredMesh2dPipeline {
             },
             fragment: Some(FragmentState {
                 // Use our custom shader
-                shader: COLORED_MESH2D_SHADER_UUID,
+                shader: self.colored_mesh2d_shader_handle.clone_weak(),
                 shader_defs: vec![],
                 entry_point: "fragment".into(),
                 targets: vec![Some(ColorTargetState {
@@ -278,15 +283,18 @@ fn fragment(in: FragmentInput) -> @location(0) vec4<f32> {
 /// Plugin that renders [`ColoredMesh2d`]s
 pub struct ColoredMesh2dPlugin;
 
-/// Handle to the custom shader with a unique random ID
-pub const COLORED_MESH2D_SHADER_UUID: Handle<Shader> = Handle::weak_from_u128(13828845428412094821);
+/// A unique random UUID for the custom shader
+pub const COLORED_MESH2D_SHADER_UUID: Uuid = Uuid::from_u128(13828845428412094821);
+
+#[derive(Resource, Deref, DerefMut)]
+struct ColoredMesh2dShaderHandle(Handle<Shader>);
 
 impl Plugin for ColoredMesh2dPlugin {
     fn build(&self, app: &mut App) {
         // Load our custom shader
         let mut shaders = app.world_mut().resource_mut::<Assets<Shader>>();
-        shaders.insert(
-            &COLORED_MESH2D_SHADER_UUID,
+        let (shader_handle, _) = shaders.insert_with_uuid(
+            COLORED_MESH2D_SHADER_UUID,
             Shader::from_wgsl(COLORED_MESH2D_SHADER, file!()),
         );
 
@@ -295,6 +303,7 @@ impl Plugin for ColoredMesh2dPlugin {
             .unwrap()
             .add_render_command::<Transparent2d, DrawColoredMesh2d>()
             .init_resource::<SpecializedRenderPipelines<ColoredMesh2dPipeline>>()
+            .insert_resource(ColoredMesh2dShaderHandle(shader_handle))
             .add_systems(
                 ExtractSchedule,
                 extract_colored_mesh2d.after(extract_mesh2d),
@@ -336,7 +345,7 @@ pub fn extract_colored_mesh2d(
         render_mesh_instances.insert(
             entity,
             RenderMesh2dInstance {
-                mesh_asset_index: handle.0.id(),
+                mesh_asset_index: handle.0.index(),
                 transforms,
                 material_bind_group_id: Material2dBindGroupId::default(),
                 automatic_batching: false,

@@ -3,7 +3,7 @@ use crate::{
     Material, MeshFlags, MeshTransforms, MeshUniform, NotShadowCaster, NotShadowReceiver,
     PreviousGlobalTransform, RenderMaterialInstances, ShadowView,
 };
-use bevy_asset::{AssetEvent, AssetId, AssetServer, Assets, Handle, UntypedAssetId};
+use bevy_asset::{AssetEvent, AssetHashMap, AssetId, AssetIndex, AssetServer, Assets, Handle};
 use bevy_core_pipeline::core_3d::Camera3d;
 use bevy_ecs::{
     component::Component,
@@ -164,8 +164,7 @@ pub fn queue_material_meshlet_meshes<M: Material>(
 
     for (i, (instance, _, _)) in gpu_scene.instances.iter().enumerate() {
         if let Some(material_asset_index) = render_material_instances.get(instance) {
-            let material_asset_index = material_asset_index.untyped();
-            if let Some(material_id) = gpu_scene.material_id_lookup.get(&material_asset_index) {
+            if let Some(material_id) = gpu_scene.material_id_lookup.get(material_asset_index) {
                 gpu_scene.material_ids_present_in_scene.insert(*material_id);
                 gpu_scene.instance_material_ids.get_mut()[i] = *material_id;
             }
@@ -617,7 +616,7 @@ pub struct MeshletGpuScene {
     scene_meshlet_count: u32,
     scene_triangle_count: u64,
     next_material_id: u32,
-    material_id_lookup: HashMap<UntypedAssetId, u32>,
+    material_id_lookup: AssetHashMap<u32>,
     material_ids_present_in_scene: HashSet<u32>,
     /// Per-instance [`Entity`], [`RenderLayers`], and [`NotShadowCaster`]
     instances: Vec<(Entity, RenderLayers, bool)>,
@@ -629,7 +628,7 @@ pub struct MeshletGpuScene {
     thread_instance_ids: StorageBuffer<Vec<u32>>,
     thread_meshlet_ids: StorageBuffer<Vec<u32>>,
     previous_cluster_ids: StorageBuffer<Vec<u32>>,
-    previous_cluster_id_starts: HashMap<(Entity, AssetId<MeshletMesh>), (u32, bool)>,
+    previous_cluster_id_starts: HashMap<(Entity, AssetIndex), (u32, bool)>,
     previous_occlusion_buffers: EntityHashMap<(Buffer, Buffer)>,
     visibility_buffer_draw_index_buffer: Option<Buffer>,
 
@@ -660,7 +659,7 @@ impl FromWorld for MeshletGpuScene {
             scene_meshlet_count: 0,
             scene_triangle_count: 0,
             next_material_id: 0,
-            material_id_lookup: HashMap::new(),
+            material_id_lookup: AssetHashMap::default(),
             material_ids_present_in_scene: HashSet::new(),
             instances: Vec::new(),
             instance_uniforms: {
@@ -877,7 +876,7 @@ impl MeshletGpuScene {
         // Calculate the previous cluster IDs for each meshlet for this instance
         let previous_cluster_id_start = self
             .previous_cluster_id_starts
-            .entry((instance, handle.id()))
+            .entry((instance, handle.index()))
             .or_insert((0, true));
         let previous_cluster_ids = if previous_cluster_id_start.1 {
             0..(meshlets_slice.len() as u32)
@@ -899,10 +898,10 @@ impl MeshletGpuScene {
     }
 
     /// Get the depth value for use with the material depth texture for a given [`Material`] asset.
-    pub fn get_material_id(&mut self, material_id: UntypedAssetId) -> u32 {
+    pub fn get_material_id(&mut self, material_index: AssetIndex) -> u32 {
         *self
             .material_id_lookup
-            .entry(material_id)
+            .entry(material_index)
             .or_insert_with(|| {
                 self.next_material_id += 1;
                 self.next_material_id
