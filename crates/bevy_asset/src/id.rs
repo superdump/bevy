@@ -91,7 +91,7 @@ impl<A: Asset> AssetId<A> {
 impl<A: Asset> Default for AssetId<A> {
     fn default() -> Self {
         Self {
-            uuid: Some(Self::DEFAULT_UUID),
+            uuid: None,
             index: AssetIndex::default(),
             marker: PhantomData,
         }

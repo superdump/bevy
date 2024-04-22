@@ -10,6 +10,7 @@ use bevy_reflect::{Reflect, TypePath};
 use bevy_utils::{hashbrown, EntityHash, HashMap};
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use std::{
     any::TypeId,
     hash::Hash,
@@ -214,6 +215,9 @@ impl<A: Asset> DenseAssetStorage<A> {
         index: AssetIndex,
         asset: A,
     ) -> Result<bool, InvalidGenerationError> {
+        self.allocator
+            .next_index
+            .fetch_max(index.index + 1, Ordering::Relaxed);
         self.flush();
         let entry = &mut self.storage[index.index as usize];
         if let Entry::Some { value, generation } = entry {
