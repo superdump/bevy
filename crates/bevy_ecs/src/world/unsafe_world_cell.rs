@@ -4,12 +4,10 @@
 
 use super::{command_queue::CommandQueue, Mut, Ref, World, WorldId};
 use crate::{
-    archetype::{Archetype, ArchetypeComponentId, Archetypes},
+    archetype::{Archetype, Archetypes},
     bundle::Bundles,
     change_detection::{MutUntyped, Ticks, TicksMut},
-    component::{
-        ComponentId, ComponentStorage, ComponentTicks, Components, StorageType, Tick, TickCells,
-    },
+    component::{ComponentId, ComponentTicks, Components, StorageType, Tick, TickCells},
     entity::{Entities, Entity, EntityLocation},
     prelude::Component,
     removal_detection::RemovedComponentEvents,
@@ -284,36 +282,6 @@ impl<'w> UnsafeWorldCell<'w> {
     pub unsafe fn storages(self) -> &'w Storages {
         // SAFETY: The caller promises to only access world data allowed by this instance.
         &unsafe { self.unsafe_world() }.storages
-    }
-
-    /// Shorthand helper function for getting the [`ArchetypeComponentId`] for a resource.
-    #[inline]
-    pub(crate) fn get_resource_archetype_component_id(
-        self,
-        component_id: ComponentId,
-    ) -> Option<ArchetypeComponentId> {
-        // SAFETY:
-        // - we only access world metadata
-        let resource = unsafe { self.world_metadata() }
-            .storages
-            .resources
-            .get(component_id)?;
-        Some(resource.id())
-    }
-
-    /// Shorthand helper function for getting the [`ArchetypeComponentId`] for a resource.
-    #[inline]
-    pub(crate) fn get_non_send_archetype_component_id(
-        self,
-        component_id: ComponentId,
-    ) -> Option<ArchetypeComponentId> {
-        // SAFETY:
-        // - we only access world metadata
-        let resource = unsafe { self.world_metadata() }
-            .storages
-            .non_send_resources
-            .get(component_id)?;
-        Some(resource.id())
     }
 
     /// Retrieves an [`UnsafeEntityCell`] that exposes read and write operations for the given `entity`.
@@ -713,7 +681,7 @@ impl<'w> UnsafeEntityCell<'w> {
             get_component(
                 self.world,
                 component_id,
-                T::Storage::STORAGE_TYPE,
+                T::STORAGE_TYPE,
                 self.entity,
                 self.location,
             )
@@ -740,7 +708,7 @@ impl<'w> UnsafeEntityCell<'w> {
             get_component_and_ticks(
                 self.world,
                 component_id,
-                T::Storage::STORAGE_TYPE,
+                T::STORAGE_TYPE,
                 self.entity,
                 self.location,
             )
@@ -770,7 +738,7 @@ impl<'w> UnsafeEntityCell<'w> {
             get_ticks(
                 self.world,
                 component_id,
-                T::Storage::STORAGE_TYPE,
+                T::STORAGE_TYPE,
                 self.entity,
                 self.location,
             )
@@ -839,7 +807,7 @@ impl<'w> UnsafeEntityCell<'w> {
             get_component_and_ticks(
                 self.world,
                 component_id,
-                T::Storage::STORAGE_TYPE,
+                T::STORAGE_TYPE,
                 self.entity,
                 self.location,
             )

@@ -1,6 +1,6 @@
 mod parallel_scope;
 
-use super::{Deferred, Resource};
+use super::{Deferred, IntoSystem, RegisterSystem, Resource};
 use crate::{
     self as bevy_ecs,
     bundle::Bundle,
@@ -17,11 +17,7 @@ use std::marker::PhantomData;
 ///
 /// Since each command requires exclusive access to the `World`,
 /// all queued commands are automatically applied in sequence
-/// when the [`apply_deferred`] system runs.
-///
-/// The command queue of an individual system can also be manually applied
-/// by calling [`System::apply_deferred`].
-/// Similarly, the command queue of a schedule can be manually applied via [`Schedule::apply_deferred`].
+/// when the `apply_deferred` system runs (see [`apply_deferred`] documentation for more details).
 ///
 /// Each command can be used to modify the [`World`] in arbitrary ways:
 /// * spawning or despawning entities
@@ -67,9 +63,7 @@ use std::marker::PhantomData;
 /// # }
 /// ```
 ///
-/// [`System::apply_deferred`]: crate::system::System::apply_deferred
 /// [`apply_deferred`]: crate::schedule::apply_deferred
-/// [`Schedule::apply_deferred`]: crate::schedule::Schedule::apply_deferred
 #[derive(SystemParam)]
 pub struct Commands<'w, 's> {
     queue: Deferred<'s, CommandQueue>,
@@ -410,12 +404,12 @@ impl<'w, 's> Commands<'w, 's> {
     /// Spawning a specific `entity` value is rarely the right choice. Most apps should use [`Commands::spawn_batch`].
     /// This method should generally only be used for sharing entities across apps, and only when they have a scheme
     /// worked out to share an ID space (which doesn't happen by default).
-    pub fn insert_or_spawn_batch<I, B>(&mut self, bundles: I)
+    pub fn insert_or_spawn_batch<I, B>(&mut self, bundles_iter: I)
     where
         I: IntoIterator<Item = (Entity, B)> + Send + Sync + 'static,
         B: Bundle,
     {
-        self.queue.push(insert_or_spawn_batch(bundles));
+        self.queue.push(insert_or_spawn_batch(bundles_iter));
     }
 
     /// Pushes a [`Command`] to the queue for inserting a [`Resource`] in the [`World`] with an inferred value.
@@ -524,6 +518,72 @@ impl<'w, 's> Commands<'w, 's> {
     pub fn run_system_with_input<I: 'static + Send>(&mut self, id: SystemId<I>, input: I) {
         self.queue
             .push(RunSystemWithInput::new_with_input(id, input));
+    }
+
+    /// Registers a system and returns a [`SystemId`] so it can later be called by [`World::run_system`].
+    ///
+    /// It's possible to register the same systems more than once, they'll be stored separately.
+    ///
+    /// This is different from adding systems to a [`Schedule`](crate::schedule::Schedule),
+    /// because the [`SystemId`] that is returned can be used anywhere in the [`World`] to run the associated system.
+    /// This allows for running systems in a push-based fashion.
+    /// Using a [`Schedule`](crate::schedule::Schedule) is still preferred for most cases
+    /// due to its better performance and ability to run non-conflicting systems simultaneously.
+    ///
+    /// If you want to prevent Commands from registering the same system multiple times, consider using [`Local`](crate::system::Local)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bevy_ecs::{prelude::*, world::CommandQueue, system::SystemId};
+    ///
+    /// #[derive(Resource)]
+    /// struct Counter(i32);
+    ///
+    /// fn register_system(mut local_system: Local<Option<SystemId>>, mut commands: Commands) {
+    ///     if let Some(system) = *local_system {
+    ///         commands.run_system(system);
+    ///     } else {
+    ///         *local_system = Some(commands.register_one_shot_system(increment_counter));
+    ///     }
+    /// }
+    ///
+    /// fn increment_counter(mut value: ResMut<Counter>) {
+    ///     value.0 += 1;
+    /// }
+    ///
+    /// # let mut world = World::default();
+    /// # world.insert_resource(Counter(0));
+    /// # let mut queue_1 = CommandQueue::default();
+    /// # let systemid = {
+    /// #   let mut commands = Commands::new(&mut queue_1, &world);
+    /// #   commands.register_one_shot_system(increment_counter)
+    /// # };
+    /// # let mut queue_2 = CommandQueue::default();
+    /// # {
+    /// #   let mut commands = Commands::new(&mut queue_2, &world);
+    /// #   commands.run_system(systemid);
+    /// # }
+    /// # queue_1.append(&mut queue_2);
+    /// # queue_1.apply(&mut world);
+    /// # assert_eq!(1, world.resource::<Counter>().0);
+    /// # bevy_ecs::system::assert_is_system(register_system);
+    /// ```
+    pub fn register_one_shot_system<
+        I: 'static + Send,
+        O: 'static + Send,
+        M,
+        S: IntoSystem<I, O, M> + 'static,
+    >(
+        &mut self,
+        system: S,
+    ) -> SystemId<I, O> {
+        let entity = self.spawn_empty().id();
+        self.queue.push(RegisterSystem::new(system, entity));
+        SystemId {
+            entity,
+            marker: std::marker::PhantomData,
+        }
     }
 
     /// Pushes a generic [`Command`] to the command queue.
@@ -770,13 +830,13 @@ impl EntityCommands<'_> {
     ///   commands.entity(player.entity)
     ///    // You can try_insert individual components:
     ///     .try_insert(Defense(10))
-    ///     
+    ///
     ///    // You can also insert tuples of components:
     ///     .try_insert(CombatBundle {
     ///         health: Health(100),
     ///         strength: Strength(40),
     ///     });
-    ///    
+    ///
     ///    // Suppose this occurs in a parallel adjacent system or process
     ///    commands.entity(player.entity)
     ///      .despawn();
@@ -977,13 +1037,13 @@ where
 /// A [`Command`] that consumes an iterator of [`Bundle`]s to spawn a series of entities.
 ///
 /// This is more efficient than spawning the entities individually.
-fn spawn_batch<I, B>(bundles: I) -> impl Command
+fn spawn_batch<I, B>(bundles_iter: I) -> impl Command
 where
     I: IntoIterator<Item = B> + Send + Sync + 'static,
     B: Bundle,
 {
     move |world: &mut World| {
-        world.spawn_batch(bundles);
+        world.spawn_batch(bundles_iter);
     }
 }
 
@@ -991,13 +1051,13 @@ where
 /// If any entities do not already exist in the world, they will be spawned.
 ///
 /// This is more efficient than inserting the bundles individually.
-fn insert_or_spawn_batch<I, B>(bundles: I) -> impl Command
+fn insert_or_spawn_batch<I, B>(bundles_iter: I) -> impl Command
 where
     I: IntoIterator<Item = (Entity, B)> + Send + Sync + 'static,
     B: Bundle,
 {
     move |world: &mut World| {
-        if let Err(invalid_entities) = world.insert_or_spawn_batch(bundles) {
+        if let Err(invalid_entities) = world.insert_or_spawn_batch(bundles_iter) {
             error!(
                 "Failed to 'insert or spawn' bundle of type {} into the following invalid entities: {:?}",
                 std::any::type_name::<B>(),
@@ -1098,6 +1158,7 @@ mod tests {
         Arc,
     };
 
+    #[allow(dead_code)]
     #[derive(Component)]
     #[component(storage = "SparseSet")]
     struct SparseDropCk(DropCk);

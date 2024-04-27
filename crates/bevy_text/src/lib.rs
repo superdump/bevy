@@ -1,5 +1,11 @@
 // FIXME(3492): remove once docs are ready
 #![allow(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![forbid(unsafe_code)]
+#![doc(
+    html_logo_url = "https://bevyengine.org/assets/icon.png",
+    html_favicon_url = "https://bevyengine.org/assets/icon.png"
+)]
 
 mod error;
 mod font;
@@ -77,11 +83,6 @@ impl Plugin for TextPlugin {
         app.init_asset::<Font>()
             .register_type::<Text>()
             .register_type::<Text2dBounds>()
-            .register_type::<TextSection>()
-            .register_type::<Vec<TextSection>>()
-            .register_type::<TextStyle>()
-            .register_type::<JustifyText>()
-            .register_type::<BreakLineOn>()
             .init_asset_loader::<FontLoader>()
             .init_resource::<TextSettings>()
             .init_resource::<FontAtlasSets>()
@@ -103,7 +104,7 @@ impl Plugin for TextPlugin {
                 ),
             );
 
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.add_systems(
                 ExtractSchedule,
                 extract_text2d_sprite.after(SpriteSystem::ExtractSprites),
