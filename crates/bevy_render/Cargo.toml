@@ -46,7 +46,7 @@ hexasphere = "1.0.0"
 parking_lot = "0.11.0"
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
-bevy-glsl-to-spirv = "0.1.7"
+bevy-glsl-to-spirv = "0.2.1"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 shaderc = "0.6.2"
