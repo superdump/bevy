@@ -1,6 +1,6 @@
 use crate::{
-    CascadeShadowConfig, Cascades, DirectionalLight, Material, PointLight, SpotLight,
-    StandardMaterial,
+    CascadeShadowConfig, Cascades, CascadesCullingPlanes, DirectionalLight, Material, PointLight,
+    SpotLight, StandardMaterial,
 };
 use bevy_asset::Handle;
 use bevy_ecs::entity::EntityHashMap;
@@ -117,6 +117,7 @@ pub struct DirectionalLightBundle {
     pub frusta: CascadesFrusta,
     pub cascades: Cascades,
     pub cascade_shadow_config: CascadeShadowConfig,
+    pub culling_planes: CascadesCullingPlanes,
     pub visible_entities: CascadesVisibleEntities,
     pub transform: Transform,
     pub global_transform: GlobalTransform,

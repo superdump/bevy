@@ -1,19 +1,21 @@
+use bevy_core_pipeline::core_3d::Camera3d;
 use bevy_ecs::entity::EntityHashMap;
 use bevy_ecs::prelude::*;
-use bevy_math::{Mat4, Vec3A, Vec4};
+use bevy_math::{Mat4, Vec2, Vec3A, Vec4};
 use bevy_reflect::prelude::*;
 use bevy_render::{
     camera::{Camera, CameraProjection},
     extract_component::ExtractComponent,
     extract_resource::ExtractResource,
     mesh::Mesh,
-    primitives::{Aabb, CascadesFrusta, CubemapFrusta, Frustum, Sphere},
+    primitives::{Aabb, CascadesFrusta, CubemapFrusta, Frustum, HalfSpace, Sphere},
     view::{
         InheritedVisibility, RenderLayers, ViewVisibility, VisibilityRange, VisibleEntities,
         VisibleEntityRanges, WithMesh,
     },
 };
 use bevy_transform::components::{GlobalTransform, Transform};
+use bevy_utils::HashMap;
 
 use crate::*;
 
@@ -286,6 +288,8 @@ pub struct Cascade {
     pub(crate) clip_from_world: Mat4,
     /// Size of each shadow map texel in world units.
     pub(crate) texel_size: f32,
+    /// View-space positions of the corners of the view frustum slice
+    pub(crate) frustum_corners_view: [Vec3A; 8],
 }
 
 pub fn clear_directional_light_cascades(mut lights: Query<(&DirectionalLight, &mut Cascades)>) {
@@ -432,6 +436,7 @@ fn calculate_cascade(
         clip_from_cascade,
         clip_from_world,
         texel_size: cascade_texel_size,
+        frustum_corners_view: frustum_corners,
     }
 }
 /// Add this component to make a [`Mesh`] not cast shadows.
@@ -503,6 +508,13 @@ pub enum SimulationLightSystems {
     CheckLightVisibility,
 }
 
+#[derive(Component, Clone, Debug, Default, Reflect)]
+#[reflect(Component)]
+pub struct CascadesCullingPlanes {
+    #[reflect(ignore)]
+    pub planes: HashMap<Entity, Vec<HalfSpace>>,
+}
+
 // Sort lights by
 // - those with volumetric (and shadows) enabled first, so that the volumetric
 //   lighting pass can quickly find the volumetric lights;
@@ -524,18 +536,29 @@ pub(crate) fn directional_light_order(
 pub fn update_directional_light_frusta(
     mut views: Query<
         (
+            &GlobalTransform,
             &Cascades,
             &DirectionalLight,
             &ViewVisibility,
             &mut CascadesFrusta,
+            &mut CascadesCullingPlanes,
         ),
         (
             // Prevents this query from conflicting with camera queries.
             Without<Camera>,
         ),
     >,
+    cameras: Query<&GlobalTransform, With<Camera3d>>,
 ) {
-    for (cascades, directional_light, visibility, mut frusta) in &mut views {
+    for (
+        light_transform,
+        cascades,
+        directional_light,
+        visibility,
+        mut frusta,
+        mut culling_planes,
+    ) in &mut views
+    {
         // The frustum is used for culling meshes to the light for shadow mapping
         // so if shadow mapping is disabled for this light, then the frustum is
         // not needed.
@@ -554,6 +577,83 @@ pub fn update_directional_light_frusta(
                         .map(|c| Frustum::from_clip_from_world(&c.clip_from_world))
                         .collect::<Vec<_>>(),
                 )
+            })
+            .collect();
+
+        let light_direction: Vec3A = light_transform.forward().as_vec3().into();
+        culling_planes.planes = cascades
+            .cascades
+            .iter()
+            .map(|(view, cascades)| {
+                let view_to_world = cameras.get(*view).unwrap().affine();
+                let mut frustum_corners_view = cascades[0].frustum_corners_view;
+                for i in 4..8 {
+                    frustum_corners_view[i] = cascades[cascades.len() - 1].frustum_corners_view[i];
+                }
+                let frustum_corners_world = frustum_corners_view
+                    .iter()
+                    .map(|corner_view| view_to_world.transform_point3a(*corner_view))
+                    .collect::<Vec<_>>();
+                let frustum_world = Frustum::from_corners(&frustum_corners_world);
+                let mut culling_planes: Vec<HalfSpace> = frustum_world
+                    .half_spaces
+                    .into_iter()
+                    .filter(|half_space| half_space.normal().dot(light_direction) < 0.0)
+                    .collect();
+
+                // Build a convex hull and then build culling planes from the light direction and
+                // hull edges
+
+                // Project frustum corners in world-space to a plane defined by -light direction
+                // intersecting the origin
+                let normal = (-light_direction).normalize_or_zero();
+                let frustum_corners_world_on_plane = frustum_corners_world
+                    .iter()
+                    .map(|corner_world| *corner_world - corner_world.dot(normal) * normal)
+                    .collect::<Vec<_>>();
+                let right = Vec3A::Y.cross(normal).normalize();
+                let up = normal.cross(right).normalize();
+                let mut points = frustum_corners_world_on_plane
+                    .iter()
+                    .map(|&p| Vec2::new(p.dot(right), p.dot(up)))
+                    .collect::<Vec<_>>();
+
+                // Find the point with the lowest y coordinate, and the leftmost of those
+                let mut p0 = Vec2::MAX;
+                for corner in &points {
+                    if corner.y < p0.y || (corner.y == p0.y && corner.x < p0.x) {
+                        p0 = *corner;
+                    }
+                }
+
+                // Sort by angle from the x axis to the line between p0 and the point
+                points
+                    .sort_unstable_by(|&a, &b| Vec2::X.dot(a - p0).total_cmp(&Vec2::X.dot(b - p0)));
+
+                // Graham scan to find the convex hull
+                let ccw = |a: Vec2, b: Vec2, c: Vec2| {
+                    (c - b).extend(0.0).cross((a - b).extend(0.0)).z > 0.0
+                };
+                let mut hull = Vec::new();
+                for &point in &points {
+                    while hull.len() > 1 && ccw(hull[hull.len() - 2], hull[hull.len() - 1], p0) {
+                        hull.pop();
+                    }
+                    hull.push(point);
+                }
+                let hull_world = hull
+                    .into_iter()
+                    .map(|p| p.x * right + p.y * up)
+                    .collect::<Vec<_>>();
+
+                // Build culling planes from light direction and edges
+                for i in 0..hull_world.len() {
+                    let edge_world = hull_world[(i + 1) % hull_world.len()] - hull_world[i];
+                    let normal = edge_world.cross(light_direction);
+                    culling_planes.push(HalfSpace::new(normal.extend(-normal.dot(hull_world[i]))));
+                }
+
+                (*view, culling_planes)
             })
             .collect();
     }
@@ -658,6 +758,7 @@ pub fn check_light_mesh_visibility(
         (
             &DirectionalLight,
             &CascadesFrusta,
+            &CascadesCullingPlanes,
             &mut CascadesVisibleEntities,
             Option<&RenderLayers>,
             &mut ViewVisibility,
@@ -701,8 +802,14 @@ pub fn check_light_mesh_visibility(
     let visible_entity_ranges = visible_entity_ranges.as_deref();
 
     // Directional lights
-    for (directional_light, frusta, mut visible_entities, maybe_view_mask, light_view_visibility) in
-        &mut directional_lights
+    for (
+        directional_light,
+        frusta,
+        culling_planes,
+        mut visible_entities,
+        maybe_view_mask,
+        light_view_visibility,
+    ) in &mut directional_lights
     {
         // Re-use already allocated entries where possible.
         let mut views_to_remove = Vec::new();
@@ -770,12 +877,30 @@ pub fn check_light_mesh_visibility(
                         continue;
                     }
 
-                    for (frustum, frustum_visible_entities) in
+                    let view_culling_planes = culling_planes
+                        .planes
+                        .get(view)
+                        .expect("Expected that view would have culling planes and it did not.");
+                    'next: for (frustum, frustum_visible_entities) in
                         view_frusta.iter().zip(view_visible_entities)
                     {
                         // Disable near-plane culling, as a shadow caster could lie before the near plane.
                         if !frustum.intersects_obb(aabb, &transform.affine(), false, true) {
                             continue;
+                        }
+
+                        let aabb_center_world = transform
+                            .affine()
+                            .transform_point3a(aabb.center)
+                            .extend(1.0);
+                        for half_space in view_culling_planes {
+                            let p_normal = half_space.normal();
+                            let relative_radius =
+                                aabb.relative_radius(&p_normal, &transform.affine().matrix3);
+                            if half_space.normal_d().dot(aabb_center_world) + relative_radius <= 0.0
+                            {
+                                continue 'next;
+                            }
                         }
 
                         view_visibility.set();

@@ -165,6 +165,16 @@ impl HalfSpace {
         }
     }
 
+    /// Constructs a `HalfSpace` from a 3 coplanar points with counter-clockwise winding.
+    /// The constructor ensures the normal vector is normalized and the distance is appropriately scaled.
+    #[inline]
+    pub fn from_coplanar_points(points: &[Vec3A; 3]) -> Self {
+        let normal = (points[2] - points[1])
+            .normalize()
+            .cross((points[0] - points[1]).normalize());
+        HalfSpace::new(normal.extend(-(normal.dot(points[1]))))
+    }
+
     /// Returns the unit normal vector of the bisecting plane that characterizes the `HalfSpace`.
     #[inline]
     pub fn normal(&self) -> Vec3A {
@@ -214,6 +224,8 @@ impl HalfSpace {
 #[derive(Component, Clone, Copy, Debug, Default, Reflect)]
 #[reflect(Component, Default)]
 pub struct Frustum {
+    /// The frustum half spaces have their normals pointing inward and are
+    /// ordered: left, right, top, bottom, near, far
     #[reflect(ignore)]
     pub half_spaces: [HalfSpace; 6],
 }
@@ -260,6 +272,48 @@ impl Frustum {
             });
         }
         Self { half_spaces }
+    }
+
+    /// Calculate a frustum from the corners.
+    /// Corners are ordered bottom right, top right, top left, bottom left for
+    /// the near and then far planes.
+    pub fn from_corners(corners: &[Vec3A]) -> Self {
+        assert_eq!(corners.len(), 8);
+        let near_bottom_right = corners[0];
+        let near_top_right = corners[1];
+        let near_top_left = corners[2];
+        let near_bottom_left = corners[3];
+        let far_bottom_right = corners[4];
+        let far_top_left = corners[6];
+        let far_bottom_left = corners[7];
+
+        // Frustum half spaces are left, right, top, bottom, near, far
+        Self {
+            half_spaces: [
+                HalfSpace::from_coplanar_points(&[
+                    near_top_left,
+                    near_bottom_left,
+                    far_bottom_left,
+                ]),
+                HalfSpace::from_coplanar_points(&[
+                    far_bottom_right,
+                    near_bottom_right,
+                    near_top_right,
+                ]),
+                HalfSpace::from_coplanar_points(&[near_top_right, near_top_left, far_top_left]),
+                HalfSpace::from_coplanar_points(&[
+                    far_bottom_left,
+                    near_bottom_left,
+                    near_bottom_right,
+                ]),
+                HalfSpace::from_coplanar_points(&[
+                    near_bottom_right,
+                    near_bottom_left,
+                    near_top_left,
+                ]),
+                HalfSpace::from_coplanar_points(&[far_top_left, far_bottom_left, far_bottom_right]),
+            ],
+        }
     }
 
     /// Checks if a sphere intersects the frustum.
