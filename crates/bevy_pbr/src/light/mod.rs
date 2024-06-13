@@ -14,6 +14,7 @@ use bevy_render::{
     },
 };
 use bevy_transform::components::{GlobalTransform, Transform};
+use bevy_utils::Parallel;
 
 use crate::*;
 
@@ -681,6 +682,7 @@ pub fn check_light_mesh_visibility(
         ),
     >,
     visible_entity_ranges: Option<Res<VisibleEntityRanges>>,
+    mut thread_queues: Local<Parallel<Vec<Vec<Entity>>>>,
 ) {
     fn shrink_entities(visible_entities: &mut VisibleEntities) {
         // Check that visible entities capacity() is no more than two times greater than len()
@@ -734,67 +736,81 @@ pub fn check_light_mesh_visibility(
 
         let view_mask = maybe_view_mask.unwrap_or_default();
 
-        for (
-            entity,
-            inherited_visibility,
-            mut view_visibility,
-            maybe_entity_mask,
-            maybe_aabb,
-            maybe_transform,
-            has_visibility_range,
-        ) in &mut visible_entity_query
-        {
-            if !inherited_visibility.get() {
-                continue;
-            }
+        for (view, view_frusta) in &frusta.frusta {
+            let view_visible_entities = visible_entities
+                .entities
+                .get_mut(view)
+                .expect("Per-view visible entities should have been inserted already");
 
-            let entity_mask = maybe_entity_mask.unwrap_or_default();
-            if !view_mask.intersects(entity_mask) {
-                continue;
-            }
-
-            // If we have an aabb and transform, do frustum culling
-            if let (Some(aabb), Some(transform)) = (maybe_aabb, maybe_transform) {
-                for (view, view_frusta) in &frusta.frusta {
-                    let view_visible_entities = visible_entities
-                        .entities
-                        .get_mut(view)
-                        .expect("Per-view visible entities should have been inserted already");
-
-                    // Check visibility ranges.
-                    if has_visibility_range
-                        && visible_entity_ranges.is_some_and(|visible_entity_ranges| {
-                            !visible_entity_ranges.entity_is_in_range_of_view(entity, *view)
-                        })
-                    {
-                        continue;
+            visible_entity_query.par_iter_mut().for_each_init(
+                || {
+                    let mut thread_queues = thread_queues.borrow_local_mut();
+                    while thread_queues.len() < view_frusta.len() {
+                        thread_queues.push(Vec::new());
+                    }
+                    thread_queues
+                },
+                |queues,
+                 (
+                    entity,
+                    inherited_visibility,
+                    mut view_visibility,
+                    maybe_entity_mask,
+                    maybe_aabb,
+                    maybe_transform,
+                    has_visibility_range,
+                )| {
+                    if !inherited_visibility.get() {
+                        return;
                     }
 
-                    for (frustum, frustum_visible_entities) in
-                        view_frusta.iter().zip(view_visible_entities)
-                    {
-                        // Disable near-plane culling, as a shadow caster could lie before the near plane.
-                        if !frustum.intersects_obb(aabb, &transform.affine(), false, true) {
-                            continue;
+                    let entity_mask = maybe_entity_mask.unwrap_or_default();
+                    if !view_mask.intersects(entity_mask) {
+                        return;
+                    }
+
+                    // If we have an aabb and transform, do frustum culling
+                    if let (Some(aabb), Some(transform)) = (maybe_aabb, maybe_transform) {
+                        // Check visibility ranges.
+                        if has_visibility_range
+                            && visible_entity_ranges.is_some_and(|visible_entity_ranges| {
+                                !visible_entity_ranges.entity_is_in_range_of_view(entity, *view)
+                            })
+                        {
+                            return;
                         }
 
-                        view_visibility.set();
-                        frustum_visible_entities.get_mut::<WithMesh>().push(entity);
-                    }
-                }
-            } else {
-                view_visibility.set();
-                for view in frusta.frusta.keys() {
-                    let view_visible_entities = visible_entities
-                        .entities
-                        .get_mut(view)
-                        .expect("Per-view visible entities should have been inserted already");
+                        for (frustum_index, frustum) in view_frusta.iter().enumerate() {
+                            // Disable near-plane culling, as a shadow caster could lie before the near plane.
+                            if !frustum.intersects_obb(aabb, &transform.affine(), false, true) {
+                                queues[frustum_index].push(Entity::PLACEHOLDER);
+                                continue;
+                            }
 
-                    for frustum_visible_entities in view_visible_entities {
-                        frustum_visible_entities.get_mut::<WithMesh>().push(entity);
+                            view_visibility.set();
+                            queues[frustum_index].push(entity);
+                        }
+                    } else {
+                        view_visibility.set();
+                        for frustum_index in 0..view_frusta.len() {
+                            queues[frustum_index].push(entity);
+                        }
                     }
-                }
-            }
+                },
+            );
+
+            thread_queues.iter_mut().for_each(|queues| {
+                queues
+                    .iter_mut()
+                    .zip(view_visible_entities.iter_mut())
+                    .for_each(|(queue, frustum_visible)| {
+                        frustum_visible.get_mut::<WithMesh>().extend(
+                            queue
+                                .drain(..)
+                                .filter(|entity| *entity != Entity::PLACEHOLDER),
+                        );
+                    });
+            });
         }
 
         for (_, cascade_view_entities) in &mut visible_entities.entities {
