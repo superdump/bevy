@@ -316,6 +316,55 @@ impl Frustum {
         }
     }
 
+    /// Returns the world space corners of the Frustum.
+    /// Corners are ordered bottom right, top right, top left, bottom left for
+    /// the near and then far planes.
+    pub fn to_corners(&self) -> [Vec3A; 8] {
+        // Find the frustum corners from the half spaces
+        // Note that n.p = d for n and d as the half space normal and offset, and p as a frustum corner
+        // Taking 3 adjacent half spaces at a time, we can solve:
+        // n_1 . p = d_1
+        // n_2 . p = d_2
+        // n_3 . p = d_3
+        // to find p. Let M be a matrix with rows defined by n_i, and d be a vector defined by d_i, then
+        // M * p = -d
+        // p = M_inverse * -d
+        // Frustum half spaces are left, right, top, bottom, near, far
+        // Corners are ordered bottom right, top right, top left, bottom left for
+        // the near and then far planes.
+        let sets = [
+            (4 /* near */, 3 /* bottom */, 1 /* right */),
+            (4 /* near */, 2 /* top */, 1 /* right */),
+            (4 /* near */, 2 /* top */, 0 /* left */),
+            (4 /* near */, 3 /* bottom */, 0 /* left */),
+            (5 /* far */, 3 /* bottom */, 1 /* right */),
+            (5 /* far */, 2 /* top */, 1 /* right */),
+            (5 /* far */, 2 /* top */, 0 /* left */),
+            (5 /* far */, 3 /* bottom */, 0 /* left */),
+        ];
+        let mut corners = [Vec3A::ZERO; 8];
+        for (corner, (a, b, c)) in corners.iter_mut().zip(sets) {
+            *corner = Mat3A::from_cols_slice(&[
+                self.half_spaces[a].normal_d.x,
+                self.half_spaces[b].normal_d.x,
+                self.half_spaces[c].normal_d.x,
+                self.half_spaces[a].normal_d.y,
+                self.half_spaces[b].normal_d.y,
+                self.half_spaces[c].normal_d.y,
+                self.half_spaces[a].normal_d.z,
+                self.half_spaces[b].normal_d.z,
+                self.half_spaces[c].normal_d.z,
+            ])
+            .inverse()
+                * Vec3A::new(
+                    -self.half_spaces[a].d(),
+                    -self.half_spaces[b].d(),
+                    -self.half_spaces[c].d(),
+                );
+        }
+        corners
+    }
+
     /// Checks if a sphere intersects the frustum.
     #[inline]
     pub fn intersects_sphere(&self, sphere: &Sphere, intersect_far: bool) -> bool {

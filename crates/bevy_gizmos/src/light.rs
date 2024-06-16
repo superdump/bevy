@@ -9,10 +9,11 @@ use bevy_color::{
     palettes::basic::{BLUE, GREEN, RED},
     Color, Oklcha,
 };
+use bevy_core_pipeline::core_3d::Camera3d;
 use bevy_ecs::{
     component::Component,
     entity::Entity,
-    query::Without,
+    query::{With, Without},
     reflect::ReflectComponent,
     schedule::IntoSystemConfigs,
     system::{Query, Res},
@@ -23,6 +24,7 @@ use bevy_math::{
 };
 use bevy_pbr::{DirectionalLight, PointLight, SpotLight};
 use bevy_reflect::{std_traits::ReflectDefault, Reflect};
+use bevy_render::primitives::{CascadesFrusta, Frustum};
 use bevy_transform::{components::GlobalTransform, TransformSystem};
 
 use crate::{
@@ -125,6 +127,26 @@ fn directional_light_gizmo(
         .with_tip_length(0.3);
 }
 
+fn frustum(frustum: &Frustum, color: Color, gizmos: &mut Gizmos<LightGizmoConfigGroup>) {
+    let frustum_corners_world = frustum.to_corners();
+    let mut near_strip = [Vec3::ZERO; 5];
+    let mut far_strip = [Vec3::ZERO; 5];
+    for i in 0..=4 {
+        // Draw lines around the near plane
+        near_strip[i] = frustum_corners_world[i % 4].into();
+        // Draw lines around the far plane
+        far_strip[i] = frustum_corners_world[(i % 4) + 4].into();
+        // Draw lines between the near and far planes
+        gizmos.line(
+            frustum_corners_world[i % 4].into(),
+            frustum_corners_world[(i % 4) + 4].into(),
+            color,
+        );
+    }
+    gizmos.linestrip(near_strip, color);
+    gizmos.linestrip(far_strip, color);
+}
+
 /// A [`Plugin`] that provides visualization of [`PointLight`]s, [`SpotLight`]s
 /// and [`DirectionalLight`]s for debugging.
 pub struct LightGizmoPlugin;
@@ -211,7 +233,14 @@ pub struct ShowLightGizmo {
 fn draw_lights(
     point_query: Query<(Entity, &PointLight, &GlobalTransform, &ShowLightGizmo)>,
     spot_query: Query<(Entity, &SpotLight, &GlobalTransform, &ShowLightGizmo)>,
-    directional_query: Query<(Entity, &DirectionalLight, &GlobalTransform, &ShowLightGizmo)>,
+    directional_query: Query<(
+        Entity,
+        &DirectionalLight,
+        &CascadesFrusta,
+        &GlobalTransform,
+        &ShowLightGizmo,
+    )>,
+    views: Query<Entity, (With<Camera3d>, With<ShowLightGizmo>)>,
     mut gizmos: Gizmos<LightGizmoConfigGroup>,
 ) {
     let color = |entity: Entity, gizmo_color: Option<LightGizmoColor>, light_color, type_color| {
@@ -240,7 +269,7 @@ fn draw_lights(
         );
         spot_light_gizmo(transform, light, color, &mut gizmos);
     }
-    for (entity, light, transform, light_gizmo) in &directional_query {
+    for (entity, light, cascades_frusta, transform, light_gizmo) in &directional_query {
         let color = color(
             entity,
             light_gizmo.color,
@@ -248,6 +277,14 @@ fn draw_lights(
             gizmos.config_ext.directional_light_color,
         );
         directional_light_gizmo(transform, color, &mut gizmos);
+        for view_entity in &views {
+            let Some(cascade_frusta) = cascades_frusta.frusta.get(&view_entity) else {
+                continue;
+            };
+            for cascade_frustum in cascade_frusta {
+                frustum(cascade_frustum, color, &mut gizmos);
+            }
+        }
     }
 }
 
@@ -255,9 +292,10 @@ fn draw_all_lights(
     point_query: Query<(Entity, &PointLight, &GlobalTransform), Without<ShowLightGizmo>>,
     spot_query: Query<(Entity, &SpotLight, &GlobalTransform), Without<ShowLightGizmo>>,
     directional_query: Query<
-        (Entity, &DirectionalLight, &GlobalTransform),
+        (Entity, &DirectionalLight, &CascadesFrusta, &GlobalTransform),
         Without<ShowLightGizmo>,
     >,
+    views: Query<Entity, (With<Camera3d>, Without<ShowLightGizmo>)>,
     mut gizmos: Gizmos<LightGizmoConfigGroup>,
 ) {
     match gizmos.config_ext.color {
@@ -268,8 +306,20 @@ fn draw_all_lights(
             for (_, light, transform) in &spot_query {
                 spot_light_gizmo(transform, light, color, &mut gizmos);
             }
-            for (_, _, transform) in &directional_query {
+            for (_, _, cascades_frusta, transform) in &directional_query {
                 directional_light_gizmo(transform, color, &mut gizmos);
+                for view_entity in &views {
+                    let Some(cascade_frusta) = cascades_frusta.frusta.get(&view_entity) else {
+                        continue;
+                    };
+                    for cascade_frustum in cascade_frusta {
+                        frustum(
+                            cascade_frustum,
+                            gizmos.config_ext.directional_light_color,
+                            &mut gizmos,
+                        );
+                    }
+                }
             }
         }
         LightGizmoColor::Varied => {
@@ -280,8 +330,20 @@ fn draw_all_lights(
             for (entity, light, transform) in &spot_query {
                 spot_light_gizmo(transform, light, color(entity), &mut gizmos);
             }
-            for (entity, _, transform) in &directional_query {
+            for (entity, _, cascades_frusta, transform) in &directional_query {
                 directional_light_gizmo(transform, color(entity), &mut gizmos);
+                for view_entity in &views {
+                    let Some(cascade_frusta) = cascades_frusta.frusta.get(&view_entity) else {
+                        continue;
+                    };
+                    for cascade_frustum in cascade_frusta {
+                        frustum(
+                            cascade_frustum,
+                            gizmos.config_ext.directional_light_color,
+                            &mut gizmos,
+                        );
+                    }
+                }
             }
         }
         LightGizmoColor::MatchLightColor => {
@@ -291,8 +353,20 @@ fn draw_all_lights(
             for (_, light, transform) in &spot_query {
                 spot_light_gizmo(transform, light, light.color, &mut gizmos);
             }
-            for (_, light, transform) in &directional_query {
+            for (_, light, cascades_frusta, transform) in &directional_query {
                 directional_light_gizmo(transform, light.color, &mut gizmos);
+                for view_entity in &views {
+                    let Some(cascade_frusta) = cascades_frusta.frusta.get(&view_entity) else {
+                        continue;
+                    };
+                    for cascade_frustum in cascade_frusta {
+                        frustum(
+                            cascade_frustum,
+                            gizmos.config_ext.directional_light_color,
+                            &mut gizmos,
+                        );
+                    }
+                }
             }
         }
         LightGizmoColor::ByLightType => {
@@ -312,12 +386,24 @@ fn draw_all_lights(
                     &mut gizmos,
                 );
             }
-            for (_, _, transform) in &directional_query {
+            for (_, _, cascades_frusta, transform) in &directional_query {
                 directional_light_gizmo(
                     transform,
                     gizmos.config_ext.directional_light_color,
                     &mut gizmos,
                 );
+                for view_entity in &views {
+                    let Some(cascade_frusta) = cascades_frusta.frusta.get(&view_entity) else {
+                        continue;
+                    };
+                    for cascade_frustum in cascade_frusta {
+                        frustum(
+                            cascade_frustum,
+                            gizmos.config_ext.directional_light_color,
+                            &mut gizmos,
+                        );
+                    }
+                }
             }
         }
     }
