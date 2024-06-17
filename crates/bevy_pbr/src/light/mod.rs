@@ -288,8 +288,6 @@ pub struct Cascade {
     pub(crate) clip_from_world: Mat4,
     /// Size of each shadow map texel in world units.
     pub(crate) texel_size: f32,
-    /// View-space positions of the corners of the view frustum slice
-    pub(crate) frustum_corners_view: [Vec3A; 8],
 }
 
 pub fn clear_directional_light_cascades(mut lights: Query<(&DirectionalLight, &mut Cascades)>) {
@@ -334,10 +332,10 @@ pub fn build_directional_light_cascades<P: CameraProjection + Component>(
         // `transform.compute_matrix()` will give us a matrix with our desired properties.
         // Instead, we directly create a good matrix from just the rotation.
         let world_from_light = Mat4::from_quat(transform.compute_transform().rotation);
-        let light_to_world_inverse = world_from_light.inverse();
+        let light_from_world = world_from_light.inverse();
 
-        for (view_entity, projection, view_to_world) in views.iter().copied() {
-            let camera_to_light_view = light_to_world_inverse * view_to_world;
+        for (view_entity, projection, world_from_view) in views.iter().copied() {
+            let light_from_camera_view = light_from_world * world_from_view;
             let view_cascades = cascades_config
                 .bounds
                 .iter()
@@ -358,7 +356,7 @@ pub fn build_directional_light_cascades<P: CameraProjection + Component>(
                         corners,
                         directional_light_shadow_map.size as f32,
                         world_from_light,
-                        camera_to_light_view,
+                        light_from_camera_view,
                     )
                 })
                 .collect();
@@ -436,7 +434,6 @@ fn calculate_cascade(
         clip_from_cascade,
         clip_from_world,
         texel_size: cascade_texel_size,
-        frustum_corners_view: frustum_corners,
     }
 }
 /// Add this component to make a [`Mesh`] not cast shadows.
@@ -548,7 +545,7 @@ pub fn update_directional_light_frusta(
             Without<Camera>,
         ),
     >,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
+    cameras: Query<&Frustum, With<Camera3d>>,
 ) {
     for (
         light_transform,
@@ -584,75 +581,10 @@ pub fn update_directional_light_frusta(
         culling_planes.planes = cascades
             .cascades
             .iter()
-            .map(|(view, cascades)| {
-                let view_to_world = cameras.get(*view).unwrap().affine();
-                let mut frustum_corners_view = cascades[0].frustum_corners_view;
-                for i in 4..8 {
-                    frustum_corners_view[i] = cascades[cascades.len() - 1].frustum_corners_view[i];
-                }
-                let frustum_corners_world = frustum_corners_view
-                    .iter()
-                    .map(|corner_view| view_to_world.transform_point3a(*corner_view))
-                    .collect::<Vec<_>>();
-                let frustum_world = Frustum::from_corners(&frustum_corners_world);
-                let mut culling_planes: Vec<HalfSpace> = frustum_world
-                    .half_spaces
-                    .into_iter()
-                    .filter(|half_space| half_space.normal().dot(light_direction) < 0.0)
-                    .collect();
-
-                // Build a convex hull and then build culling planes from the light direction and
-                // hull edges
-
-                // Project frustum corners in world-space to a plane defined by -light direction
-                // intersecting the origin
-                let normal = (-light_direction).normalize_or_zero();
-                let frustum_corners_world_on_plane = frustum_corners_world
-                    .iter()
-                    .map(|corner_world| *corner_world - corner_world.dot(normal) * normal)
-                    .collect::<Vec<_>>();
-                let right = Vec3A::Y.cross(normal).normalize();
-                let up = normal.cross(right).normalize();
-                let mut points = frustum_corners_world_on_plane
-                    .iter()
-                    .map(|&p| Vec2::new(p.dot(right), p.dot(up)))
-                    .collect::<Vec<_>>();
-
-                // Find the point with the lowest y coordinate, and the leftmost of those
-                let mut p0 = Vec2::MAX;
-                for corner in &points {
-                    if corner.y < p0.y || (corner.y == p0.y && corner.x < p0.x) {
-                        p0 = *corner;
-                    }
-                }
-
-                // Sort by angle from the x axis to the line between p0 and the point
-                points
-                    .sort_unstable_by(|&a, &b| Vec2::X.dot(a - p0).total_cmp(&Vec2::X.dot(b - p0)));
-
-                // Graham scan to find the convex hull
-                let ccw = |a: Vec2, b: Vec2, c: Vec2| {
-                    (c - b).extend(0.0).cross((a - b).extend(0.0)).z > 0.0
-                };
-                let mut hull = Vec::new();
-                for &point in &points {
-                    while hull.len() > 1 && ccw(hull[hull.len() - 2], hull[hull.len() - 1], p0) {
-                        hull.pop();
-                    }
-                    hull.push(point);
-                }
-                let hull_world = hull
-                    .into_iter()
-                    .map(|p| p.x * right + p.y * up)
-                    .collect::<Vec<_>>();
-
-                // Build culling planes from light direction and edges
-                for i in 0..hull_world.len() {
-                    let edge_world = hull_world[(i + 1) % hull_world.len()] - hull_world[i];
-                    let normal = edge_world.cross(light_direction);
-                    culling_planes.push(HalfSpace::new(normal.extend(-normal.dot(hull_world[i]))));
-                }
-
+            .map(|(view, _cascades)| {
+                let camera_frustum = cameras.get(*view).unwrap();
+                let culling_planes =
+                    calculate_cascades_culling_planes(camera_frustum, light_direction);
                 (*view, culling_planes)
             })
             .collect();
@@ -881,30 +813,18 @@ pub fn check_light_mesh_visibility(
                         .planes
                         .get(view)
                         .expect("Expected that view would have culling planes and it did not.");
-                    'next: for (frustum, frustum_visible_entities) in
+                    for (frustum, frustum_visible_entities) in
                         view_frusta.iter().zip(view_visible_entities)
                     {
-                        // Disable near-plane culling, as a shadow caster could lie before the near plane.
-                        if !frustum.intersects_obb(aabb, &transform.affine(), false, true) {
-                            continue;
+                        if aabb_intersects_culling_planes(
+                            aabb,
+                            transform,
+                            frustum,
+                            view_culling_planes,
+                        ) {
+                            view_visibility.set();
+                            frustum_visible_entities.get_mut::<WithMesh>().push(entity);
                         }
-
-                        let aabb_center_world = transform
-                            .affine()
-                            .transform_point3a(aabb.center)
-                            .extend(1.0);
-                        for half_space in view_culling_planes {
-                            let p_normal = half_space.normal();
-                            let relative_radius =
-                                aabb.relative_radius(&p_normal, &transform.affine().matrix3);
-                            if half_space.normal_d().dot(aabb_center_world) + relative_radius <= 0.0
-                            {
-                                continue 'next;
-                            }
-                        }
-
-                        view_visibility.set();
-                        frustum_visible_entities.get_mut::<WithMesh>().push(entity);
                     }
                 }
             } else {
@@ -1078,4 +998,255 @@ pub fn check_light_mesh_visibility(
             }
         }
     }
+}
+
+#[inline]
+fn is_ccw(a: Vec2, b: Vec2, c: Vec2) -> bool {
+    (c - b).extend(0.0).cross((a - b).extend(0.0)).z > 0.0
+}
+
+fn calculate_cascades_culling_planes(
+    camera_frustum: &Frustum,
+    light_direction: Vec3A,
+) -> Vec<HalfSpace> {
+    // Filter the culling planes to only keep those that point opposite to the light
+    // direction
+    let mut culling_planes: Vec<HalfSpace> = camera_frustum
+        .half_spaces
+        .into_iter()
+        .filter(|half_space| half_space.normal().dot(light_direction) < 0.0)
+        .collect();
+
+    // Build a convex hull and then build culling planes from the light direction and
+    // hull edges
+
+    // Project frustum corners in world-space to a plane defined by -light direction
+    // intersecting the origin
+    let normal = (-light_direction).normalize_or_zero();
+    let frustum_corners_world_on_plane = camera_frustum
+        .to_corners()
+        .iter()
+        .map(|corner_world| corner_world.reject_from_normalized(normal))
+        .collect::<Vec<_>>();
+    let right = Vec3A::Y.cross(normal).normalize();
+    let up = normal.cross(right).normalize();
+    let mut points = frustum_corners_world_on_plane
+        .iter()
+        .map(|&p| Vec2::new(p.dot(right), p.dot(up)))
+        .collect::<Vec<_>>();
+
+    // Find the point with the lowest y coordinate, and the leftmost of those
+    let mut p0 = Vec2::MAX;
+    for corner in &points {
+        if corner.y < p0.y || (corner.y == p0.y && corner.x < p0.x) {
+            p0 = *corner;
+        }
+    }
+
+    // Sort by angle from the x axis to the line between p0 and the point
+    points.sort_unstable_by(|&a, &b| Vec2::X.dot(a - p0).total_cmp(&Vec2::X.dot(b - p0)));
+
+    // Graham scan to find the convex hull
+    let mut hull = Vec::new();
+    for &point in &points {
+        while hull.len() > 1 && is_ccw(hull[hull.len() - 2], hull[hull.len() - 1], p0) {
+            hull.pop();
+        }
+        hull.push(point);
+    }
+    let hull_world = hull
+        .into_iter()
+        .map(|p| p.x * right + p.y * up)
+        .collect::<Vec<_>>();
+
+    // Build culling planes from light direction and edges
+    for i in 0..hull_world.len() {
+        let edge_world = hull_world[(i + 1) % hull_world.len()] - hull_world[i];
+        let normal = edge_world.cross(light_direction);
+        culling_planes.push(HalfSpace::new(normal.extend(normal.dot(hull_world[i]))));
+    }
+
+    culling_planes
+}
+
+fn aabb_intersects_culling_planes(
+    aabb: &Aabb,
+    transform: &GlobalTransform,
+    light_frustum: &Frustum,
+    view_culling_planes: &[HalfSpace],
+) -> bool {
+    // Disable near-plane culling, as a shadow caster could lie before the near plane.
+    if !light_frustum.intersects_obb(aabb, &transform.affine(), false, true) {
+        false;
+    }
+
+    let aabb_center_world = transform
+        .affine()
+        .transform_point3a(aabb.center)
+        .extend(1.0);
+    for half_space in view_culling_planes {
+        let p_normal = half_space.normal();
+        let relative_radius = aabb.relative_radius(&p_normal, &transform.affine().matrix3);
+        if half_space.normal_d().dot(aabb_center_world) + relative_radius < 0.0 {
+            return false;
+        }
+    }
+
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy_math::{EulerRot, Mat4, Quat, Vec3, Vec3A};
+    use bevy_render::{
+        camera::{CameraProjection, Projection},
+        primitives::{Aabb, Frustum, HalfSpace},
+    };
+    use bevy_transform::components::{GlobalTransform, Transform};
+
+    use crate::{Cascade, CascadeShadowConfig, DirectionalLightShadowMap};
+
+    use super::{
+        aabb_intersects_culling_planes, calculate_cascade, calculate_cascades_culling_planes,
+    };
+
+    struct CullingData {
+        projection: Projection,
+        transform: GlobalTransform,
+        camera_frustum: Frustum,
+        light_transform: GlobalTransform,
+        light_direction: Vec3A,
+        light_frustum: Frustum,
+        culling_planes: Vec<HalfSpace>,
+        cube_aabb: Aabb,
+        last_cascade: Cascade,
+    }
+
+    fn init_culling() -> CullingData {
+        // Create 3D camera
+        let projection = Projection::default();
+        let transform = GlobalTransform::from(Transform::default());
+        // Create frustum
+        let camera_frustum = projection.compute_frustum(&transform);
+        // Calculate culling planes
+        let light_transform = GlobalTransform::from(Transform::from_rotation(Quat::from_euler(
+            EulerRot::ZYX,
+            0.0,
+            45.0f32.to_radians(),
+            (-45.0f32).to_radians(),
+        )));
+        let light_direction = Vec3A::from(light_transform.forward().as_vec3());
+        let culling_planes = calculate_cascades_culling_planes(&camera_frustum, light_direction);
+        // Create cube aabb to test
+        let cube_aabb = Aabb::from_min_max(-0.5 * Vec3::ONE, 0.5 * Vec3::ONE);
+
+        // Create last cascade
+        let cascades_config = CascadeShadowConfig::default();
+
+        // It is very important to the numerical and thus visual stability of shadows that
+        // light_to_world has orthogonal upper-left 3x3 and zero translation.
+        // Even though only the direction (i.e. rotation) of the light matters, we don't constrain
+        // users to not change any other aspects of the transform - there's no guarantee
+        // `transform.compute_matrix()` will give us a matrix with our desired properties.
+        // Instead, we directly create a good matrix from just the rotation.
+        let world_from_light = Mat4::from_quat(transform.compute_transform().rotation);
+        let light_from_world = world_from_light.inverse();
+
+        let light_from_camera_view = light_from_world * transform.compute_matrix();
+
+        // Negate bounds as -z is camera forward direction.
+        let z_near = (1.0 - cascades_config.overlap_proportion)
+            * -cascades_config.bounds[cascades_config.bounds.len() - 2];
+        let z_far = -cascades_config.bounds[cascades_config.bounds.len() - 1];
+
+        let corners = projection.get_frustum_corners(z_near, z_far);
+
+        let last_cascade = calculate_cascade(
+            corners,
+            DirectionalLightShadowMap::default().size as f32,
+            world_from_light,
+            light_from_camera_view,
+        );
+        let light_frustum = Frustum::from_clip_from_world(&last_cascade.clip_from_world);
+
+        CullingData {
+            projection,
+            transform,
+            camera_frustum,
+            light_direction,
+            culling_planes,
+            cube_aabb,
+            last_cascade,
+            light_transform,
+            light_frustum,
+        }
+    }
+
+    #[test]
+    fn test_cascade_culling_inside_view_frustum() {
+        let culling_data = init_culling();
+        // 10 units in front of the camera is inside the camera view frustum
+        let cube_transform = GlobalTransform::from(Transform::from_translation(-10.0 * Vec3::Z));
+        assert!(aabb_intersects_culling_planes(
+            &culling_data.cube_aabb,
+            &cube_transform,
+            &culling_data.light_frustum,
+            &culling_data.culling_planes
+        ));
+    }
+
+    // // Center of frustum faces
+    // #[test]
+    // fn test_cascade_culling_view_frustum_faces() {
+    // }
+
+    // // Corners of frustum
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
+
+    // // Behind back faces of frustum
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
+
+    // // Behind back faces and outside back corners of frustum
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
+
+    // // Outside to the sides of the hull but within the frustum depth-wise
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
+
+    // // Outside at the corners of the hull but within the frustum depth-wise
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
+
+    // // Closer to the light source inside the hull
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
+
+    // // Closer to the light source on the edges of the hull
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
+
+    // // Closer to the light source at the corners of the hull
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
+
+    // // Closer to the light source outside the edges of the hull
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
+
+    // // Closer to the light source outside the corners of the hull
+    // #[test]
+    // fn test_cascade_culling() {
+    // }
 }
