@@ -683,7 +683,7 @@ pub const fn screen_space_specular_transmission_pipeline_key(
 ///
 /// As [`crate::render::mesh::collect_meshes_for_gpu_building`] only considers
 /// meshes that were newly extracted, and it writes information from the
-/// [`RenderMeshMaterialIds`] into the
+/// [`RenderMaterialInstances`] into the
 /// [`crate::render::mesh::MeshInputUniform`], we must tell
 /// [`crate::render::mesh::extract_meshes_for_gpu_building`] to re-extract a
 /// mesh if its material changed. Otherwise, the material binding information in
@@ -704,8 +704,7 @@ fn mark_meshes_as_changed_if_their_materials_changed<M>(
     }
 }
 
-/// Fills the [`RenderMaterialInstances`] and [`RenderMeshMaterialIds`]
-/// resources from the meshes in the scene.
+/// Fills the [`RenderMaterialInstances`] resources from the meshes in the scene.
 fn extract_mesh_materials<M: Material>(
     mut material_instances: ResMut<RenderMaterialInstances>,
     changed_meshes_query: Extract<
