@@ -34,6 +34,292 @@ fn assert_is_normalized(message: &str, length_squared: f32) {
     }
 }
 
+const BASIS_VECTORS_RIGHT: [Vec3; 6] = [
+    Vec3::X,
+    Vec3::NEG_X,
+    Vec3::Y,
+    Vec3::NEG_Y,
+    Vec3::Z,
+    Vec3::NEG_Z,
+];
+
+const BASIS_VECTORS_UP: [[Vec3; 4]; 6] = [
+    // Comments show the direction chosen for right
+    // X
+    [
+        Vec3::Y,
+        Vec3::NEG_Y,
+        Vec3::Z,
+        Vec3::NEG_Z,
+    ],
+    // -X
+    [
+        Vec3::Y,
+        Vec3::NEG_Y,
+        Vec3::Z,
+        Vec3::NEG_Z,
+    ],
+    // Y
+    [
+        Vec3::X,
+        Vec3::NEG_X,
+        Vec3::Z,
+        Vec3::NEG_Z,
+    ],
+    // -Y
+    [
+        Vec3::X,
+        Vec3::NEG_X,
+        Vec3::Z,
+        Vec3::NEG_Z,
+    ],
+    // Z
+    [
+        Vec3::X,
+        Vec3::NEG_X,
+        Vec3::Y,
+        Vec3::NEG_Y,
+    ],
+    // -Z
+    [
+        Vec3::X,
+        Vec3::NEG_X,
+        Vec3::Y,
+        Vec3::NEG_Y,
+    ],
+];
+
+const BASIS_VECTORS_FORWARD: [[[Vec3; 2]; 4]; 6] = [
+    // Comments show the directions chosen for right and up
+    // X
+    [
+        // X Y
+        [
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ],
+        // X -Y
+        [
+            Vec3::NEG_Z,
+            Vec3::Z,
+        ],
+        // X Z
+        [
+            Vec3::NEG_Y,
+            Vec3::Y,
+        ],
+        // X -Z
+        [
+            Vec3::Y,
+            Vec3::NEG_Y,
+        ],
+    ],
+    // -X
+    [
+        // -X Y
+        [
+            Vec3::NEG_Z,
+            Vec3::Z,
+        ],
+        // -X -Y
+        [
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ],
+        // -X Z
+        [
+            Vec3::Y,
+            Vec3::NEG_Y,
+        ],
+        // -X -Z
+        [
+            Vec3::NEG_Y,
+            Vec3::Y,
+        ],
+    ],
+    // Y
+    [
+        // Y X
+        [
+            Vec3::NEG_Z,
+            Vec3::Z,
+        ],
+        // Y -X
+        [
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ],
+        // Y Z
+        [
+            Vec3::X,
+            Vec3::NEG_X,
+        ],
+        // Y -Z
+        [
+            Vec3::NEG_X,
+            Vec3::X,
+        ],
+    ],
+    // -Y
+    [
+        // -Y X
+        [
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ],
+        // -Y -X
+        [
+            Vec3::NEG_Z,
+            Vec3::Z,
+        ],
+        // -Y Z
+        [
+            Vec3::NEG_X,
+            Vec3::X,
+        ],
+        // -Y -Z
+        [
+            Vec3::X,
+            Vec3::NEG_X,
+        ],
+    ],
+    // Z
+    [
+        // Z X
+        [
+            Vec3::Y,
+            Vec3::NEG_Y,
+        ],
+        // Z -X
+        [
+            Vec3::NEG_Y,
+            Vec3::Y,
+        ],
+        // Z Y
+        [
+            Vec3::NEG_X,
+            Vec3::X,
+        ],
+        // Z -Y
+        [
+            Vec3::X,
+            Vec3::NEG_X,
+        ],
+    ],
+    // -Z
+    [
+        // -Z X
+        [
+            Vec3::Y,
+            Vec3::NEG_Y,
+        ],
+        // -Z -X
+        [
+            Vec3::NEG_Y,
+            Vec3::Y,
+        ],
+        // -Z Y
+        [
+            Vec3::X,
+            Vec3::NEG_X,
+        ],
+        // -Z -Y
+        [
+            Vec3::NEG_X,
+            Vec3::X,
+        ],
+    ],
+];
+
+/// The orientation of the transform right, up, and forward vectors, in that order.
+///
+/// P means positive, N means negative.
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+#[repr(u8)]
+pub enum TransformForwardBasis {
+    PXPYPZ = 0,
+    PXPYNZ,
+    PXNYNZ,
+    PXNYPZ,
+    PXPZNY,
+    PXPZPY,
+    PXNZPY,
+    PXNZNY,
+    NXPYNZ,
+    NXPYPZ,
+    NXNYPZ,
+    NXNYNZ,
+    NXPZPY,
+    NXPZNY,
+    NXNZNY,
+    NXNZPY,
+    PYPXNZ,
+    PYPXPZ,
+    PYNXPZ,
+    PYNXNZ,
+    PYPZPX,
+    PYPZNX,
+    PYNZNX,
+    PYNZPX,
+    NYPXPZ,
+    NYPXNZ,
+    NYNXNZ,
+    NYNXPZ,
+    NYPZNX,
+    NYPZPX,
+    NYNZPX,
+    NYNZNX,
+    PZPXPY,
+    PZPXNY,
+    PZNXNY,
+    PZNXPY,
+    PZPYNX,
+    PZPYPX,
+    PZNYPX,
+    PZNYNX,
+    NZPXPY,
+    NZPXNY,
+    NZNXNY,
+    NZNXPY,
+    NZPYPX,
+    NZPYNX,
+    NZNYNX,
+    NZNYPX,
+}
+
+impl TransformForwardBasis {
+    #[inline]
+    fn right_index(&self) -> usize {
+        (((*self as u8) >> 3) & 7) as usize
+    }
+
+    #[inline]
+    fn right(&self) -> Vec3 {
+        BASIS_VECTORS_RIGHT[self.right_index()]
+    }
+
+    #[inline]
+    fn up_index(&self) -> usize {
+        (((*self as u8) >> 1) & 3) as usize
+    }
+
+    #[inline]
+    fn up(&self) -> Vec3 {
+        BASIS_VECTORS_UP[self.right_index()][self.up_index()]
+    }
+
+    #[inline]
+    fn forward_index(&self) -> usize {
+        ((*self as u8) & 1) as usize
+    }
+
+    #[inline]
+    fn forward(&self) -> Vec3 {
+        BASIS_VECTORS_FORWARD[self.right_index()][self.up_index()][self.forward_index()]
+    }
+}
+
 /// Describe the position of an entity. If the entity has a parent, the position is relative
 /// to its parent position.
 ///
@@ -102,7 +388,7 @@ pub struct Transform {
     ///
     /// glTF specifies that models have a forward direction of +z whereas cameras and lights have -z.
     /// This option allows the glTF importer and other usages to make appropriate adjustments.
-    pub flip_model_forward: bool,
+    pub forward_basis: TransformForwardBasis,
 }
 
 impl Transform {
@@ -111,7 +397,8 @@ impl Transform {
         translation: Vec3::ZERO,
         rotation: Quat::IDENTITY,
         scale: Vec3::ONE,
-        flip_model_forward: false,
+        // x-right, y-up, z-back, that is, forward is along -z
+        forward_basis: TransformForwardBasis::PXPYNZ,
     };
 
     /// Creates a new [`Transform`] at the position `(x, y, z)`. In 2d, the `z` component
@@ -132,7 +419,7 @@ impl Transform {
             translation,
             rotation,
             scale,
-            flip_model_forward: false,
+            forward_basis: TransformForwardBasis::PXPYNZ,
         }
     }
 
@@ -281,7 +568,7 @@ impl Transform {
     #[inline]
     pub fn local_x(&self) -> Dir3 {
         // Quat * unit vector is length 1
-        Dir3::new_unchecked(self.rotation * Vec3::X)
+        Dir3::new_unchecked(self.rotation * self.forward_basis.right())
     }
 
     /// Equivalent to [`-local_x()`][Transform::local_x()]
@@ -300,7 +587,7 @@ impl Transform {
     #[inline]
     pub fn local_y(&self) -> Dir3 {
         // Quat * unit vector is length 1
-        Dir3::new_unchecked(self.rotation * Vec3::Y)
+        Dir3::new_unchecked(self.rotation * self.forward_basis.up())
     }
 
     /// Equivalent to [`local_y()`][Transform::local_y]
@@ -319,47 +606,19 @@ impl Transform {
     #[inline]
     pub fn local_z(&self) -> Dir3 {
         // Quat * unit vector is length 1
-        Dir3::new_unchecked(self.rotation * Vec3::Z)
+        Dir3::new_unchecked(self.rotation * -self.forward_basis.forward())
     }
 
     /// Equivalent to [`-local_z()`][Transform::local_z]
     #[inline]
-    pub fn camera_forward(&self) -> Dir3 {
+    pub fn forward(&self) -> Dir3 {
         -self.local_z()
     }
 
     /// Equivalent to [`local_z()`][Transform::local_z]
     #[inline]
-    pub fn camera_back(&self) -> Dir3 {
+    pub fn back(&self) -> Dir3 {
         self.local_z()
-    }
-
-    /// Equivalent to [`-local_z()`][Transform::local_z] if `flip_model_forward` is false,
-    /// else [`local_z()`][Transform::local_z]
-    ///
-    /// glTF has opposing forward directions for cameras and lights, and for models. Model
-    /// forward is +z, whereas camera and light forward is -z.
-    #[inline]
-    pub fn model_forward(&self) -> Dir3 {
-        if self.flip_model_forward {
-            self.local_z()
-        } else {
-            -self.local_z()
-        }
-    }
-
-    /// Equivalent to [`local_z()`][Transform::local_z] if `flip_model_forward` is false,
-    /// else [`-local_z()`][Transform::local_z]
-    ///
-    /// glTF has opposing forward directions for cameras and lights, and for models. Model
-    /// forward is +z, whereas camera and light forward is -z. Back is the opposite of this.
-    #[inline]
-    pub fn model_back(&self) -> Dir3 {
-        if self.flip_model_forward {
-            -self.local_z()
-        } else {
-            self.local_z()
-        }
     }
 
     /// Rotates this [`Transform`] by the given rotation.
@@ -611,7 +870,7 @@ impl Transform {
             translation,
             rotation,
             scale,
-            flip_model_forward: self.flip_model_forward,
+            forward_basis: self.forward_basis,
         }
     }
 
